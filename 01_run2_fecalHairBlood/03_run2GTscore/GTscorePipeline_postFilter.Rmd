@@ -1,0 +1,470 @@
+---
+title: "GTscorePipeline_run2_postFilter"
+output: html_document
+date: "2022-09-09"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.path = "tools/")
+```
+
+```{r load packages, include=FALSE}
+library(here)
+library(tidyverse)
+library(phylotools)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("Biostrings")
+source(here::here("./seqAnalysis/gtScore_sourceScripts/GTscore.R")) # NOTE- added N=ATGC to script for later analyses (not included in original)
+```
+
+## 1) Create primer-probe & sample files
+
+## 1.1) Sample files
+Load files
+```{r}
+sampleSummary <- read.csv('/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_master_sampleSummary.csv') %>%
+  mutate(sampleType=recode(sampleType, "NA" = "(-)"))
+
+p1_combo <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_combined_sampleFiles.txt")
+p2_combo <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_combined_sampleFiles.txt")
+pp3_combo <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_combined_sampleFiles.txt")
+
+p1_lwed <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_LWED_sampleFiles.txt")
+p2_lwed <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_LWED_sampleFiles.txt")
+pp3_lwed <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_LWED_sampleFiles.txt")
+
+p1_simp <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_SIMP_sampleFiles.txt")
+pp2_simp <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_SIMP_sampleFiles.txt")
+pp3_simp <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_SIMP_sampleFiles.txt")
+```
+
+Filter out samples with less than 50% genotype rate
+
+```{r}
+failedSamples <- sampleSummary %>%
+  filter(GenotypeRate < 0.5) %>%
+  distinct_at(vars(sampleID), .keep_all = T) %>%
+  select(Sample) %>%
+  mutate(Sample = gsub("\\.", "-", Sample)) %>%
+  mutate(Sample = gsub("interleaved", "interleaved.fastq", Sample)) %>%
+  pull()
+View(failedSamples)
+
+p1_comboPass <- p1_combo %>%
+  filter(!V1 %in% failedSamples)
+p2_comboPass <- p2_combo %>%
+  filter(!V1 %in% failedSamples)
+p3_comboPass <- p3_combo %>%
+  filter(!V1 %in% failedSamples)
+
+p1_lwedPass <- p1_lwed %>%
+  filter(!V1 %in% failedSamples)
+p2_lwedPass <- p2_lwed %>%
+  filter(!V1 %in% failedSamples)
+p3_lwedPass <- p3_lwed %>%
+  filter(!V1 %in% failedSamples)
+
+p1_simpPass <- p1_simp %>%
+  filter(!V1 %in% failedSamples)
+p2_simpPass <- p2_simp %>%
+  filter(!V1 %in% failedSamples)
+p3_simpPass <- p3_simp %>%
+  filter(!V1 %in% failedSamples)
+
+# Export sample files
+write.table(p1_comboPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_postFilter_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(p2_comboPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_postFilter_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(p3_comboPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_postFilter_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(p1_lwedPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_postFilter_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(p2_lwedPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_postFilter_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(p3_lwedPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_postFilter_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(p1_simpPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_postFilter_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(p2_simpPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_postFilter_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(p3_simpPass, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_postFilter_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+## 1.2) Primer-probe files
+
+There were only three loci with zero reads, so we can make a quick list,
+read in the old files, filter out the zero-read loci, and write new
+files for each sampleFile doc.
+
+```{r}
+# Loci with zero reads
+lociFail <- c("INDID_188.3", "LWED_278.1", "SEXID_205.2")
+
+# General primer-probe files
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_combined_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_postFilter_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_combined_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_postFilter_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_combined_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_postFilter_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+# LWED primer-probe files
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_LWED_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_postFilter_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_LWED_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_postFilter_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_LWED_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_postFilter_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+# Primer Pool 3 loci
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_SIMP_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_postFilter_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_SIMP_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_postFilter_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_SIMP_primerProbeFile.txt"), header = T) %>%
+  filter(!Locus %in% lociFail) %>%
+  write.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_postFilter_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+```
+
+# 2) AmpliconReadCounter
+
+Input flags for this script are: \* --p a tab delimited file containing
+primer/probe information for each locus \* --files a text file
+containing a list of .fastq sequence files to count reads from.
+
+Optional flags: \* --prefix optional prefix for output file names \*
+--inDir option to specify directory containing sequence data \*
+--inputType fq or fastqgz (defaults to fastqgz) \* --useFullPrimer uses
+the full primer for counting reads rather than the trimmed primer \*
+--alleleOrder order of alleles output in locusTable file. Options are
+original (matches primer-probe file order) or alphabetical (default) \*
+--printMatched outputs matched reads for each individual \*
+--printDiscarded outputs discarded reads for each individual
+```{r count reads for amplicons, eval=FALSE}
+setwd("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore")
+# Unfiltered reads
+## Primer Pool 1
+system2("perl",
+        args="AmpliconReadCounter.pl -p p1_postFilter_combined_primerProbeFile.txt --files p1_postFilter_combined_sampleFiles.txt --prefix p1_postFilter_")
+system2("perl",
+        args="AmpliconReadCounter.pl -p p1_postFilter_LWED_primerProbeFile.txt --files p1_postFilter_LWED_sampleFiles.txt --prefix p1_postFilter_LWED_")
+system2("perl",
+        args="AmpliconReadCounter.pl -p p1_postFilter_SIMP_primerProbeFile.txt --files p1_postFilter_SIMP_sampleFiles.txt --prefix p1_postFilter_SIMP_")
+
+## Primer Pool 2
+system2("perl",
+        args="AmpliconReadCounter.pl -p p2_postFilter_combined_primerProbeFile.txt --files p2_postFilter_combined_sampleFiles.txt --prefix p2_postFilter_")
+system2("perl",
+        args="AmpliconReadCounter.pl -p p2_postFilter_LWED_primerProbeFile.txt --files p2_postFilter_LWED_sampleFiles.txt --prefix p2_postFilter_LWED_")
+system2("perl",
+        args="AmpliconReadCounter.pl -p p2_postFilter_SIMP_primerProbeFile.txt --files p2_postFilter_SIMP_sampleFiles.txt --prefix p2_postFilter_SIMP_")
+
+## Primer Pool 3
+system2("perl",
+        args="AmpliconReadCounter.pl -p p3_postFilter_combined_primerProbeFile.txt --files p3_postFilter_combined_sampleFiles.txt --prefix p3_postFilter_")
+system2("perl",
+        args="AmpliconReadCounter.pl -p p3_postFilter_LWED_primerProbeFile.txt --files p3_postFilter_LWED_sampleFiles.txt --prefix p3_postFilter_LWED_")
+system2("perl",
+        args="AmpliconReadCounter.pl -p p3_postFilter_SIMP_primerProbeFile.txt --files p3_postFilter_SIMP_sampleFiles.txt --prefix p3_postFilter_SIMP_")
+```
+
+# 3) Genotyping
+### 3.1) Genotyping: Pool 1
+```{r Genotyping}
+#load locus table and allele reads file
+p1_postFilter_singleSNP_locusTable<-read.delim("p1_postFilter_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p1_postFilter_singleSNP_alleleReads<-read.delim("p1_postFilter_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p1_postFilter_singleSNP_locusTable)
+p1_postFilter_singleSNP_alleleReads[1:5,1:5]
+
+p1_postFilter_LWED_singleSNP_locusTable<-read.delim("p1_postFilter_LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p1_postFilter_LWED_singleSNP_alleleReads<-read.delim("p1_postFilter_LWED_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p1_postFilter_LWED_singleSNP_locusTable)
+p1_postFilter_LWED_singleSNP_alleleReads[1:5,1:5]
+
+p1_postFilter_SIMP_singleSNP_locusTable<-read.delim("p1_postFilter_SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p1_postFilter_SIMP_singleSNP_alleleReads<-read.delim("p1_postFilter_SIMP_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p1_postFilter_SIMP_singleSNP_locusTable)
+p1_postFilter_SIMP_singleSNP_alleleReads[1:5,1:5]
+
+#generate singleSNP genotypes using the polyGen algorithm
+p1_postFilter_polyGenResults_singleSNP<-polyGen(p1_postFilter_singleSNP_locusTable,p1_postFilter_singleSNP_alleleReads)
+p1_postFilter_LWED_polyGenResults_singleSNP<-polyGen(p1_postFilter_LWED_singleSNP_locusTable,p1_postFilter_LWED_singleSNP_alleleReads)
+p1_postFilter_SIMP_polyGenResults_singleSNP<-polyGen(p1_postFilter_SIMP_singleSNP_locusTable,p1_postFilter_SIMP_singleSNP_alleleReads)
+
+#look at first five rows and columns
+p1_postFilter_polyGenResults_singleSNP[1:5,1:5]
+p1_postFilter_LWED_polyGenResults_singleSNP[1:5,1:5]
+p1_postFilter_SIMP_polyGenResults_singleSNP[1:5,1:5]
+
+#write results
+write.table(p1_postFilter_polyGenResults_singleSNP,"p1_postFilter_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(p1_postFilter_LWED_polyGenResults_singleSNP,"p1_postFilter_LWED_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(p1_postFilter_SIMP_polyGenResults_singleSNP,"p1_postFilter_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+### 3.2) Genotyping: Pool 2
+```{r Genotyping}
+#load locus table and allele reads file
+p2_postFilter_singleSNP_locusTable<-read.delim("p2_postFilter_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p2_postFilter_singleSNP_alleleReads<-read.delim("p2_postFilter_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p2_postFilter_singleSNP_locusTable)
+p2_postFilter_singleSNP_alleleReads[1:5,1:5]
+
+p2_postFilter_LWED_singleSNP_locusTable<-read.delim("p2_postFilter_LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p2_postFilter_LWED_singleSNP_alleleReads<-read.delim("p2_postFilter_LWED_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p2_postFilter_LWED_singleSNP_locusTable)
+p2_postFilter_LWED_singleSNP_alleleReads[1:5,1:5]
+
+p2_postFilter_SIMP_singleSNP_locusTable<-read.delim("p2_postFilter_SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p2_postFilter_SIMP_singleSNP_alleleReads<-read.delim("p2_postFilter_SIMP_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p2_postFilter_SIMP_singleSNP_locusTable)
+p2_postFilter_SIMP_singleSNP_alleleReads[1:5,1:5]
+
+#generate singleSNP genotypes using the polyGen algorithm
+p2_postFilter_polyGenResults_singleSNP<-polyGen(p2_postFilter_singleSNP_locusTable,p2_postFilter_singleSNP_alleleReads)
+p2_postFilter_LWED_polyGenResults_singleSNP<-polyGen(p2_postFilter_LWED_singleSNP_locusTable,p2_postFilter_LWED_singleSNP_alleleReads)
+p2_postFilter_SIMP_polyGenResults_singleSNP<-polyGen(p2_postFilter_SIMP_singleSNP_locusTable,p2_postFilter_SIMP_singleSNP_alleleReads)
+
+#look at first five rows and columns
+p2_postFilter_polyGenResults_singleSNP[1:5,1:5]
+p2_postFilter_LWED_polyGenResults_singleSNP[1:5,1:5]
+p2_postFilter_SIMP_polyGenResults_singleSNP[1:5,1:5]
+
+#write results
+write.table(p2_postFilter_polyGenResults_singleSNP,"p2_postFilter_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(p2_postFilter_LWED_polyGenResults_singleSNP,"p2_postFilter_LWED_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(p2_postFilter_SIMP_polyGenResults_singleSNP,"p2_postFilter_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+### 3.3) Genotyping: Pool 3
+```{r Genotyping}
+#load locus table and allele reads file
+p3_postFilter_singleSNP_locusTable<-read.delim("p3_postFilter_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p3_postFilter_singleSNP_alleleReads<-read.delim("p3_postFilter_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p3_postFilter_singleSNP_locusTable)
+p3_postFilter_singleSNP_alleleReads[1:5,1:5]
+
+p3_postFilter_LWED_singleSNP_locusTable<-read.delim("p3_postFilter_LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p3_postFilter_LWED_singleSNP_alleleReads<-read.delim("p3_postFilter_LWED_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p3_postFilter_LWED_singleSNP_locusTable)
+p3_postFilter_LWED_singleSNP_alleleReads[1:5,1:5]
+
+p3_postFilter_SIMP_singleSNP_locusTable<-read.delim("p3_postFilter_SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+p3_postFilter_SIMP_singleSNP_alleleReads<-read.delim("p3_postFilter_SIMP_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(p3_postFilter_SIMP_singleSNP_locusTable)
+p3_postFilter_SIMP_singleSNP_alleleReads[1:5,1:5]
+
+#generate singleSNP genotypes using the polyGen algorithm
+p3_postFilter_polyGenResults_singleSNP<-polyGen(p3_postFilter_singleSNP_locusTable,p3_postFilter_singleSNP_alleleReads)
+p3_postFilter_LWED_polyGenResults_singleSNP<-polyGen(p3_postFilter_LWED_singleSNP_locusTable,p3_postFilter_LWED_singleSNP_alleleReads)
+p3_postFilter_SIMP_polyGenResults_singleSNP<-polyGen(p3_postFilter_SIMP_singleSNP_locusTable,p3_postFilter_SIMP_singleSNP_alleleReads)
+
+#look at first five rows and columns
+p3_postFilter_polyGenResults_singleSNP[1:5,1:5]
+p3_postFilter_LWED_polyGenResults_singleSNP[1:5,1:5]
+p3_postFilter_SIMP_polyGenResults_singleSNP[1:5,1:5]
+
+#write results
+write.table(p3_postFilter_polyGenResults_singleSNP,"p3_postFilter_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(p3_postFilter_LWED_polyGenResults_singleSNP,"p3_postFilter_LWED_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(p3_postFilter_SIMP_polyGenResults_singleSNP,"p3_postFilter_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+## 4) Data summaries
+### 4.1) Locus summaries
+#### 4.1.1) Summarize single SNP results for loci
+
+The summarizeGTscore command generates summary data for each locus in table form.  The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele.  Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
+
+##### 4.1.1.1 Single SNP summaries: Pool 1
+```{r}
+#summarize single SNP results
+p1_postFilter_singleSNP_summary<-summarizeGTscore(p1_postFilter_singleSNP_alleleReads, p1_postFilter_singleSNP_locusTable, p1_postFilter_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "1")
+p1_postFilter_LWED_singleSNP_summary<-summarizeGTscore(p1_postFilter_LWED_singleSNP_alleleReads, p1_postFilter_LWED_singleSNP_locusTable, p1_postFilter_LWED_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "1")
+p1_postFilter_SIMP_singleSNP_summary<-summarizeGTscore(p1_postFilter_SIMP_singleSNP_alleleReads, p1_postFilter_SIMP_singleSNP_locusTable, p1_postFilter_SIMP_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "1")
+
+#write results
+write.table(p1_postFilter_singleSNP_summary,"p1_postFilter_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(p1_postFilter_LWED_singleSNP_summary,"p1_postFilter_LWED_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(p1_postFilter_SIMP_singleSNP_summary,"p1_postFilter_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+```
+
+##### 4.1.1.2 Single SNP summaries: Pool 2
+```{r}
+#summarize single SNP results
+p2_postFilter_singleSNP_summary<-summarizeGTscore(p2_postFilter_singleSNP_alleleReads, p2_postFilter_singleSNP_locusTable, p2_postFilter_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "2")
+p2_postFilter_LWED_singleSNP_summary<-summarizeGTscore(p2_postFilter_LWED_singleSNP_alleleReads, p2_postFilter_LWED_singleSNP_locusTable, p2_postFilter_LWED_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "2")
+p2_postFilter_SIMP_singleSNP_summary<-summarizeGTscore(p2_postFilter_SIMP_singleSNP_alleleReads, p2_postFilter_SIMP_singleSNP_locusTable, p2_postFilter_SIMP_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "2")
+
+#write results
+write.table(p2_postFilter_singleSNP_summary,"p2_postFilter_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(p2_postFilter_LWED_singleSNP_summary,"p2_postFilter_LWED_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(p2_postFilter_SIMP_singleSNP_summary,"p2_postFilter_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+```
+
+##### 4.1.1.3 Single SNP summaries: Pool 3
+```{r}
+#summarize single SNP results
+p3_postFilter_singleSNP_summary<-summarizeGTscore(p3_postFilter_singleSNP_alleleReads, p3_postFilter_singleSNP_locusTable, p3_postFilter_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "3")
+p3_postFilter_LWED_singleSNP_summary<-summarizeGTscore(p3_postFilter_LWED_singleSNP_alleleReads, p3_postFilter_LWED_singleSNP_locusTable, p3_postFilter_LWED_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "3")
+p3_postFilter_SIMP_singleSNP_summary<-summarizeGTscore(p3_postFilter_SIMP_singleSNP_alleleReads, p3_postFilter_SIMP_singleSNP_locusTable, p3_postFilter_SIMP_polyGenResults_singleSNP) %>%
+  mutate(primerPool = "3")
+
+#write results
+write.table(p3_postFilter_singleSNP_summary,"p3_postFilter_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(p3_postFilter_LWED_singleSNP_summary,"p3_postFilter_LWED_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(p3_postFilter_SIMP_singleSNP_summary,"p3_postFilter_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+```
+
+#### 4.1.2) Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
+##### 4.1.2.1) Primer Pool 1
+```{r}
+# Load locus summaries
+p1_postFilter_ls <- read.table("p1_postFilter_GTscore_locusSummary.txt", header = T, sep = "\t")
+p1_postFilter_lwed_ls <- read.table("p1_postFilter_LWED_GTscore_locusSummary.txt", header = T, sep = "\t")
+p1_postFilter_simp_ls <- read.table("p1_postFilter_SIMP_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## Locus summaries
+p1_postFilter_ls1 <- p1_postFilter_ls %>%
+  filter(!str_detect(Locus, "LWED|SIMP"))
+p1_postFilter_lwed1_ls <- p1_postFilter_lwed_ls %>%
+  filter(str_detect(Locus, "LWED"))
+p1_postFilter_simp1_ls <- p1_postFilter_simp_ls %>%
+  filter(str_detect(Locus, "SIMP"))
+
+## SingleSNP summaries
+p1_postFilter_ss <- p1_postFilter_singleSNP_summary %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP"))
+p1_postFilter_lwed_ss <- p1_postFilter_LWED_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "LWED"))
+p1_postFilter_simp_ss <- p1_postFilter_SIMP_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "SIMP"))
+
+# Recombine locus summaries & single snp summary files, then merge the two
+p1_postFilter_ls_recombine <- rbind(p1_postFilter_ls1, p1_postFilter_lwed1_ls, p1_postFilter_simp1_ls)
+View(p1_postFilter_ls_recombine)
+
+p1_postFilter_ss_recombine <- rbind(p1_postFilter_ss, p1_postFilter_lwed_ss, p1_postFilter_simp_ss)
+p1_postFilter_ss_recombine$Locus_ID <- sub("^([^_]*_[^_]*).*", "\\1", p1_postFilter_ss_recombine$Locus_ID)
+View(p1_postFilter_ss_recombine)
+
+p1_postFilter_ls_ss <- merge(p1_postFilter_ls_recombine, p1_postFilter_ss_recombine, by.x = "Locus", by.y = "Locus_ID") 
+View(p1_postFilter_ls_ss)
+```
+
+##### 4.1.2.2) Primer Pool 2
+```{r}
+# Load locus summaries
+p2_postFilter_ls <- read.table("p2_postFilter_GTscore_locusSummary.txt", header = T, sep = "\t")
+p2_postFilter_lwed_ls <- read.table("p2_postFilter_LWED_GTscore_locusSummary.txt", header = T, sep = "\t")
+p2_postFilter_simp_ls <- read.table("p2_postFilter_SIMP_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## Locus summaries
+p2_postFilter_ls1 <- p2_postFilter_ls %>%
+  filter(!str_detect(Locus, "LWED|SIMP"))
+p2_postFilter_lwed1_ls <- p2_postFilter_lwed_ls %>%
+  filter(str_detect(Locus, "LWED"))
+p2_postFilter_simp1_ls <- p2_postFilter_simp_ls %>%
+  filter(str_detect(Locus, "SIMP"))
+
+## SingleSNP summaries
+p2_postFilter_ss <- p2_postFilter_singleSNP_summary %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP"))
+p2_postFilter_lwed_ss <- p2_postFilter_LWED_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "LWED"))
+p2_postFilter_simp_ss <- p2_postFilter_SIMP_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "SIMP"))
+
+View(p2_postFilter_ss)
+
+# Recombine locus summaries & single snp summary files, then merge the two
+p2_postFilter_ls_recombine <- rbind(p2_postFilter_ls1, p2_postFilter_lwed1_ls, p2_postFilter_simp1_ls)
+View(p1_postFilter_ls_recombine)
+
+p2_postFilter_ss_recombine <- rbind(p2_postFilter_ss, p2_postFilter_lwed_ss, p2_postFilter_simp_ss)
+p2_postFilter_ss_recombine$Locus_ID <- sub("^([^_]*_[^_]*).*", "\\1", p2_postFilter_ss_recombine$Locus_ID)
+View(p2_postFilter_ss_recombine)
+
+p2_postFilter_ls_ss <- merge(p2_postFilter_ls_recombine, p2_postFilter_ss_recombine, by.x = "Locus", by.y = "Locus_ID") 
+View(p2_postFilter_ls_ss)
+```
+
+##### 4.1.2.3) Primer Pool 3
+```{r}
+# Load locus summaries
+p3_postFilter_ls <- read.table("p3_postFilter_GTscore_locusSummary.txt", header = T, sep = "\t")
+p3_postFilter_lwed_ls <- read.table("p3_postFilter_LWED_GTscore_locusSummary.txt", header = T, sep = "\t")
+p3_postFilter_simp_ls <- read.table("p3_postFilter_SIMP_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## Locus summaries
+p3_postFilter_ls1 <- p3_postFilter_ls %>%
+  filter(!str_detect(Locus, "LWED|SIMP"))
+p3_postFilter_lwed1_ls <- p3_postFilter_lwed_ls %>%
+  filter(str_detect(Locus, "LWED"))
+p3_postFilter_simp1_ls <- p3_postFilter_simp_ls %>%
+  filter(str_detect(Locus, "SIMP"))
+
+## SingleSNP summaries
+p3_postFilter_ss <- p3_postFilter_singleSNP_summary %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP"))
+p3_postFilter_lwed_ss <- p3_postFilter_LWED_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "LWED"))
+p3_postFilter_simp_ss <- p3_postFilter_SIMP_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "SIMP"))
+
+View(p3_postFilter_ss)
+
+# Recombine locus summaries & single snp summary files, then merge the two
+p3_postFilter_ls_recombine <- rbind(p3_postFilter_ls1, p3_postFilter_lwed1_ls, p3_postFilter_simp1_ls)
+View(p3_postFilter_ls_recombine)
+
+p3_postFilter_ss_recombine <- rbind(p3_postFilter_ss, p3_postFilter_lwed_ss, p3_postFilter_simp_ss)
+p3_postFilter_ss_recombine$Locus_ID <- sub("^([^_]*_[^_]*).*", "\\1", p3_postFilter_ss_recombine$Locus_ID)
+View(p3_postFilter_ss_recombine)
+
+p3_postFilter_ls_ss <- merge(p3_postFilter_ls_recombine, p3_postFilter_ss_recombine, by.x = "Locus", by.y = "Locus_ID") 
+View(p3_postFilter_ls_ss)
+```
+
+##### 4.1.2.4) Create master locus summary file
+```{r}
+p123_postFilter_ls_ss <- rbind(p1_postFilter_ls_ss, p2_postFilter_ls_ss, p3_postFilter_ls_ss)
+View(p123_postFilter_ls_ss)
+
+# Export
+write.csv(p123_postFilter_ls_ss, "./summaryFiles/p123_postFilter_master_locusSummary.csv", row.names = F)
+```

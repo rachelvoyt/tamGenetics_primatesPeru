@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+./01_run2_fecalHairBlood/00_originalSeqResults
+./01_run2_fecalHairBlood/00_qualityChecks
+./01_run2_fecalHairBlood/01_run2Seqs
+./01_run2_fecalHairBlood/01_run2Seqs_filtered
+./01_run2_fecalHairBlood/02_run2Interleaved
+./01_run2_fecalHairBlood/archived
