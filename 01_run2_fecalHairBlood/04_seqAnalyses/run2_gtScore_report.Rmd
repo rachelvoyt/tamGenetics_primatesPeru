@@ -16,6 +16,7 @@ library(here)
 library(tidyverse)
 library(TidyMultiqc)
 library(HistDat)
+library(matrixStats)
 library(gsubfn)
 library(scales)
 library(kableExtra)
@@ -117,7 +118,8 @@ multiqc --interactive .
 Step 2: Load FastQC MultiQC report to R
 
 ```{r}
-MultiQCfastQCpath <- file.path("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/00_qualityChecksFastQC/multiqc_data", "multiqc_data.json")
+MultiQCfastQCpath <- file.path("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/01_run2_fecalHairBlood/00_qualityChecksFastQC/multiqc_data", "multiqc_data.json")
+
 MultiQCfastQC <- TidyMultiqc::load_multiqc(MultiQCfastQCpath, sections = c("general", "raw"))
 ```
 
@@ -191,18 +193,24 @@ Locus and summary files were created via the GTscore pipeline for analysis of GT
 
 ```{r}
 # GTscore loci summary file
-loci <- read.csv(here('./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_master_locusSummary.csv'))
+loci <- read.csv(here('./01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_master_locusSummary.csv'))
 ```
 
 **Samples: MultiQC report & GTscore summary file**
 
 ```{r}
 # GTscore summary file
-samples <- read.csv(here('./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_master_sampleSummary.csv'))
+samples <- read.csv(here('./01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_master_sampleSummary.csv'))
 
 # Samples without the negative controls
 samplesNoNeg <- samples %>%
   filter(!sampleType == "(-)")
+
+# List negative controls
+samplesNeg. <- samples %>%
+  filter(sampleType == "(-)") %>%
+  distinct(sampleID) %>%
+  mutate(sampleID = gsub("_", ".", sampleID))
 ```
 
 ## 2.2 Loci with zero reads
@@ -291,7 +299,7 @@ The analyses below show us that that our failed samples have the following chara
 
 4.  All of which suggests that the loci that amplified for our failed samples may be overamplifiers; supported by my brief investigation below
 
-Beyond that though, the conditions that appear to have caused sample failure appear to be related to 1) sample quality and 2) primer pool, where the samples run with the full primer pool were more likely to fail.
+Beyond that though, the conditions that appear to have caused sample failure appear to be related to 1) sample quality and 2) primer pool, where the fecal/hair samples run with the full primer pool were more likely to fail.
 
 #### 2.3.2.1 Primer-probe reads
 
@@ -322,7 +330,7 @@ ggplot() +
 
 #### 2.3.2.2 Read quality
 
-With that said, the number of primer-probe read counts don't necessarily matter if these reads are low quality -- HOWEVER, we can see below that median read quality for most failed samples is actually quite good.
+With that said, the number of primer-probe read counts don't necessarily matter if these reads are low quality -- HOWEVER, we can see below that median read quality for most failed samples (aside from those that just completely didn't work) is actually quite good.
 
 Note that I've only included read 1 QC scores here - a quick check showed that read 2 score look the same.
 
@@ -345,21 +353,22 @@ ggplot(seqQC_failedSamples, aes(x = reorder(sampleNo, medianQC_r1), y = medianQC
 
 #### 2.3.2.3 Distribution of reads
 
-If we have low genotyping success per sample, but lot of primer-probe reads per sample plus a high median sequence-quality per sample, this may instead mean that the reads from which these values were calculated are representative of only a small subset of loci; i.e., some loci are overamplifying.
+If we have low genotyping success per sample, but lot of primer-probe reads per sample plus a high median sequence-quality per sample, this instead suggests that the reads from which these values were calculated are representative of only a small subset of loci; i.e., some loci are overamplifying.
 
 To investigate, we can look at the reads per locus per sample and see how they're distributed.
 
 ##### Entire dataset
 
-First we'll look at the dataset as a whole, which shows us that **we have a handful of loci that are over-amplifying.**
+First we'll look at the dataset as a whole, which shows us that **we have a handful of loci that are overrepresented.**
 
 ```{r}
-readCounts <- read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/fullSet_AlleleReads_singleSNPs.txt"))
+# Load read counts
+readCounts <- read.table(here("./01_run2_fecalHairBlood/03_run2GTscore/fullSet_AlleleReads_singleSNPs.txt"))
 
 # First set up a function to add the read counts per allele for each locus, using package gsubfn
 repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
 
-# Then apply the function to readCounts & get the sum of all reads for each locus
+# Then apply the function to readCounts & get the sum & median of all reads for each locus
 readCounts_all <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
   rownames_to_column("Locus") %>%
   mutate(Locus = sub("(_[^_]+)_.*", "\\1", Locus)) %>%
@@ -368,77 +377,110 @@ readCounts_all <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
   as.data.frame() %>%
   rownames_to_column("sampleID") %>%
   mutate(sampleID = substr(sampleID, start = 1, stop = 11)) %>%
+  filter(!sampleID %in% samplesNeg.$sampleID) %>%
   column_to_rownames("sampleID") %>%
   t() %>%
   as.data.frame() %>%
   mutate(across(everything(),as.numeric)) %>%
-  mutate(readSum = rowSums(.[1:142]))
+  mutate(readSum = rowSums(.[1:135])) %>%
+  mutate(readMedian = rowMedians(as.matrix(.[,c(1:135)])))
 
-# Subset readCounts_all just to the sum for each locus, then note outliers
-## Define a function to find outliers
+# Define a function to find outliers
 findoutlier <- function(x) {
   return(x < quantile(x, .25) - 1.5*IQR(x) | x > quantile(x, .75) + 1.5*IQR(x))
 }
 
-## Subset readCounts_all
+# Subset readCounts_all just to the sum & median for each locus, then note outliers
 sumReads_perLocus <- readCounts_all %>%
   rownames_to_column("Locus") %>%
-  select(c("Locus", "readSum")) %>%
-  mutate(outlier = ifelse(findoutlier(readSum), Locus, NA)) %>%
+  select(c("Locus", "readSum", "readMedian")) %>%
+  mutate(sumOutlier = ifelse(findoutlier(readSum), Locus, NA)) %>%
+  relocate(sumOutlier, .after = readSum) %>%
+  mutate(medianOutlier = ifelse(findoutlier(readMedian), Locus, NA)) %>%
+  relocate(medianOutlier, .after = readMedian) %>%
   arrange(-readSum)
 summary(sumReads_perLocus$readSum)
+summary(sumReads_perLocus$readMedian)
 
-## Plots
+# Plots - SUM
 ggplot(sumReads_perLocus, aes(x=readSum, y=factor(0))) +
   geom_boxplot() +
-  labs(title = "Total reads per locus (all samples)", x = "Number of reads", y = "") +
+  labs(title = "Total reads per locus (all samples)", x = "Total number of reads", y = "") +
   theme_bw()
 
 ggplot(sumReads_perLocus, aes(x = readSum, y = reorder(Locus, readSum))) +
   geom_bar(stat = "identity") +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
-  labs(title = "Total reads per locus (all samples)", x = "Number of reads", y = "")
+  labs(title = "Total reads per locus (all samples)", x = "Total number of reads", y = "")
+
+# Plots - MEDIAN
+ggplot(sumReads_perLocus, aes(x=readMedian, y=factor(0))) +
+  geom_boxplot() +
+  labs(title = "Median reads per locus (all samples)", x = "Median number of reads", y = "") +
+  theme_bw()
+
+ggplot(sumReads_perLocus, aes(x = readMedian, y = reorder(Locus, readMedian))) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
+  labs(title = "Median reads per locus (all samples)", x = "Median number of reads", y = "")
 ```
 
-In total, **we have 22 outliers**. NOTE, however, that these values are based on a dataset that includes underperforming samples, which makes it hard to say whether they're truly overamplifying. With that said, INDID_389.1 is an exception - it has about twice the read counts as the next highest locus.
+In total, **we have 22 outliers when looking at total reads, and 40 outliers when looking at median reads**. NOTE, however, that these values are based on a dataset that 1) includes underperforming samples, and 2) isn't subset by species or primer pool, which makes it hard to say whether they're truly overamplifying. With that said, INDID_389.1 (and possibly SIMP_356.1) may be exceptions, with these two holding the spots for highest total and median read counts.
 
 ```{r}
 sumReads_perLocus %>%
   arrange(-readSum) %>%
-  kbl(align = "c", col.names = c("Locus", "Total primer-probe reads", "Outlier locus?")) %>%
+  kbl(align = "c", col.names = c("Locus", "Total primer-probe reads", "Outlier locus (sum)", "Median primer-probe reads", "Outlier locus (median)")) %>%
   kable_material(full_width = F) %>%
   scroll_box(height = "500px", fixed_thead = list(enabled = T, background = "#363636"))
+length(sumReads_perLocus$medianOutlier %>%
+         na.omit())
 ```
 
 ##### Failed samples only
 
-We can now look specifically at the failed samples, where we again see a number of outliers (46 here). INDID_389.1 is also taking up a good chunk of reads among our failed samples (again, nearly twice the reads of the locus with the next-highest number of reads). Here too though, aside from INDID_389.1, I wouldn't necessarily label all of these as "overamplifiers" until we're looking only at our better-quality samples.
+We can now look specifically at the failed samples, where we again see a number of outliers (46 here). INDID_389.1 and SIMP_356.1 are high here as well, along with SIMP_311.3. A couple things to note--
+
+-   The median number of reads for these loci is *higher* than with the full dataset
+
+-   Over half of the 200,000 total reads that we saw for INDID_389.1 in the full dataset seem to be coming from these failed samples
+
+Which means that perhaps these loci aren't necessarily overamplifiers generally, but are more likely to do so with lower-quality samples.
 
 ```{r}
 # List sampleIDs from failedSamples & reformat
 failedSamples_rcList <- failedSamples_list %>%
   mutate(sampleID = gsub("_", ".", sampleID))
   
-# Subset to failed samples and recalculate sumReads
+# Subset to failed samples and recalculate sums & medians
 readCounts_failedSamples <- readCounts_all %>%
   select(failedSamples_rcList$sampleID) %>%
   mutate(across(everything(),as.numeric)) %>%
-  mutate(readSum = rowSums(.[1:62]))
+  mutate(readSum = rowSums(.[1:62])) %>%
+  mutate(readMedian = rowMedians(as.matrix(.[,c(1:62)])))
   
 sumReads_perLocus_failedSamples <- readCounts_failedSamples %>%
   rownames_to_column("Locus") %>%
-  select(c("Locus", "readSum")) %>%
-  mutate(outlier = ifelse(findoutlier(readSum), Locus, NA))
+  select(c("Locus", "readSum", "readMedian")) %>%
+  mutate(sumOutlier = ifelse(findoutlier(readSum), Locus, NA)) %>%
+  relocate(sumOutlier, .after = readSum) %>%
+  mutate(medianOutlier = ifelse(findoutlier(readMedian), Locus, NA)) %>%
+  relocate(medianOutlier, .after = readMedian) %>%
+  arrange(-readSum)
 summary(sumReads_perLocus_failedSamples$readSum)
+summary(sumReads_perLocus_failedSamples$readMedian)
 
+# Table
 sumReads_perLocus_failedSamples %>%
-  dplyr::select(c(readSum, outlier)) %>%
+  dplyr::select(c(readSum, sumOutlier, readMedian, medianOutlier)) %>%
   na.omit() %>%
   arrange(-readSum) %>%
-  kbl(align = "c", col.names = c("Total primer-probe reads", "Outlier locus")) %>%
+  kbl(align = "c", col.names = c("Total primer-probe reads", "Outlier locus (sum)", "Median primer-probe reads", "Outlier locus (median)")) %>%
   kable_material(full_width = F) %>%
   scroll_box(height = "500 px", fixed_thead = list(enabled = T, background = "#363636"))
 
+# Plots
+## SUM
 ggplot(sumReads_perLocus_failedSamples, aes(x = readSum, y = reorder(Locus, readSum))) +
   geom_bar(stat = "identity") +
   labs(title = "Total reads per locus (failed samples)", x = "Number of reads", y = "") +
@@ -449,25 +491,44 @@ ggplot(sumReads_perLocus_failedSamples, aes(x=readSum, y=factor(0))) +
   geom_boxplot() +
   labs(title = "Total reads per locus (failed samples)", x = "Number of reads", y = "") +
   scale_x_continuous(labels = comma)
+
+## MEDIAN
+ggplot(sumReads_perLocus_failedSamples, aes(x = readMedian, y = reorder(Locus, readMedian))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Median reads per locus (failed samples)", x = "Median number of reads", y = "") +
+   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
+  scale_x_continuous(labels = comma)
+
+ggplot(sumReads_perLocus_failedSamples, aes(x=readMedian, y=factor(0))) +
+  geom_boxplot() +
+  labs(title = "Median reads per locus (failed samples)", x = "Median number of reads", y = "") +
+  scale_x_continuous(labels = comma)
 ```
 
 ##### Successful samples only
 
-If we look at only our successful samples (\> 50% genotype success), do we see the same loci overamplifying?
+We can now check whether these same loci overamplify when samples have \> 50% genotype success. INDID_389.1 is no longer at the top spot (but still overrepresented); instead we see a lot of the species-specific individual IDs as outliers.
 
 ```{r}
 # Subset to successful samples and recalculate sumReads
 readCounts_passedSamples <- readCounts_all %>%
   select(!failedSamples_rcList$sampleID) %>%
   mutate(across(everything(),as.numeric)) %>%
-  mutate(readSum = rowSums(.[1:62]))
+  mutate(readSum = rowSums(.[1:73])) %>%
+  mutate(readMedian = rowMedians(as.matrix(.[,c(1:73)])))
   
 sumReads_perLocus_passedSamples <- readCounts_passedSamples %>%
   rownames_to_column("Locus") %>%
-  select(c("Locus", "readSum")) %>%
-  mutate(outlier = ifelse(findoutlier(readSum), Locus, NA))
+  select(c("Locus", "readSum", "readMedian")) %>%
+  mutate(sumOutlier = ifelse(findoutlier(readSum), Locus, NA)) %>%
+  relocate(sumOutlier, .after = readSum) %>%
+  mutate(medianOutlier = ifelse(findoutlier(readMedian), Locus, NA)) %>%
+  relocate(medianOutlier, .after = readMedian) %>%
+  arrange(-readSum)
 summary(sumReads_perLocus_passedSamples$readSum)
+summary(sumReads_perLocus_passedSamples$readMedian)
 
+# Table
 sumReads_perLocus_passedSamples %>%
   select(c(readSum, outlier)) %>%
   na.omit() %>%
@@ -476,6 +537,8 @@ sumReads_perLocus_passedSamples %>%
   kable_material(full_width = F) %>%
   scroll_box(height = "500 px", fixed_thead = list(enabled = T, background = "#363636"))
 
+# Plots
+## SUM
 ggplot(sumReads_perLocus_passedSamples, aes(x = readSum, y = reorder(Locus, readSum))) +
   geom_bar(stat = "identity") +
   labs(title = "Total reads per locus (successful samples)", x = "Total reads", y = "") +
@@ -486,11 +549,25 @@ ggplot(sumReads_perLocus_passedSamples, aes(x=readSum, y=factor(0))) +
   geom_boxplot() +
   labs(title = "Total reads per locus (successful samples)", x = "Total reads", y = "") +
   scale_x_continuous(labels = comma)
+
+## MEDIAN
+ggplot(sumReads_perLocus_passedSamples, aes(x = readMedian, y = reorder(Locus, readMedian))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Median reads per locus (successful samples)", x = "Median reads", y = "") +
+  scale_x_continuous(labels = comma) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+ggplot(sumReads_perLocus_passedSamples, aes(x=readMedian, y=factor(0))) +
+  geom_boxplot() +
+  labs(title = "Median reads per locus (successful samples)", x = "Median reads", y = "") +
+  scale_x_continuous(labels = comma)
 ```
 
 ##### A closer look at INDID_389.1
 
-Which samples are the reads for this locus coming from?
+I wanted to look into INDID_389.1 a bit further since it had such a high read count (200,000 total reads). We saw earlier that a little over half of these reads were coming from the failed samples, and here we see that the samples with the highest read counts for this locus were run with Primer Pool 1.
+
+(Note that Primer Pool 2 does not contain this locus.)
 
 ```{r}
 readCounts_indid389.1 <- readCounts_all %>%
@@ -503,6 +580,7 @@ readCounts_indid389.1 <- readCounts_all %>%
   rownames_to_column("sampleID") %>%
   mutate(sampleID = gsub("\\.", "_", sampleID)) %>%
   arrange(-INDID_389.1)
+summary(readCounts_indid389.1$INDID_389.1)
 
 readCounts_indid389.1_md <- merge(readCounts_indid389.1, samples, by = "sampleID") %>%
   select(c(sampleID, INDID_389.1, sampleType, primerPool.x)) %>%
@@ -519,7 +597,6 @@ readCounts_indid389.1_md %>%
   kbl(align = "c", col.names = c("Sample ID", "Reads for INDID_389.1", "Sample type", "Primer pool")) %>%
   kable_material(full_width = F) %>%
   scroll_box(height = "500 px", fixed_thead = list(enabled = T, background = "#363636"))
-  
 ```
 
 #### 2.3.2.3 Broader reasons for sample failure
@@ -622,7 +699,7 @@ After identifying zero-read loci and underperforming samples in parts I and II, 
 Locus summary file from GTscore pipeline:
 
 ```{r}
-lociPF <- read.csv(here('./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_postFilter_master_locusSummary.csv'))
+lociPF <- read.csv(here('./01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_postFilter_master_locusSummary.csv'))
 ```
 
 Given the differences in sample success between full and split primer pools, I chose to assess locus performance between full and split pools as well - details below.
@@ -659,7 +736,7 @@ lociPF_under50b <- lociPF %>%
 length(unique(lociPF_under50b$Locus))
 ```
 
-We see in this first plot that we have a lot more failures in Primer Pool 1 vs. either of the split pools:
+We see in this first plot that **we have many more locus failures in Primer Pool 1 vs. either of the split pools.**
 
 ```{r}
 # Primer pool vs. locus genotype rate
@@ -745,7 +822,7 @@ Since I just want to know if the genotypes are matching up correctly, regardless
 Genotype assignments are from the GTscore pipeline, which uses the "polygen" function, a custom-made function from McKinney et al. (2018), to assign genotypes.
 
 ```{r}
-fullSet_genos <- read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/fullSet_polyGenResults_singleSNP.txt"))
+fullSet_genos <- read.table(here("./01_run2_fecalHairBlood/03_run2GTscore/fullSet_polyGenResults_singleSNP.txt"))
 fullSet_genos_sexid <- fullSet_genos %>%
   rownames_to_column("Locus") %>%
   filter(str_detect(Locus, "SEXID")) %>%
@@ -755,15 +832,15 @@ fullSet_genos_sexid <- fullSet_genos %>%
 Genotype keys:
 
 ```{r}
-sexKey_original <- read.csv(here("./seqAnalysis/sexSNP_key_original.csv"))
-speciesKey_original <- read.csv(here("./seqAnalysis/speciesSNP_key_original.csv"))
+sexKey_original <- read.csv(here("./01_run2_fecalHairBlood/sexSNP_key_original.csv"))
+speciesKey_original <- read.csv(here("./01_run2_fecalHairBlood/speciesSNP_key_original.csv"))
 ```
 
 Reformat sex key:
 
 ```{r}
 # First add the loci names that I've been using using our primer-probe file 
-primerProbe_sexid <- read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/run2_primerProbeFile_original.txt"), header = T) %>% 
+primerProbe_sexid <- read.table(here("./01_run2_fecalHairBlood/03_run2GTscore/run2_primerProbeFile_original.txt"), header = T) %>% 
   select(c(Locus, Primer)) %>% 
   filter(str_detect(Locus, "SEXID"))
 primerProbe_sexid$Primer
@@ -828,4 +905,10 @@ fullSet_genos_sexid_FM <- fullSet_genos_sexid %>%
   select(c(Locus, sampleID, sex)) %>%
   pivot_wider(names_from = sampleID,
               values_from = sex)
+```
+
+Step 2: Subset by primer pool and species, since loci are split across primer pools 2 & 3 and some sexid loci are species-specific
+
+```{r}
+
 ```

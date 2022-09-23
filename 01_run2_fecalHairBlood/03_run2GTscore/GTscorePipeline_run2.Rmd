@@ -1,16 +1,45 @@
 ---
-title: "GTscorePipeline_COMBINED_run2"
+title: "GTscorePipeline_run2"
 output: html_document
 date: "2022-09-06"
 editor_options: 
   markdown: 
     wrap: 72
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE,fig.path = "tools/")
-knitr::opts_knit$set(root.dir = "./seqanalysis/01_run2_fecalHairBlood/03_run2GTscore")
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
+knitr::opts_knit$set(root.dir = "./01_run2_fecalHairBlood/03_run2GTscore")
 ```
+
+# 1 Overview
+
+## 1.1 About the pipeline
+
+This pipeline includes all steps needed to analyze MiSeq data output, including how to 1) interleave the fasta sequences, 2) create the necessary files for analysis in GTscore, and 3) run the GTscore pipeline itself.
+
+The GTscore pipeline was originally created by Garrett McKinney (see the associated github [here](https://github.com/gjmckinney/GTscore)). Here, I combine the scripts included in his original "GTscore_pipeline.R" as well as his original "README.md" - there's a good bit of overlap between these files, but a few scripts exist in one but not the other. I've also included separate analyses for each species as well as for each primer pool, since not all samples were run with all loci and not all loci are applicable to both species.
+
+## 1.2 About the data
+
+The sequence data used in this pipeline is from tamRun2, the second sequencing run in this project. This run has a total of **142 samples**, including:
+
+1.  **44 testing samples (+ 2 negatives)**, allowing us to assess:
+    1.  Full vs. split primer pools
+    2.  0.025 vs. 0.05 uM primer concentration
+    3.  4 ul sample vs. dilute 1:1 sample with water
+    4.  a couple chelex samples
+    5.  blood samples run with the Burgess PCR1 protocol
+    6.  diluting PCR1 products 1:10 vs. 1:20 prior to running PCR2
+    7.  duplicates for many of the above as well as for the fecal/hair/blood paired samples
+2.  **30 paired samples (+ 4 PCR1 negatives + 1 PCR2 negative)**, with DNA extractions from the same 30 individuals across three different sample types: fecal, hair, and blood
+
+Note that Run 2 analyses only include loci that passed the first round of optimization.
+
+# 2 Packages
 
 ```{r load packages, include=FALSE}
 library(here)
@@ -19,14 +48,10 @@ library(phylotools)
 if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install("Biostrings")
-source(here::here("./seqAnalysis/gtScore_sourceScripts/GTscore.R")) # NOTE- added N=ATGC to script for later analyses (not included in original)
+source("GTscore.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
 ```
 
-GTscore also requires Perl as well as the the packages
-"Algorithm::Combinatorics" and "Excel-Writer-XLSX". Perform the
-following in terminal to install on Linux. NOTE -- be sure to install
-both perl and the modules in root. how to install perl packages:
-<http://www.cpan.org/modules/INSTALL.html>
+GTscore also requires Perl as well as the the packages "Algorithm::Combinatorics" and "Excel-Writer-XLSX". Perform the following in terminal to install on Linux. NOTE -- be sure to install both perl and the modules in root. See how to install perl packages [here](http://www.cpan.org/modules/INSTALL.html).
 
 ```{bash, eval = FALSE}
 # Install perl
@@ -37,39 +62,13 @@ cpan App::cpanminus
 sudo cpanm Algorithm::Combinatorics
 ```
 
-# About the pipeline
+# 3 Prep sequencing results
 
-This pipeline includes all steps needed to analyze MiSeq data output,
-including how to interleave the fasta sequences and create the necessary
-files for analysis in GTscore. The GTscore part of the pipeline is based
-on that created by Garrett McKinney (see the associated github
-[here](https://github.com/gjmckinney/GTscore)), and combines scripts
-included in his original "GTscore_pipeline.R" as well as his original
-"README.md" - there's a good bit of overlap between these files, but a
-few scripts exist in one but not the other.
+Note that I'm using raw (unfiltered) reads for this pipeline. Quality checks are included in the run2Analyses_report.Rmd file.
 
-In this pipeline, I've included separate analyses for each species as
-well as for each primer pool, since not all samples were run with all
-loci and not all loci are applicable to both species.
+## 3.1 Extract sequencing results
 
-Note that Run 2 analyses only include loci that passed the first round
-of optimization.
-
-# About the data
-
-The sequence data used in this pipeline is from tamRun2, the second
-sequencing run in this project.
-
-# Prep sequencing results
-
-Note that I'm using raw (unfiltered) reads for this pipeline. Quality
-checks are included in the run2Analyses_report.Rmd file.
-
-## Extract sequencing results
-
-After downloading the results from Basespace, transfer the zip file to
-00_originalSeqResults and extract into 01_run2Seqs (keep the original
-zip file as a copy in 00_originalSeqResults):
+After downloading the results from Basespace, transfer the zip file to 00_originalSeqResults and extract into 01_run2Seqs (keep the original zip file as a copy in 00_originalSeqResults):
 
 ```{bash Extract sequencing results, eval = FALSE}
 # Navigate to 00_originalSeqResults
@@ -78,10 +77,9 @@ zip file as a copy in 00_originalSeqResults):
 unzip FASTQ_Generation_2022-09-06_01_44_03Z-604973726-20220906T193600Z-001.zip -d ../01_run2Seqs
 ```
 
-## Interleave fasta sequences
+## 3.2 Interleave fasta sequences
 
-To prep for the GTscore pipeline, we need to combine reads 1 & 2 for
-each sample into a single interleaved file & unzip:
+To prep for the GTscore pipeline, we need to combine reads 1 & 2 for each sample into a single interleaved file & unzip:
 
 ```{bash Interleave fasta seqs, eval = FALSE}
 # Navigate to the directory containing the .fastq.gz files from the Illumina sequencing run
@@ -98,338 +96,229 @@ cd 02_run2Interleaved
 gunzip -r .
 ```
 
-# 1 Create primer-probe & sample files
+# 4 Create primer-probe & sample files
 
-We also need to make a few files to input into the GTscore pipeline: 1)
-Sample files 2) Primer-probe files
+We also need to make a few files to input into the GTscore pipeline, including 1) sample files 2) primer-probe files for each primer pool and species. I'm separating them out like this so that we have a more accurate read count and genotype rates for each sample and locus.
 
-## 1.1 Sample files
+## 4.1 Sample files
 
-Step 1: Create general sample file "run2_sampleFiles.txt" containing all
-the names of the interleaved fasta files created above (make this by
-hand; use terminal to list all file names and create a new txt file)
+Step 1: Create general sample file "run2_sampleFiles_original.txt" containing all the names of the interleaved fasta files created above (make this by hand; use terminal to list all file names and create a new txt file)
 
-Step 2: Split the general sample file into i) lwed & simp samples, then
-ii) full pool & split pool samples
+Step 2: Split the general sample file into i) lwed & simp samples, then ii) full pool & split pool samples
 
-Primer Pool 1 (115 samples total, includes 2\*(5 pcr1 neg + 1 pcr2 neg))
-50 LWED + 5 pcr1 (-) + 1 pcr2 (-) = 56 total 53 SIMP + 5 pcr1 (-) + 1
-pcr2 (-) = 59 total
+Primer Pool 1 (115 samples total, includes 2\*(5 pcr1 neg + 1 pcr2 neg)) 50 LWED + 5 pcr1 (-) + 1 pcr2 (-) = 56 total 53 SIMP + 5 pcr1 (-) + 1 pcr2 (-) = 59 total
 
-Primer Pool 2 (25 samples total, includes 2\*(1 pc1 neg & 1 pcr2 neg)) 6
-LWED + 1 pcr1 neg + 1 pcr2 neg = 8 total 15 SIMP + 1 pcr1 neg + 1 pcr2
-neg = 17 total
+Primer Pool 2 (25 samples total, includes 2\*(1 pc1 neg & 1 pcr2 neg)) 6 LWED + 1 pcr1 neg + 1 pcr2 neg = 8 total 15 SIMP + 1 pcr1 neg + 1 pcr2 neg = 17 total
 
-Primer Pool 3 (13 samples total, includes 2\*(1 pcr2 neg)) 5 LWED + 1
-pcr2 (-) = 6 total 6 SIMP + 1 pcr2 (-) = 7 total
+Primer Pool 3 (13 samples total, includes 2\*(1 pcr2 neg)) 5 LWED + 1 pcr2 (-) = 6 total 6 SIMP + 1 pcr2 (-) = 7 total
+
+### 4.1.1 Read in metadata
 
 ```{r}
 # Read in metadata
-md <- read.csv(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv")) %>%
-  filter(included_inRun == "yes")
+md <- read.csv(here("./01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv")) %>%
+  filter(included_inRun == "yes") %>%
+  select(c(sampleID, species, primerPool))
 md$sampleID <- gsub("_", "-", md$sampleID) # adjust formatting; miseq changes "_" to "-" for some reason
-View(md) # double check there's 142 samples; success
+length(md$sampleID) # double check there's 142 samples; success
 table(md$primerPool)
-#   1   2   3     also have one "NA" (PCR2 negative)
-# 108  22  11     6 pcr1 (-) for p1, 2 pcr1 (-) for split pools
+```
 
-# Create separate lists of lwed & simp samples for primer pool 1 (full pool), and pools 2 & 3 (split pools)
-## LWED
-md_LWED_p1 <- md %>%
-  filter(is.na(species) | species != "SIMP") %>%
-  filter(is.na(primerPool) | primerPool == "1") %>%
-  select(sampleID) %>%
-  pull()
-View(md_LWED_p1) # 56 - 6 = 50 LWED samples
+### 4.1.2 Create sample file subsets
 
-md_LWED_p2 <- md %>%
-  filter(is.na(species) | species != "SIMP") %>%
-  filter(is.na(primerPool) | primerPool == "2") %>%
-  select(sampleID) %>%
-  pull()
-View(md_LWED_p2) # 8; success
+Filter run2_sampleFiles to create separate LWED & SIMP for each pool set (full & split)
 
-md_LWED_p3 <- md %>%
-  filter(is.na(species) | species != "SIMP") %>%
-  filter(is.na(primerPool) | primerPool == "3") %>%
-  select(sampleID) %>%
-  pull()
-View(md_LWED_p3) # 6; success
+```{r}
+# Read in original list of run2 sample files
+sf_original <- read.table(here("./01_run2_fecalHairBlood/03_run2GTscore/run2_sampleFiles_original.txt"))
 
-## SIMP
-md_SIMP_p1 <- md %>%
-  filter(is.na(species) | species != "SFUS") %>%
-  filter(is.na(primerPool) | primerPool == "1") %>%
-  select(sampleID) %>%
-  pull()
-View(md_SIMP_p1) # 59; success
+# Reformat column & attach metadata
+sf_original_md <- sf_original %>%
+  separate(V1, into = c("x", "y"), sep = 11) %>%
+  merge(., md, by.x = "x", by.y = "sampleID")
 
-md_SIMP_p2 <- md %>%
-  filter(is.na(species) | species != "SFUS") %>%
-  filter(is.na(primerPool) | primerPool == "2") %>%
-  select(sampleID) %>%
-  pull()
-View(md_SIMP_p2) # 17; success
-
-md_SIMP_p3 <- md %>%
-  filter(is.na(species) | species != "SFUS") %>%
-  filter(is.na(primerPool) | primerPool == "3") %>%
-  select(sampleID) %>%
-  pull()
-View(md_SIMP_p3) # 7; success
-
-# Filter run2_sampleFiles to create separate LWED & SIMP for each pool set (full & split)
-## Read in run2SampleFiles
-sf_original <- read.table(here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/run2_sampleFiles_original.txt"))
-View(sf_original)
-
-## Separate columns to make match/filter easier
-sf_original_sep <- sf_original %>%
-  separate(V1, into = c("x", "y"), sep = 11)
-View(sf_original_sep)
-
-## Separate sf_original into p1 and p2 & 3
-sf_p1 <- sf_original_sep %>%
-  filter(x %in% c(md_LWED_p1, md_SIMP_p1)) %>%
+# Separate sf_original into p1, p2, & p3 (note that the pcr2 (-) is included in all subsets)
+sf_p1 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("2", "3")) %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-View(sf_p1) # 109 samples; 108 p1 + 1 pcr2 (-)
+View(sf_p1) # 109 samples
 
-sf_p2 <- sf_original_sep %>%
-  filter(x %in% c(md_LWED_p2, md_SIMP_p2)) %>%
+sf_p2 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("1", "3")) %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
 View(sf_p2) # 23; success
 
-sf_p3 <- sf_original_sep %>%
-  filter(x %in% c(md_LWED_p3, md_SIMP_p3)) %>%
+sf_p3 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool%in% c("1", "2")) %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
 View(sf_p3) # 12; success
 
-## Create separate LWED/SIMP files for p1, p2, and p3
-### LWED
-sf_LWED_p1 <- sf_original_sep %>%
-  filter(x %in% md_LWED_p1) %>%
+# Create separate LWED/SIMP files for p1, p2, and p3
+## LWED
+sf_LWED_p1 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("2", "3")) %>%
+  filter(is.na(species) | !species == "SIMP") %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-View(sf_LWED_p1) # 56 samples; success
 
-sf_LWED_p2 <- sf_original_sep %>%
-  filter(x %in% md_LWED_p2) %>%
+sf_LWED_p2 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("1", "3")) %>%
+  filter(is.na(species) | !species == "SIMP") %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-View(sf_LWED_p2) # 8 samples; success
 
-sf_LWED_p3 <- sf_original_sep %>%
-  filter(x %in% md_LWED_p3) %>%
+sf_LWED_p3 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("1", "2")) %>%
+  filter(is.na(species) | !species == "SIMP") %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-View(sf_LWED_p3) # 6 samples; success
 
 ### SIMP
-sf_SIMP_p1 <- sf_original_sep %>%
-  filter(x %in% md_SIMP_p1) %>%
+sf_SIMP_p1 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("2", "3")) %>%
+  filter(is.na(species) | !species == "SFUS") %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-length(sf_SIMP_p1$V1) # 59 samples; success
 
-sf_SIMP_p2 <- sf_original_sep %>%
-  filter(x %in% md_SIMP_p2) %>%
+sf_SIMP_p2 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("1", "3")) %>%
+  filter(is.na(species) | !species == "SFUS") %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-length(sf_SIMP_p2$V1) # 17 samples; success
 
-sf_SIMP_p3 <- sf_original_sep %>%
-  filter(x %in% md_SIMP_p3) %>%
+sf_SIMP_p3 <- sf_original_md %>%
+  filter(is.na(primerPool) | !primerPool %in% c("1", "2")) %>%
+  filter(is.na(species) | !species == "SFUS") %>%
+  select(c(x, y)) %>%
   unite(V1, x, y, sep = "")
-length(sf_SIMP_p3$V1) # 7 samples; success
-
-# Export sample files
-write.table(sf_p1, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_p2, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_p3, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-
-write.table(sf_LWED_p1, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_LWED_p2, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_LWED_p3, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-
-write.table(sf_SIMP_p1, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_SIMP_p2, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_SIMP_p3, file = here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
 ```
 
-## 1.2 Primer probe files
+Export sample files
 
-Each primer-probe file contains: 1. Locus - locus name 2. Ploidy - in
-our case, all are diploid so ploidy = 2 3. SNPpos - position of SNP in
-the amplicon, assuming that the first base = 0 4. Allele1 - one of the
-options for the SNP 5. Allele2 - the other option for the SNP 6.
-Probe1 - an 8 nt sequence overlapping the SNP; contains Allele1 7.
-Probe2 - same as Probe1, but contains Allele2 8. Primer - the forward
-primer sequence for each locus
+```{r}
+# Files for each primer pool, species combined
+write.table(sf_p1, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p1_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_p2, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p2_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_p3, file = here(".//01_run2_fecalHairBlood/03_run2GTscore/p3_combined_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
 
-We already have our original primerProbeFile from the optimization run;
-now we need to filter out the loci that didn't pass optimization and
-create separate files for full pool (p1) and split pool (p2 & p3).
+# Files for each primer pool, LWED only
+write.table(sf_LWED_p1, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p1_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_LWED_p2, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p2_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_LWED_p3, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p3_LWED_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
 
-Step 1) To do that, we first have to recombine the optimization
-primer-probe files, which were separated into those with and without the
-bp3 error:
+# Files for each primer pool, SIMP only
+write.table(sf_SIMP_p1, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p1_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_SIMP_p2, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p2_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_SIMP_p3, file = here("./01_run2_fecalHairBlood/03_run2GTscore/p3_SIMP_sampleFiles.txt"), sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+## 4.2 Primer probe files
+
+Each primer-probe file contains the following:
+
+1.  Locus - locus name
+2.  Ploidy - in our case, all are diploid so ploidy = 2
+3.  SNPpos - position of SNP in the amplicon, assuming that the first base = 0
+4.  Allele1 - one of the options for the SNP
+5.  Allele2 - the other option for the SNP
+6.  Probe1 - an 8 nt sequence overlapping the SNP; contains Allele1
+7.  Probe2 - same as Probe1, but contains Allele2
+8.  Primer - the forward primer sequence for each locus
+
+We already have our original primerProbeFile from the optimization run; now we need to filter out the loci that didn't pass optimization and create separate files for full pool (p1) and split pool (p2 & p3).
+
+### 4.2.1 Load in original primer-probe files
+
+We first have to recombine the optimization primer-probe files, which were separated into those with and without the bp3 error.
 
 ```{r Create primer-probe files}
 # Load original primerProbe files, with and without bp3 error and including BOTH species
 pp_original_clean <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/00_optimization/03_gtScore/primerProbeFile.txt", header = T)
-View(pp_original_clean)
+
 pp_original_bp3error <- read.table("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/00_optimization/03_gtScore/bp3error_primerProbeFile.txt", header = T)
 
 # COMBINE the bp3error and non-error primerProbe files & temporarily separate out the bp3Index
 pp_original_all <- rbind(pp_original_clean, pp_original_bp3error) %>%
-  separate(Locus, into = c("locusName", "bp3Rank"), sep = "\\.")
+  separate(Locus, into = c("locusName", "bp3Index"), sep = "_") %>%
+  separate(bp3Index, into = c("bp3Index", "bp3Rank"), sep = "\\.")
 length(pp_original_all$locusName) # 302 loci total; success
-View(pp_original_all)
 ```
 
-Step 2: Next, we need to get a list of loci that passed the optimization
-step (this will also act as the primer list for Primer Pool 1), plus do
-a bit of formatting adjustments:
+### 4.2.2 Create primer-probe file subsets
 
+We can then use that primer-probe file in combination with a file containing the loci that passed and which primer pools they belong to (file created by manually combining platePrimers_toRepool.csv & oPools_toReorder_142oligos.csv (created in a separate script) and adding primerPool column). Primer pool splits are as follows:
+-   Pool 1: 442 primers (221 loci)
+-   Pool 2: 222 primers (111 loci)
+-   Pool 3: 220 primers (110 loci)
+
+Read in poolSplits
 ```{r}
-# Load file with final loci choices post-optimization
-gtseq_finalChoices <- read.csv("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru//primers/03_lociChoices/Master SNP file - GTseq_googleSheet_10Jul2022.csv")
-View(gtseq_finalChoices)
-
-# Get the list of loci that passed optimization; just need SET name & bp3 index
-gtseq_keepLoci <- gtseq_finalChoices %>%
-  filter(To.be.removed.before.second.amplification.round. == "NO") %>%
-  select(c("SET", "bp3_index..UNIQUE."))
-length(gtseq_keepLoci$SET) # 221 loci passing optimization; success
-View(gtseq_keepLoci)
-
-# Remove "_" in SET name
-gtseq_keepLoci$SET <- gsub("_", "", gtseq_keepLoci$SET)
-head(gtseq_keepLoci)
-
-# Now what SET names do we have?
-unique(gtseq_keepLoci$SET) # "INDID" "INDIDadd" "LWEDINDID" "SEXID" "SIMPINDID" "SPECIESID"
-
-# Adjust SET names where needed & concatenate the columns to match with original primerProbe file
-lociKeep <- gtseq_keepLoci %>%
-  mutate(SET = recode(SET, "INDIDadd" = "INDID", "LWEDINDID" = "LWED", "SIMPINDID" = "SIMP"))
-length(lociKeep$SET) # still 221; success
-head(lociKeep)
-```
-
-Step 3: We now need to create lists of passing loci in Primer Pool 2 &
-Primer Pool 3. To do that, we first need to load in the file outlining
-how the pools were split (created by manually combining
-platePrimers_toRepool.csv & oPools_toReorder_142oligos.csv and adding
-primerPool column). Then we can create lists of the primers included in
-the three pools, where we should have: Pool 1: 442 primers (221 loci)
-Pool 2: 222 primers (111 loci) Pool 3: 220 primers (110 loci)
-
-```{r}
-# Load data & create primer pool 2 & 3 lists
 poolSplits <- read.csv('/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/primers/03_lociChoices/primerPool_splits.csv')
-View(primerPools)
-
-p2 <- poolSplits %>%
-  filter(primerPool == "2") %>%
-  select(bp3Index)
-length(p2$bp3Index) # 222; success
-
-p3 <- poolSplits %>%
-  filter(primerPool == 3) %>%
-  select(bp3Index)
-length(p3$bp3Index) # 220; success
-
-# Create lists for loci to keep in primer pools 2 & 3
-lociKeep_p1 <- lociKeep %>%
-  unite(locus, c("SET", "bp3_index..UNIQUE.")) %>%
-  pull() # turn into a vector
-head(lociKeep_p1)
-
-lociKeep_p2 <- lociKeep %>%
-  filter(bp3_index..UNIQUE. %in% p2$bp3Index) %>%
-  unite(locus, c("SET", "bp3_index..UNIQUE.")) %>%
-  pull() # turn into a vector
-head(lociKeep_p2)
-length(lociKeep_p2) # 111; success
-
-lociKeep_p3 <- lociKeep %>%
-  filter(bp3_index..UNIQUE. %in% p3$bp3Index) %>%
-  unite(locus, c("SET", "bp3_index..UNIQUE.")) %>%
-  pull() # turn into a vector
-head(lociKeep_p3)
-length(lociKeep_p3) # 110; success
+View(poolSplits)
 ```
 
-Step 4: Now we can match locusName in the original primer-probe file to
-lociKeep to create primer-probe files with loci that passed in each
-primer pool AND create separate files for each species.
-
-NOTE that there are no SIMP primers in Primer Pool 2.
-
+Create primer-probe file subsets
 ```{r}
 # Primer Pool 1
 pp_p1 <- pp_original_all %>%
-  filter(locusName %in% lociKeep_p1) %>%
-  unite(Locus, locusName, bp3Rank, sep = ".") # recombine columns to bring back in bp3 rank
-length(pp_p1$Locus) # 221; success
-View(pp_p1)
+  filter(bp3Index %in% poolSplits$bp3Index) %>%
+  unite(Locus, locusName, bp3Index, sep = "_") %>%
+  unite(Locus, Locus, bp3Rank, sep = ".") # 221; success
 
 pp_p1_LWED <- pp_p1 %>%
   filter(!str_detect(Locus, "SIMP"))
-View(pp_p1_LWED)
 
 pp_p1_SIMP <- pp_p1 %>%
   filter(!str_detect(Locus, "LWED"))
-View(pp_p1_SIMP)
 
 # Primer Pool 2
-pp_p2 <- pp_original_all %>%
-  filter(locusName %in% lociKeep_p2) %>%
-  unite(Locus, locusName, bp3Rank, sep = ".") # recombine columns to bring back in bp3 rank
-length(pp_p2$Locus) # 111; success
-View(pp_p2)
+pp_p2 <- pp_original_all %>% 
+  filter(bp3Index %in% poolSplits$bp3Index[poolSplits$primerPool == "2"]) %>%
+  filter(bp3Index %in% poolSplits$bp3Index) %>%
+  unite(Locus, locusName, bp3Index, sep = "_") %>%
+  unite(Locus, Locus, bp3Rank, sep = ".") # 111; success
 
 pp_p2_LWED <- pp_p2 %>%
   filter(!str_detect(Locus, "SIMP"))
-View(pp_p2_LWED)
 
 pp_p2_SIMP <- pp_p2 %>%
   filter(!str_detect(Locus, "LWED"))
-View(pp_p2_SIMP)
 
 # Primer Pool 3
-pp_p3 <- pp_original_all %>%
-  filter(locusName %in% lociKeep_p3) %>%
-  unite(Locus, locusName, bp3Rank, sep = ".") # recombine columns to bring back in bp3 rank
-length(pp_p3$Locus) # 110; success
-View(pp_p3)
+pp_p3 <- pp_original_all %>% 
+  filter(bp3Index %in% poolSplits$bp3Index[poolSplits$primerPool == "3"]) %>%
+  filter(bp3Index %in% poolSplits$bp3Index) %>%
+  unite(Locus, locusName, bp3Index, sep = "_") %>%
+  unite(Locus, Locus, bp3Rank, sep = ".") # 110; success
 
 pp_p3_LWED <- pp_p3 %>%
   filter(!str_detect(Locus, "SIMP"))
-View(pp_p3_LWED)
 
 pp_p3_SIMP <- pp_p3 %>%
   filter(!str_detect(Locus, "LWED"))
-View(pp_p3_SIMP)
-
-# Write files
-write.table(pp_p1, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-write.table(pp_p1_LWED, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-write.table(pp_p1_SIMP, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p1_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-
-write.table(pp_p2, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-write.table(pp_p2_LWED, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-write.table(pp_p2_SIMP, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p2_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-
-write.table(pp_p3, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-write.table(pp_p3_LWED, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
-write.table(pp_p3_SIMP, here("./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/p3_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
 ```
 
-# 2 Count reads for amplicons
+Export files
+```{r}
+write.table(pp_p1, here("./01_run2_fecalHairBlood/03_run2GTscore/p1_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+write.table(pp_p1_LWED, here("./01_run2_fecalHairBlood/03_run2GTscore/p1_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+write.table(pp_p1_SIMP, here("./01_run2_fecalHairBlood/03_run2GTscore/p1_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
 
-Once the files are created, we can proceed with the second step in the
-GTscore pipeline - counting amplicon reads. We'll be doing doing this
-for the full set of data (all samples, all loci), whose results will be
-used for genotyping, and the various species/primer-pool subsets of the
-data, whose results will be used for analyses of loci and sample
-performance.
+write.table(pp_p2, here("./01_run2_fecalHairBlood/03_run2GTscore/p2_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+write.table(pp_p2_LWED, here("./01_run2_fecalHairBlood/03_run2GTscore/p2_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+write.table(pp_p2_SIMP, here("./01_run2_fecalHairBlood/03_run2GTscore/p2_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+
+write.table(pp_p3, here("./01_run2_fecalHairBlood/03_run2GTscore/p3_combined_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+write.table(pp_p3_LWED, here("./01_run2_fecalHairBlood/03_run2GTscore/p3_LWED_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+write.table(pp_p3_SIMP, here("./01_run2_fecalHairBlood/03_run2GTscore/p3_SIMP_primerProbeFile.txt"), sep = "\t", row.names = F, quote = F)
+```
+
+# 5 Count reads for amplicons
+
+Once the files are created, we can proceed with the first step in the GTscore pipeline - counting amplicon reads. We'll be doing doing this for the full set of data (all samples, all loci) as well as the various species/primer-pool subsets of the data to allow for more accurate analyses of loci and sample performance:
 
 1.  Full set (all samples with all loci)
 2.  Primer Pool 1 - all samples
@@ -442,43 +331,27 @@ performance.
 9.  Primer Pool 3 - LWED samples
 10. Primer Pool 3 - SIMP samples
 
-The read counter is written in perl (AmpliconReadCounter.pl), but can be
-called from R. Running it does the following:
+## 5.1 Info on AmpliconReadCounter.pl
 
-1.  Identifies each unique sequence, then counts the number of times
-    each unique sequence occurs within an individual
+The read counter is written in perl (AmpliconReadCounter.pl), but can be called from R. Running it does the following:
 
-2.  Aligns each unique sequence with primer and probe; if the sequence
-    doesn't align, then it is excluded as an off-target sequence and
-    reports by individual and by locus are given.
+1.  Identifies each unique sequence, then counts the number of times each unique sequence occurs within an individual
 
--   Note: By default, all primers are trimmed to the length of the
-    shortest primer to increase speed. Optionally the full length primer
-    can be used for the primer but this may significantly increase run
-    timing depending on variation in primer lengths across loci.
+2.  Aligns each unique sequence with primer and probe; if the sequence doesn't align, then it is excluded as an off-target sequence and reports by individual and by locus are given.
 
-Input flags for this script are: \* --p a tab delimited file containing
-primer/probe information for each locus \* --files a text file
-containing a list of .fastq sequence files to count reads from.
+-   Note: By default, all primers are trimmed to the length of the shortest primer to increase speed. Optionally the full length primer can be used for the primer but this may significantly increase run timing depending on variation in primer lengths across loci.
 
-Optional flags: \* --prefix optional prefix for output file names \*
---inDir option to specify directory containing sequence data \*
---inputType fq or fastqgz (defaults to fastqgz) \* --useFullPrimer uses
-the full primer for counting reads rather than the trimmed primer \*
---alleleOrder order of alleles output in locusTable file. Options are
-original (matches primer-probe file order) or alphabetical (default) \*
---printMatched outputs matched reads for each individual \*
---printDiscarded outputs discarded reads for each individual
+Input flags for this script are: \* --p a tab delimited file containing primer/probe information for each locus \* --files a text file containing a list of .fastq sequence files to count reads from.
 
-#### Setting up directories and running AmpliconReadCounterl.pl
+Optional flags: \* --prefix optional prefix for output file names \* --inDir option to specify directory containing sequence data \* --inputType fq or fastqgz (defaults to fastqgz) \* --useFullPrimer uses the full primer for counting reads rather than the trimmed primer \* --alleleOrder order of alleles output in locusTable file. Options are original (matches primer-probe file order) or alphabetical (default) \* --printMatched outputs matched reads for each individual \* --printDiscarded outputs discarded reads for each individual
 
-To run from the command line, use: perl AmpliconReadCounter.pl -p
-primerProbeFile.txt --files sampleList.txt
+## 5.2 Run AmpliconReadCounterl.pl
+
+To run from the command line, use: perl AmpliconReadCounter.pl -p primerProbeFile.txt --files sampleList.txt
 
 To run from R, use:
 
 ```{r count reads for amplicons, eval=FALSE}
-setwd(here("./seqanalysis/01_run2_fecalHairBlood/03_run2GTscore"))
 # All samples, all loci
 system2("perl",
         args="AmpliconReadCounter.pl -p run2_primerProbeFile_original.txt --files run2_sampleFiles_original.txt --prefix fullSet_")
@@ -508,45 +381,31 @@ system2("perl",
         args="AmpliconReadCounter.pl -p p3_SIMP_primerProbeFile.txt --files p3_SIMP_sampleFiles.txt --prefix p3_SIMP_")
 ```
 
-AmpliconReadCounter.pl outputs a LocusTable file and an AlleleReads file
-for single-SNP and haplotype data, plus two summary files.
+AmpliconReadCounter.pl outputs a LocusTable file and an AlleleReads file for single-SNP and haplotype data, plus two summary files.
 
-The default names for these files are as follows, with \_LWED and \_SIMP
-appended to files associated with species-specific analyses:
+The default names for these files are as follows, with \_LWED and \_SIMP appended to files associated with species-specific analyses:
 
--   LocusTable_singleSNPs.txt - locus name, ploidy, and alleles for each
-    SNP
--   AlleleReads_singleSNPs.txt - counts for each SNP allele (rows are
-    loci, columns are individuals)
--   LocusTable_haplotypes.txt - same as above (doesn't matter for us
-    since we're only using single SNPs)
--   AlleleReads_haplotypes.txt - same as above (doesn't matter for us
-    since we're only using single SNPs)
--   GTscore_individualSummary.txt - counts by individual of total reads,
-    off-target reads, primer-only reads, and primer probe reads
--   GTscore_locusSummary.txt - counts by locus of primer reads and
-    primer probe reads
+-   LocusTable_singleSNPs.txt - locus name, ploidy, and alleles for each SNP
+-   AlleleReads_singleSNPs.txt - counts for each SNP allele (rows are loci, columns are individuals)
+-   LocusTable_haplotypes.txt - same as above (doesn't matter for us since we're only using single SNPs)
+-   AlleleReads_haplotypes.txt - same as above (doesn't matter for us since we're only using single SNPs)
+-   GTscore_individualSummary.txt - counts by individual of total reads, off-target reads, primer-only reads, and primer probe reads
+-   GTscore_locusSummary.txt - counts by locus of primer reads and primer probe reads
 
-# 3 Genotyping
+# 6 Genotyping
 
-Genotyping is accomplished using the polyGen function. The genotyping
-algorithm is described in McKinney et al. 2018 and is a maximum
-likelihood algorithm capable of genotyping any number of alleles and
-ploidy per locus. This allows genoyping of single SNPs as well as
-microhaplotypes, and loci with elevated ploidy.
+Genotyping is accomplished using the polyGen function. The genotyping algorithm is described in McKinney et al. 2018 and is a maximum likelihood algorithm capable of genotyping any number of alleles and ploidy per locus. This allows genoyping of single SNPs as well as microhaplotypes, and loci with elevated ploidy.
 
-Two arguments are required for polyGen, the locusTable and alleleReads
-files output by AmpliconReadCounter.
+Two arguments are required for polyGen, the locusTable and alleleReads files output by AmpliconReadCounter.
 
 Optional arguments for polyGen are:
 
--   p_thresh - threshold p-value for likelihood ratio test (default
-    0.05)
+-   p_thresh - threshold p-value for likelihood ratio test (default 0.05)
 -   epsilon - error rate for genotyping model (default 0.01)
 
 **NOTE** that only primer probe reads are used in genotyping!
 
-## 3.1 Genotyping: Full set
+## 6.1 Genotyping: Full set
 
 ```{r}
 #load locus table and allele reads file
@@ -566,7 +425,7 @@ polyGenResults_singleSNP[1:5,1:5]
 write.table(polyGenResults_singleSNP,"fullSet_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
-## 3.2 Genotyping: Pool 1
+## 6.2 Genotyping: Pool 1
 
 ```{r Genotyping}
 #load locus table and allele reads file
@@ -604,7 +463,7 @@ write.table(p1_LWED_polyGenResults_singleSNP,"p1_LWED_polyGenResults_singleSNP.t
 write.table(p1_SIMP_polyGenResults_singleSNP,"p1_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
-## 3.3 Genotyping: Pool 2
+## 6.3 Genotyping: Pool 2
 
 ```{r Genotyping}
 #load locus table and allele reads file
@@ -642,7 +501,7 @@ write.table(p2_LWED_polyGenResults_singleSNP,"p2_LWED_polyGenResults_singleSNP.t
 write.table(p2_SIMP_polyGenResults_singleSNP,"p2_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
-## 3.4 Genotyping: Pool 3
+## 6.4 Genotyping: Pool 3
 
 ```{r Genotyping}
 #load locus table and allele reads file
@@ -680,24 +539,15 @@ write.table(p3_LWED_polyGenResults_singleSNP,"p3_LWED_polyGenResults_singleSNP.t
 write.table(p3_SIMP_polyGenResults_singleSNP,"p3_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
-# 4 Data summaries
+# 7 Data summaries
 
-## 4.1 Locus summaries
+## 7.1 Locus summaries
 
-### 4.1.1 Summarize single SNP results for loci
+### 7.1.1 Summarize single SNP results for loci
 
-The summarizeGTscore command generates summary data for each locus in
-table form. The summary data includes genotype rate, average read depth,
-minor (least frequent) allele frequency, major (most frequent) allele
-frequency, alleles per locus, and frequency per allele. Minor allele
-frequency is a common metric for filtering loci that are likely to be
-uninformative for population genetics; however, loci with haplotype
-alleles may have an allele with very low frequency but still have
-appreciable frequency at multiple other alleles. Because of this, the
-major allele frequency is included in output, as well as the observed
-frequencies for all alleles at a given locus.
+The summarizeGTscore command generates summary data for each locus in table form. The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele. Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
 
-#### 4.1.1.1 Single SNP summaries: Pool 1
+#### 7.1.1.1 Single SNP summaries: Pool 1
 
 ```{r}
 #summarize single SNP results
@@ -717,7 +567,7 @@ write.table(p1_LWED_singleSNP_summary,"p1_LWED_singleSNP_summary.txt",quote=FALS
 write.table(p1_SIMP_singleSNP_summary,"p1_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
 ```
 
-#### 4.1.1.2 Single SNP summaries: Pool 2
+#### 7.1.1.2 Single SNP summaries: Pool 2
 
 ```{r}
 #summarize single SNP results
@@ -737,7 +587,7 @@ write.table(p2_LWED_singleSNP_summary,"p2_LWED_singleSNP_summary.txt",quote=FALS
 write.table(p2_SIMP_singleSNP_summary,"p2_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
 ```
 
-#### 4.1.1.3 Single SNP summaries: Pool 3
+#### 7.1.1.3 Single SNP summaries: Pool 3
 
 ```{r}
 #summarize single SNP results
@@ -757,9 +607,9 @@ write.table(p3_LWED_singleSNP_summary,"p3_LWED_singleSNP_summary.txt",quote=FALS
 write.table(p3_SIMP_singleSNP_summary,"p3_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
 ```
 
-### 4.1.2 Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
+### 7.1.2 Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
 
-#### 4.1.2.1 Primer Pool 1
+#### 7.1.2.1 Primer Pool 1
 
 ```{r}
 # Load locus summaries
@@ -798,7 +648,7 @@ p1_ls_ss <- merge(p1_ls_recombine, p1_ss_recombine, by.x = "Locus", by.y = "Locu
 View(p1_ls_ss)
 ```
 
-#### 4.1.2.2 Primer Pool 2
+#### 7.1.2.2 Primer Pool 2
 
 ```{r}
 # Load locus summaries
@@ -837,7 +687,7 @@ p2_ls_ss <- merge(p2_ls_recombine, p2_ss_recombine, by.x = "Locus", by.y = "Locu
 View(p2_ls_ss)
 ```
 
-#### 4.1.2.3 Primer Pool 3
+#### 7.1.2.3 Primer Pool 3
 
 ```{r}
 # Load locus summaries
@@ -876,7 +726,7 @@ p3_ls_ss <- merge(p3_ls_recombine, p3_ss_recombine, by.x = "Locus", by.y = "Locu
 View(p3_ls_ss)
 ```
 
-#### 4.1.2.4 Create master locus summary file
+#### 7.1.2.4 Create master locus summary file
 
 ```{r}
 p123_ls_ss <- rbind(p1_ls_ss, p2_ls_ss, p3_ls_ss)
@@ -886,7 +736,7 @@ View(p123_ls_ss)
 write.csv(p123_ls_ss, "./summaryFiles/p123_master_locusSummary.csv", row.names = F)
 ```
 
-### 4.1.3 Generate plots for single SNP results
+### 7.1.3 Generate plots for single SNP results
 
 NOTE - plots below are for full dataset only (not LWED and SIMP subsets)
 
@@ -1089,9 +939,7 @@ ggplot()+geom_point(data=p123_master_sampleSummary,aes(x=Primer.Probe.Reads,y=Ge
   geom_hline(yintercept=0.9,lty="dashed")
 ```
 
-Samples with unusually high heterozygosity may be contaminated or have
-elevated ploidy. [[Given chimerism, however, this isn't super helpful
-for blood samples]]
+Samples with unusually high heterozygosity may be contaminated or have elevated ploidy. [[Given chimerism, however, this isn't super helpful for blood samples]]
 
 plot heterozygosity vs primer probe reads
 
@@ -1106,13 +954,10 @@ ggplot()+geom_point(data=p123_master_sampleSummary,aes(x=Primer.Probe.Reads,y=He
 
 #### Identify duplicate samples
 
-The IDduplicateSamples function does all pairwise comparisons of samples
-and outputs two metrics:
+The IDduplicateSamples function does all pairwise comparisons of samples and outputs two metrics:
 
--   proportionCommon - The proportion of loci that had genotypes for
-    both samples in a pair
--   proportionMatch - The proportion of loci that have identical
-    genotypes in the sample pair
+-   proportionCommon - The proportion of loci that had genotypes for both samples in a pair
+-   proportionMatch - The proportion of loci that have identical genotypes in the sample pair
 
 ```{r identify duplicate samples,eval=FALSE}
 #convert missing genotypes "0" to NA
@@ -1138,12 +983,7 @@ polyGenResults_dupTest
 
 Plot results of IDduplicateSamples
 
-McKinney says that he generally sets thresholds of proportionMatch \>
-0.8 and proportionCommon \> 0.75 to identify duplicate sample pairs, but
-the appropriate thresholds will depend on the marker set being used and
-the relatedness among samples. In this plot, he notes that it is
-possible that individuals at the lower range of identical genotypes
-(\~0.85) are relatives rather than duplicated samples.
+McKinney says that he generally sets thresholds of proportionMatch \> 0.8 and proportionCommon \> 0.75 to identify duplicate sample pairs, but the appropriate thresholds will depend on the marker set being used and the relatedness among samples. In this plot, he notes that it is possible that individuals at the lower range of identical genotypes (\~0.85) are relatives rather than duplicated samples.
 
 ```{r plot IDduplicateSamples results}
 #potential duplicates are proportionMatch>0.8 and proportionCommon>0.75
@@ -1167,8 +1007,7 @@ polyGenResults_dupTest %>% filter(proportionMatch>=matchThresh,proportionCommon>
 
 #### Identify contaminated samples
 
-Contaminated samples can be identified through elevated heterozygosity.
-NOTE- this isn't going to be helpful for us given the blood chimerism.
+Contaminated samples can be identified through elevated heterozygosity. NOTE- this isn't going to be helpful for us given the blood chimerism.
 
 ```{r identify contaminated samples (heterozygosity)}
 #plot heterozygosity vs genotype rate per sample
@@ -1188,9 +1027,7 @@ contaminatedSample<-GTscore_individualSummary %>% filter(Heterozygosity>0.30) %>
 contaminatedSample
 ```
 
-Contaminated samples can also be identified by an elevated contamination
-score. In this example, samples with a contamination score \> 0.3 are
-known to be contaminated.
+Contaminated samples can also be identified by an elevated contamination score. In this example, samples with a contamination score \> 0.3 are known to be contaminated.
 
 ```{r }
 #plot histogram of contamination score
@@ -1220,8 +1057,7 @@ library(knitr)
 
 #### Identify poor quality loci to remove
 
-Flag SNPs with \< 50% genotype rate as candidates for removal. Will need
-to do this with LWED and SIMP samples separately, then recombine.
+Flag SNPs with \< 50% genotype rate as candidates for removal. Will need to do this with LWED and SIMP samples separately, then recombine.
 
 ```{r}
 poorQualitySNPs <- p1_ls_ss %>% filter(GenotypeRate<0.5) %>% mutate(Locus=as.character(Locus)) %>% pull(Locus)
@@ -1249,8 +1085,7 @@ write.csv(pq_both2, "./summaryFiles/poorQualitySNPs_combined.csv", row.names = F
 
 #### plots
 
-Ratio & Scatter Plots can show evidence of systemic issues in read
-counting (off-target reads, biases) or elevated ploidy
+Ratio & Scatter Plots can show evidence of systemic issues in read counting (off-target reads, biases) or elevated ploidy
 
 Plot genotype ratio & scatterplots for each locus
 
@@ -1261,21 +1096,14 @@ plotGenotypes(singleSNP_locusTable, singleSNP_alleleReads, polyGenResults_single
 plotGenotypes(singleSNP_locusTable, singleSNP_alleleReads, polyGenResults_singleSNP, type='scatter', savePlot="Y", saveDir="scatterPlots_loci")
 ```
 
-Plot histogram of contamination score for loci. An arbitrary score of
-0.3 was set to identify problematic loci, but a lower or higher
-threshold may be more suitable. Visual examination of loci with elevated
-scores is recommended. In cases where there are very few heterozygous
-individuals, a high contamination score may be not truly reflect locus
-performance..
+Plot histogram of contamination score for loci. An arbitrary score of 0.3 was set to identify problematic loci, but a lower or higher threshold may be more suitable. Visual examination of loci with elevated scores is recommended. In cases where there are very few heterozygous individuals, a high contamination score may be not truly reflect locus performance..
 
 ```{r, warning=FALSE}
 #loci with high contamination scores should have scatterplots examined to ensure genotypes look accurate
 singleSNP_summary %>% ggplot(data=.) + geom_histogram(aes(x=conScore),binwidth=0.01)+geom_vline(xintercept=0.3)
 ```
 
-Plot contamination score vs minor allele frequency. Loci with both a
-high contamination score and high minor allele frequency are likely to
-be problematic.
+Plot contamination score vs minor allele frequency. Loci with both a high contamination score and high minor allele frequency are likely to be problematic.
 
 ```{r, warning=FALSE}
 singleSNP_summary %>% ggplot(data=.) + geom_point(aes(x=conScore,y=minAF))
@@ -1287,19 +1115,11 @@ Get list of loci with high contamination score
 singleSNP_summary %>% filter(conScore>0.3)
 ```
 
-Look at scatterplots for loci with high contamination score. See orignal
-GTscore README.Rmd for examples of a paralog, locus w/likely off-target
-sequence, locus w/high contamination score but may be fine.
+Look at scatterplots for loci with high contamination score. See orignal GTscore README.Rmd for examples of a paralog, locus w/likely off-target sequence, locus w/high contamination score but may be fine.
 
 # 6 Export genotype files
 
-When exporting files, you can either export the full results and remove
-any poor quality samples or loci afterwards, or you can use whitelists
-or blacklists to filter during export. Both the exportGenepop and
-exportRubias functions have the following options: sampleWhitelist,
-locusWhitelist, sampleBlacklist, locusBlacklist. The whitelists are a
-list of samples or loci to retain, the blacklists are lists of samples
-or loci to discard.
+When exporting files, you can either export the full results and remove any poor quality samples or loci afterwards, or you can use whitelists or blacklists to filter during export. Both the exportGenepop and exportRubias functions have the following options: sampleWhitelist, locusWhitelist, sampleBlacklist, locusBlacklist. The whitelists are a list of samples or loci to retain, the blacklists are lists of samples or loci to discard.
 
 #### Genepop format
 
@@ -1321,13 +1141,9 @@ exportGenepop(polyGenResults_singleSNP,singleSNP_locusTable,
 
 #### Rubias format
 
-Data output for Rubias should have metadata associated with each sample
-that specifies the sample type, mixture if a mixture sample, reference
-if a baseline sample, the reporting group, the sample collection, and
-individual name.
+Data output for Rubias should have metadata associated with each sample that specifies the sample type, mixture if a mixture sample, reference if a baseline sample, the reporting group, the sample collection, and individual name.
 
-Sample metadata columns should have the following names: sample_type,
-repunit, collection, indiv
+Sample metadata columns should have the following names: sample_type, repunit, collection, indiv
 
 metadata can be created here or loaded from file
 
@@ -1351,8 +1167,7 @@ exportRubias(polyGenResults_singleSNP_LWED,singleSNP_locusTable_LWED,sampleMetaD
 exportRubias(polyGenResults_singleSNP_SIMP,singleSNP_locusTable_SIMP,sampleMetaData,filename="polyGenResults_singleSNP_rubias_SIMP.txt")
 ```
 
-export Rubias format with poor quality loci and contaminated sample
-removed
+export Rubias format with poor quality loci and contaminated sample removed
 
 ```{r}
 exportRubias(polyGenResults_singleSNP,singleSNP_locusTable,sampleMetaData,
@@ -1368,38 +1183,19 @@ exportRubias(polyGenResults_singleSNP_SIMP,singleSNP_locusTable_SIMP,sampleMetaD
 
 # 7 Locus diagnostics
 
-Diagnostic functions are provided to help in identifying patterns of
-sequence variation for loci. This can assist in identifying SNPs that
-were not accounted for in the initial probe design and in adjusting the
-in-silico probes to exclude off-target sequence from genotyping.
+Diagnostic functions are provided to help in identifying patterns of sequence variation for loci. This can assist in identifying SNPs that were not accounted for in the initial probe design and in adjusting the in-silico probes to exclude off-target sequence from genotyping.
 
-There are two approaches used by GTscore: First, plotting the number of
-nucleotide mismatches by position in the sequence data relative to the
-reference sequence for each locus, and second, performing sequence
-alignments using the program MSA (Bodenhofer et al. 2015). Plotting the
-mismatches by position is fast and easy to interpret except in the case
-of indels. The MSA alignments take longer to complete but facilitate the
-visualization of indels.
+There are two approaches used by GTscore: First, plotting the number of nucleotide mismatches by position in the sequence data relative to the reference sequence for each locus, and second, performing sequence alignments using the program MSA (Bodenhofer et al. 2015). Plotting the mismatches by position is fast and easy to interpret except in the case of indels. The MSA alignments take longer to complete but facilitate the visualization of indels.
 
-The first step for both methods is to get the sequences that aligned to
-each locus, this can be done based on primer alignments or primer-probe
-alignments using the script matchReads.pl.
+The first step for both methods is to get the sequences that aligned to each locus, this can be done based on primer alignments or primer-probe alignments using the script matchReads.pl.
 
 ### Sequence alignment to each locus (Perl)
 
-Input flags for this script are: \* --p a tab delimited file containing
-primer/probe information for each locus \* --files a text file
-containing a list of .fastq sequence files to count reads from \*
---matchType the match type chosen for retaining sequences for each
-locus. Options are "primer" to retain sequences that match the primer
-for a locus or "primerProbe" to retain sequences that match both the
-primer and probe. primerProbe is the default if no option is specified.
+Input flags for this script are: \* --p a tab delimited file containing primer/probe information for each locus \* --files a text file containing a list of .fastq sequence files to count reads from \* --matchType the match type chosen for retaining sequences for each locus. Options are "primer" to retain sequences that match the primer for a locus or "primerProbe" to retain sequences that match both the primer and probe. primerProbe is the default if no option is specified.
 
 Optional flags: \* --prefix optional prefix for output file names
 
-You can run matchReads.pl from the command line using the following
-example: perl matchReads.pl -p primerProbeFile.txt --files
-sampleFiles.txt --matchType primerProbe [--prefix]
+You can run matchReads.pl from the command line using the following example: perl matchReads.pl -p primerProbeFile.txt --files sampleFiles.txt --matchType primerProbe [--prefix]
 
 Alternatively, you can also run it through R:
 
@@ -1421,15 +1217,11 @@ system2("perl",
         args="matchReads.pl -p primerProbeFile.txt --files sampleFiles_SIMP.txt --matchType primerProbe --prefix SIMP_")
 ```
 
-The default output file names are matchReads_primerAligned.txt or
-matchReads_primerProbeAligned.txt depending on which match type was
-chosen.
+The default output file names are matchReads_primerAligned.txt or matchReads_primerProbeAligned.txt depending on which match type was chosen.
 
 ### Create reference amplicon sequences file
 
-To conduct locus diagnostics, we need both a text file and fasta file of
-reference amplicon sequences. The sequences are already in Sam's
-pos_amplicon.csv file, we just need to get it in the right format:
+To conduct locus diagnostics, we need both a text file and fasta file of reference amplicon sequences. The sequences are already in Sam's pos_amplicon.csv file, we just need to get it in the right format:
 
 Text file first:
 
@@ -1497,22 +1289,7 @@ dat2fasta(amplicon_txt_simp, outfile = "ampliconRefSeqs_SIMP.fasta")
 
 ### MSA alignment (GTscore.R)
 
-MSA alignment of the matched reads can be done directly on the output
-from matchReads.pl using the alignMatchedSeqs command in GTscore. Probe
-sequence is incorporated into the alignment to visualize how probes may
-be affecting read counting, and reference sequence can optionally be
-included to facilitate comparison of the observed sequence with the
-target locus. The probe sequence is obtained from the primer-probe file
-originally used by AmpliconReadCounter.pl; the reference sequence file
-has a two column format where the first column is the locus name and the
-second column is the reference sequence for the locus amplicon. MSA will
-take a very long time to run if too many sequences are included for
-alignment so a minimum read threshold (minReads) is included as an
-option in the alignment command (suggest begin with minReads=20). In
-addition, a maximum of 100 unique sequences (ranked by number of reads)
-will be aligned. The maximum number of reads allowed for alignment can
-be changed using the maxAlignedSeqs option. Be sure the required perl
-package has been installed (Excel-Writer-XLSX).
+MSA alignment of the matched reads can be done directly on the output from matchReads.pl using the alignMatchedSeqs command in GTscore. Probe sequence is incorporated into the alignment to visualize how probes may be affecting read counting, and reference sequence can optionally be included to facilitate comparison of the observed sequence with the target locus. The probe sequence is obtained from the primer-probe file originally used by AmpliconReadCounter.pl; the reference sequence file has a two column format where the first column is the locus name and the second column is the reference sequence for the locus amplicon. MSA will take a very long time to run if too many sequences are included for alignment so a minimum read threshold (minReads) is included as an option in the alignment command (suggest begin with minReads=20). In addition, a maximum of 100 unique sequences (ranked by number of reads) will be aligned. The maximum number of reads allowed for alignment can be changed using the maxAlignedSeqs option. Be sure the required perl package has been installed (Excel-Writer-XLSX).
 
 ```{r MSA alignment}
 #load reference sequences in table format
@@ -1553,35 +1330,19 @@ primerProbeMatchedReads_SIMP<-read.delim("SIMP_matchedReads_primerProbeAligned.t
 alignMatchedSeqs(referenceSeqs=referenceSeqs_SIMP, primerProbes=primerProbes_SIMP, matchedReads=primerProbeMatchedReads_SIMP,minReads=20, maxAlignedSeqs=100,type="primerProbe",saveDir="MSA_primerProbeMatched_SIMP")
 ```
 
-Excel files are output for each locus within the directory specified by
-savDir. The first row is a consensus sequence based on the sequence
-alignments. This is followed by the probes, reference sequence if
-included, and then the sequence alignments.
+Excel files are output for each locus within the directory specified by savDir. The first row is a consensus sequence based on the sequence alignments. This is followed by the probes, reference sequence if included, and then the sequence alignments.
 
 ### Plotting mismatches by position (Perl and GTscore.R)
 
 #### Calculate sequence mismatches by position (Perl)
 
-Plotting the number of mismatches by position requires first comparing
-each matched sequence against the reference sequence and summing the
-number of mismatches for each nucleotide position. This is done with the
-perl script seqMismatchPositions.pl.
+Plotting the number of mismatches by position requires first comparing each matched sequence against the reference sequence and summing the number of mismatches for each nucleotide position. This is done with the perl script seqMismatchPositions.pl.
 
-Input flags for this script are \* --amplicon a fasta file containing
-the reference amplicon sequence for each locus \* --matchedSeqs a tab
-delimited file containing sequences that matched each locus. This file
-is generated by matchReads.pl \* --matchType the match type chosen for
-retaining sequences for each locus. Options are "primer" to retain
-sequences that match the primer for a locus or "primerProbe" to retain
-sequences that match both the primer and probe. primerProbe is the
-default if no option is specified.
+Input flags for this script are \* --amplicon a fasta file containing the reference amplicon sequence for each locus \* --matchedSeqs a tab delimited file containing sequences that matched each locus. This file is generated by matchReads.pl \* --matchType the match type chosen for retaining sequences for each locus. Options are "primer" to retain sequences that match the primer for a locus or "primerProbe" to retain sequences that match both the primer and probe. primerProbe is the default if no option is specified.
 
 Optional flags \* --prefix optional prefix for output file names
 
-You can run matchReads.pl from the command line using the following
-example: perl seqMismatchPositions.pl --amplicon ampliconRefSeqs.fasta
---matchedSeqs matchedReads_primerAligned.txt --matchType primer
-[--prefix]
+You can run matchReads.pl from the command line using the following example: perl seqMismatchPositions.pl --amplicon ampliconRefSeqs.fasta --matchedSeqs matchedReads_primerAligned.txt --matchType primer [--prefix]
 
 Alternatively, you can also run it through R:
 
@@ -1605,11 +1366,7 @@ system2("perl",
         args="seqMismatchPositions.pl --amplicon ampliconRefSeqs_SIMP.fasta --matchedSeqs SIMP_matchedReads_primerProbeAligned.txt --matchType primerProbe --prefix SIMP_")
 ```
 
-The default output file names are mismatchPositions_primer.txt or
-mismatchPositions_primerProbe.txt depending on which match type was
-chosen. The output files will be used by the summarizeMismatches
-function in GTscore to generate plots of mismatches by position for each
-locus.
+The default output file names are mismatchPositions_primer.txt or mismatchPositions_primerProbe.txt depending on which match type was chosen. The output files will be used by the summarizeMismatches function in GTscore to generate plots of mismatches by position for each locus.
 
 #### Plot of sequence mismatches by position (GTscore.R)
 
