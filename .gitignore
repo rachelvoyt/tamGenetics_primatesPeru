@@ -9,3 +9,5 @@
 ./01_run2_fecalHairBlood/02_run2Interleaved/
 ./01_run2_fecalHairBlood/archived/
 *.fastq
+*.fastqc.html
+*.fastqc.zip
