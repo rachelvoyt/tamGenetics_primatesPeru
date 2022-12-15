@@ -1,0 +1,218 @@
+---
+title: "tamRun3_genoAnalyses"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+# 1 Overview
+
+This pipeline is for the analysis of genotypes acquired via
+GTscorePipeline_tamRun3.Rmd, including comparisons to metadata and
+investigation of mismatches.
+
+# 2 Data
+
+Genotypes and metadata are below. Note that genotypes were only called
+for loci with at least 10x coverage.
+
+```{r}
+# Genotypes
+genos_fullSet <- read.table("./../03_run3GTscore/fullSet_polyGenResults_singleSNP.txt", header = T)
+
+# Metadata
+md <- read.csv("./../03_run3GTscore/tamRun3_metadata.csv") %>%
+  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
+  unite(pcr1, pcr1Plate, pcr1Row, sep = "-", remove = T) %>%
+  unite(pcr1, pcr1, pcr1Col, sep = "", remove = T)
+```
+
+# 3 Species assignments
+
+For all samples, including chimeric blood samples, we should expect 100%
+congruence with metadata.
+
+Things to keep in mind:
+
+-   all SPECIESID loci are in primer pool 2
+
+## 3.1 Assign species to genotypes
+
+Species key:
+
+```{r}
+speciesKey <- read.csv("speciesSNP_key_14Dec2022.csv")
+```
+
+Species assignments:
+
+```{r}
+genos_species <- genos_fullSet %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SPECIES")) %>%
+  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!Locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  left_join(speciesKey, by = c("Locus", "genotype")) %>%
+  mutate(species = coalesce(species, genotype)) %>%
+  select(c(Locus, sampleID, species)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = species) %>%
+  column_to_rownames("Locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalGenos_sp = (rowSums(. == "LWED") + rowSums(. == "SIMP"))) %>%
+  mutate(propGenos_sp = (totalGenos_sp/12)) %>%
+  mutate(propLWED = (rowSums(. == "LWED")/totalGenos_sp)) %>%
+  mutate(propSIMP = (rowSums(. == "SIMP")/totalGenos_sp)) %>%
+  mutate(propMismatch_species = (1 - abs(propLWED - propSIMP))) %>%
+  mutate(speciesAssigned = ifelse(propLWED == 1, "LWED", ifelse(propSIMP == 1, "SIMP", NA))) %>%
+  rownames_to_column("sampleID") %>%
+  relocate(c(speciesAssigned, totalGenos_sp, propMismatch_species, propLWED, propSIMP, propGenos_sp), .after = sampleID)
+```
+
+## 3.2 Metadata comparison
+
+Metadata comparisons show that we have 41 mismatches total; 8 hair
+samples, 1 PCR1 (-), 1 XTN (-), and 31 blood samples. Note that the
+negative controls shouldn't have any genotypes at all; these are part of
+a separate troubleshooting analysis.
+
+We'll proceed to SEXID analyses before doing more investigating into
+species mismatches.
+
+```{r}
+# Check (mis)matches
+genos_species_md <- md %>%
+  select(c(sampleID, species, sampleType)) %>%
+  merge(., genos_species, by = "sampleID") %>%
+  mutate(mdMatch_sp = ifelse(species == speciesAssigned,"TRUE", "FALSE")) %>%
+  relocate(mdMatch_sp, .after = sampleID)
+
+# Extract samples with mismatches
+genos_species_mismatch <- genos_species_md %>%
+  filter(mdMatch_sp == "FALSE")
+```
+
+# 4 Sex assignments
+
+Things to keep in mind: \* We have 12 SEXID total, with 4 SIMP-specific
+and 2 LWED-specific
+
+-   7 SEXID loci are in primer pool 2:
+    -   197 SIMP
+    -   198 SIMP
+    -   200
+    -   203 SIMP
+    -   218 SIMP
+    -   219
+    -   222
+-   5 SEXID loci are in primer pool 3:
+    -   195 LWED
+    -   205
+    -   208 LWED
+    -   209
+    -   215
+
+# 4.1 Assign sex to genotypes
+
+Sex key:
+
+```{r}
+sexKey <- read.csv("sexSNP_key_8Dec2022.csv") %>%
+  na.omit() %>%
+  unique()
+```
+
+Sex assignments:
+
+```{r}
+genos_sex <- genos_fullSet %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SEXID")) %>%
+  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!Locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  left_join(sexKey, by = c("Locus", "genotype")) %>%
+  mutate(sex = coalesce(sex, genotype)) %>%
+  select(c(Locus, sampleID, sex)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = sex) %>%
+  column_to_rownames("Locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalGenos_sex = (rowSums(. == "F") + rowSums(. == "M"))) %>%
+  mutate(propGenos_sex = (totalGenos_sex/12)) %>%
+  mutate(propF = (rowSums(. == "F")/totalGenos_sex)) %>%
+  mutate(propM = (rowSums(. == "M")/totalGenos_sex)) %>%
+  mutate(propMismatch_sex = (1 - abs(propF - propM))) %>%
+  mutate(sexAssigned = ifelse(propF == 1, "F", ifelse(propM == 1, "M", NA))) %>%
+  rownames_to_column("sampleID") %>%
+  relocate(c(sexAssigned, totalGenos_sex, propMismatch_sex, propF, propM, propGenos_sex), .after = sampleID) %>%
+  relocate(c(SEXID_SIMP_197, SEXID_SIMP_198, SEXID_200, SEXID_SIMP_203, SEXID_SIMP_218, SEXID_219, SEXID_222), .after = propGenos_sex)
+```
+
+# 4.2 Metadata comparisons
+
+Here we're pulling sex assignment mismatches among hair samples only,
+since chimerism in blood is likely to result in mismatches if the
+individual is part of a F/M twin pair.
+
+Among hair samples, we have 9 mismatches total. Some things to note:
+
+-   5 of these only have one genotype called out of 12
+-   for those with more than 1 SEXID genotype called, all sex
+    assignments were in 100% agreement
+
+```{r}
+# Check (mis)matches
+genos_sex_md <- md %>%
+  select(c(sampleID, sex, sampleType)) %>%
+  merge(., genos_sex, by = "sampleID") %>%
+  mutate(mdMatch_sex = ifelse(sex == sexAssigned,"TRUE", "FALSE")) %>%
+  relocate(mdMatch_sex, .after = sampleID)
+
+# Extract samples with mismatches - hair samples only for now
+genos_sex_mismatch <- genos_sex_md %>%
+  filter(mdMatch_sex == "FALSE") %>%
+  filter(sampleType == "hair")
+```
+
+# 5 Investigating mismatches
+
+First let's make a dataframe combining samples with mismatched species and/or sex assignments:
+
+```{r}
+# Combine samples with species and/or sex mismatches
+speciesSex_mismatches <- merge(genos_species_md, genos_sex_md, by = c("sampleID", "sampleType")) %>%
+  relocate(c(mdMatch_sp, mdMatch_sex), .after = sampleID) %>%
+  filter(if_any(starts_with("mdMatch"), ~ . == "FALSE"))
+```
+
+## 5.1 INDID loci
+
+For samples with species mismatches, do we get informative genotypes for species-specific INDID loci?
+
+```{r}
+genos_fullSet %>%
+  rownames_to_column("sampleID") %>%
+  filter(s)
+```
+
