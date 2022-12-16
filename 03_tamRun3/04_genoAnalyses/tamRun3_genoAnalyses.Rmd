@@ -27,18 +27,25 @@ investigation of mismatches.
 Genotypes and metadata are below. Note that genotypes were only called
 for loci with at least 10x coverage.
 
+Genotypes from tamRun3
 ```{r}
-# Genotypes
 genos_fullSet <- read.table("./../03_run3GTscore/fullSet_polyGenResults_singleSNP.txt", header = T)
+```
 
-# Metadata
-md <- read.csv("./../03_run3GTscore/tamRun3_metadata.csv") %>%
+Metadata for tamRun3; adding columns for whether samples were also included in optimization run (tamRun1) and/or tamRun2
+
+```{r}
+md_tamRun1 <- read.csv("./../../00_tamRun1_optimization/metadata_run1.csv")
+md_tamRun2 <- read.csv("./../../01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv")
+
+md_tamRun3 <- read.csv("./../03_run3GTscore/tamRun3_metadata.csv") %>%
   mutate(species = str_replace(species, "SFUS", "LWED")) %>%
   mutate(sampleID = gsub("_","\\.", sampleID)) %>%
   mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
   unite(pcr1, pcr1Plate, pcr1Row, sep = "-", remove = T) %>%
   unite(pcr1, pcr1, pcr1Col, sep = "", remove = T)
 ```
+
 
 # 3 Species assignments
 
@@ -197,22 +204,63 @@ genos_sex_mismatch <- genos_sex_md %>%
 
 # 5 Investigating mismatches
 
-First let's make a dataframe combining samples with mismatched species and/or sex assignments:
+First let's make a dataframe combining samples with mismatched species
+and/or sex assignments:
 
 ```{r}
 # Combine samples with species and/or sex mismatches
 speciesSex_mismatches <- merge(genos_species_md, genos_sex_md, by = c("sampleID", "sampleType")) %>%
   relocate(c(mdMatch_sp, mdMatch_sex), .after = sampleID) %>%
   filter(if_any(starts_with("mdMatch"), ~ . == "FALSE"))
+
+speciesSex_mismatches_hair <- speciesSex_mismatches %>%
+  filter(sampleType == "hair")
 ```
 
-## 5.1 INDID loci
+## 5.1 Split primer pools
 
-For samples with species mismatches, do we get informative genotypes for species-specific INDID loci?
+In primer pool 2, we have:
+
+-   all SPECIESID loci
+-   6 LWED-specific loci
+-   no SIMP-specific loci
+
+In primer pool 3, we have:
+
+-   no SPECIESID loci
+-   26 LWED-specific loci
+-   all SIMP-specific loci
+
+For hair samples with mismatches, let's take a closer look at the genotypes from loci in primer pool 2 vs. primer pool 3
 
 ```{r}
-genos_fullSet %>%
-  rownames_to_column("sampleID") %>%
-  filter(s)
-```
+pp2 <- read.table("p2_combined_primerProbeFile.txt", header = T) %>%
+  mutate(Locus = sub('[.][^.]+$', '', Locus)) %>%
+  mutate(primerPool = "pool2") %>%
+  select(c(Locus, primerPool))
+pp3 <- read.table("p3_combined_primerProbeFile.txt", header = T) %>%
+  mutate(Locus = sub('[.][^.]+$', '', Locus)) %>%
+  mutate(primerPool = "pool3") %>%
+  select(c(Locus, primerPool))
+splitPools <- rbind(pp2, pp3) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_195', 'SEXID_LWED_195')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_197', 'SEXID_SIMP_197')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_198', 'SEXID_SIMP_198')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_203', 'SEXID_SIMP_203')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_208', 'SEXID_LWED_208')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_211', 'SEXID_LWED_211')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_218', 'SEXID_SIMP_218'))
 
+genos_mismatches_hair <- genos_fullSet %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  filter(sampleID %in% speciesSex_mismatches_hair$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Locus") %>%
+  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
+  merge(., splitPools, by = "Locus") %>%
+  relocate(primerPool, .after = "Locus")
+```
