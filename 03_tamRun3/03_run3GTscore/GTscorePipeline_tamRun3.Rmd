@@ -1,5 +1,5 @@
 ---
-title: "GTscorePipeline_laLab_run1"
+title: "GTscorePipeline_tamRun3"
 output: html_document
 date: "2022-11-20"
 editor_options: 
@@ -18,13 +18,13 @@ knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
 
 ## 1.1 About the pipeline
 
-This pipeline includes all steps needed to analyze MiSeq data output, including how to 1) download MiSeq sequencing files, 2) do quality checks, 3) create the necessary files for analysis in GTscore, and 4) run the GTscore pipeline itself.
+This pipeline is to analyze data from tamGenetics_run3 and includes all steps needed to analyze MiSeq data output, including how to 1) download MiSeq sequencing files, 2) do quality checks, 3) create the necessary files for analysis in GTscore, and 4) run the GTscore pipeline itself.
 
 The GTscore pipeline was originally created by Garrett McKinney (see the associated github [here](https://github.com/gjmckinney/GTscore)). Here, I combine the scripts included in his original "GTscore_pipeline.R" as well as his original "README.md" - there's a good bit of overlap between these files, but a few scripts exist in one but not the other. I've also included separate analyses for each species, since not all not all loci are informative for both species.
 
 ## 1.2 About the data
 
-The sequence data used in this pipeline is from tamRun3, the third MiSeq sequencing run with the full set of hair and blood samples. This run has a total of **138 samples**.
+The sequence data used in this pipeline is from tamRun3, the third MiSeq sequencing run with the full set of hair and blood samples. This run has a total of **438 samples**.
 
 # 2 Packages
 
@@ -34,7 +34,7 @@ library(phylotools)
 library(TidyMultiqc)
 library(tidyverse)
 if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
+    install.packages("BiocManager", version = "3.16")
 BiocManager::install("Biostrings")
 source("GTscore.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
 ```
@@ -54,13 +54,13 @@ cpan App::cpanminus
 sudo cpanm Algorithm::Combinatorics
 ```
 
-# 3 Download & prep sequencing results
+# 3 Prep sequencing results
 
 ## 3.1 Download sequences from BaseSpace
 
-To download all sample files, it's easiest to use the BaseSpace Command Line Interface (CLI). 
+To download all sample files, it's easiest to use the BaseSpace Command Line Interface (CLI).
 
-To install, follow the scripts provided here: https://developer.basespace.illumina.com/docs/content/documentation/cli/cli-overview
+To install, follow the scripts provided here: <https://developer.basespace.illumina.com/docs/content/documentation/cli/cli-overview>
 
 Note that even if it's already installed, you may need to re-authenticate via the command below. Running it will give a link; click to open in a browser and complete authentication.
 
@@ -137,7 +137,7 @@ multiqc --interactive .
 
 ## 4.2 TidyMultiqc
 
-To convert the MultiQC into something more usable in R, we can use the package 'TidyMultiqc', which converts the 'multiqc_data.json' file into tidy data frames. 
+To convert the MultiQC into something more usable in R, we can use the package 'TidyMultiqc', which converts the 'multiqc_data.json' file into tidy data frames.
 
 Load FastQC MultiQC report to R
 
@@ -211,14 +211,11 @@ ggplot(seqQC, aes(medianQC_r2)) +
 
 # 5 Create primer-probe & sample files
 
-Prior to running the GTscore pipeline itself, we need to make a few files, including 1) sample files 2) primer-probe files for each species. I'm separating them out like this so that we have a more accurate read count and genotype rates for each sample and locus.
+Prior to running the GTscore pipeline itself, we need to make a few files, including 1) sample files 2) primer-probe files for each species. I'm separating them out like this so that we have more accurate read counts and genotype rates for each sample and locus.
 
 ## 5.1 Sample files
 
-We need three sets of sample files total:
-1) all samples
-2) LWED samples only + all negatives
-3) SIMP samples only + all negatives
+We need three sets of sample files total: 1) all samples 2) LWED samples only + all negatives 3) SIMP samples only + all negatives
 
 ### 5.1.1 All samples
 
@@ -234,14 +231,12 @@ Load into R
 sf_fullSet <- read.table("sampleFiles_fullSet.txt")
 ```
 
-
 ### 5.1.2 Species subsets
 
 First we need to load in the metadata for all of the samples and make a few formatting adjustments
 
 ```{r}
-md <- read.csv("tamRun3_metadata.csv") %>%
-  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
+md <- read.csv("tamRun3_metadata_12Jan2022.csv") %>%
   mutate(sampleID = gsub("_","-", sampleID)) %>%
   mutate(sampleFile = paste0(sampleID, ".fastq"))
 ```
@@ -279,7 +274,7 @@ Each primer-probe file contains the following:
 
 ### 4.2.1 Load in primer-probe files
 
-These files have already been prepared and divided into species-subsets in previous runs, but can be viewed below:
+Here I'm loading in primer-probe files that I created for previous runs. I've divided the primer-probe files into three sets, one with all loci, one for LWED loci (excludes SIMP-specific loci) and one for SIMP loci (excludes LWED-specific loci).
 
 ```{r}
 pp_fullSet <- read.table("primerProbeFile_fullSet.txt", header = T)
@@ -347,11 +342,11 @@ The default names for these files are as follows, with LWED and SIMP appended to
 -   GTscore_individualSummary.txt - counts by individual of total reads, off-target reads, primer-only reads, and primer probe reads
 -   GTscore_locusSummary.txt - counts by locus of primer reads and primer probe reads
 
-## 5.3 Identify loci <10x coverage
+## 5.3 Identify loci \<10x coverage
 
-Genotyping by sequencing generally requires a minimum of 10x coverage to be considered reliable; however, the GTscore genotyping script doesn't include this cutoff, and will provide genotypes with as little as one read per allele for heterozygous calls and 3 reads (vs. 0) for a homozygous call. As such, I'm implementing a filtering step here to recode all loci with <10 reads to "0" so that loci with lower than 10x coverage will not receive genotypes.
+Genotyping by sequencing generally requires a minimum of 10x coverage to be considered reliable; however, the GTscore genotyping script doesn't include this cutoff, and will provide genotypes with as little as one read per allele for heterozygous calls and 3 reads (vs. 0) for a homozygous call. As such, I'm implementing a filtering step here to recode all loci with \<10 reads to "0" so that loci with lower than 10x coverage will not receive genotypes.
 
-Step 1: Recode loci with <10x coverage in the full set of allele read counts
+Step 1: Recode loci with \<10x coverage in the full set of allele read counts
 
 ```{r}
 # Read in allele counts for the full dataset
@@ -415,7 +410,7 @@ Optional arguments for polyGen are:
 
 **NOTE** that only primer probe reads are used in genotyping!
 
-Note also that I'm making three genotype files, one for all loci vs. all samples and two species-specific sets - this allows our genotyping metrics to be more accurate. 
+Note also that I'm making three genotype files, one for all loci vs. all samples and two species-specific sets - this allows our genotyping metrics to be more accurate.
 
 ## 6.1 Genotyping: Full set
 
@@ -461,6 +456,33 @@ SIMP_polyGenResults_singleSNP<-polyGen(SIMP_singleSNP_locusTable,SIMP_singleSNP_
 
 #write results
 write.table(SIMP_polyGenResults_singleSNP,"SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+## 6.4 Export genotype files
+
+### 6.4.1 Genepop format
+
+export genepop format - no filtering
+
+```{r}
+#export genepop, no filtering
+exportGenepop(polyGenResults_singleSNP,singleSNP_locusTable,filename="polyGenResults_singleSNP_genepop.txt")
+```
+
+### 6.4.2 Rubias format
+
+Data output for Rubias should have metadata associated with each sample that specifies the sample type, mixture if a mixture sample, reference if a baseline sample, the reporting group, the sample collection, and individual name.
+
+Sample metadata columns should have the following names: sample_type, repunit, collection, indiv
+
+export Rubias format with no filtering
+
+```{r}
+#export rubias format
+exportRubias(fullSet_polyGenResults_singleSNP,fullSet_singleSNP_locusTable,filename="fullSet_polyGenResults_singleSNP_rubias.txt")
+
+exportRubias(polyGenResults_singleSNP_LWED,singleSNP_locusTable_LWED,sampleMetaData,filename="polyGenResults_singleSNP_rubias_LWED.txt")
+exportRubias(polyGenResults_singleSNP_SIMP,singleSNP_locusTable_SIMP,sampleMetaData,filename="polyGenResults_singleSNP_rubias_SIMP.txt")
 ```
 
 # 7 Data summaries
@@ -529,7 +551,6 @@ ls_ss <- merge(ls_recombine, ss_recombine, by.x = "Locus", by.y = "Locus_ID")
 # Export
 write.csv(ls_ss, "./summaryFiles/master_locusSummary.csv", row.names = F)
 ```
-
 
 ### 7.1.3 Generate plots for single SNP results
 
@@ -828,12 +849,7 @@ When exporting files, you can either export the full results and remove any poor
 
 ## 9.1 Genepop format
 
-export genepop format - no filtering
 
-```{r}
-#export genepop, no filtering
-exportGenepop(polyGenResults_singleSNP,singleSNP_locusTable,filename="polyGenResults_singleSNP_genepop.txt")
-```
 
 export genepop format - poor quality loci removed
 
@@ -845,33 +861,6 @@ exportGenepop(polyGenResults_singleSNP,singleSNP_locusTable,
 ```
 
 ## 9.2 Rubias format
-
-Data output for Rubias should have metadata associated with each sample that specifies the sample type, mixture if a mixture sample, reference if a baseline sample, the reporting group, the sample collection, and individual name.
-
-Sample metadata columns should have the following names: sample_type, repunit, collection, indiv
-
-metadata can be created here or loaded from file
-
-create sample metadata for mixture sample
-
-```{r}
-#load sample data file
-sampleMetaData<-read.delim("sampleMetaData.csv",header=TRUE, sep = ",")
-#adjust indiv names in metadata (some of the GTscore functions change - to .)
-sampleMetaData$indiv <- sub('tamOpt-', 'tamOpt.', sampleMetaData$indiv)
-#view
-View(sampleMetaData)
-```
-
-export Rubias format with no filtering
-
-```{r}
-#export rubias format
-exportRubias(fullSet_polyGenResults_singleSNP,fullSet_singleSNP_locusTable,filename="fullSet_polyGenResults_singleSNP_rubias.txt")
-
-exportRubias(polyGenResults_singleSNP_LWED,singleSNP_locusTable_LWED,sampleMetaData,filename="polyGenResults_singleSNP_rubias_LWED.txt")
-exportRubias(polyGenResults_singleSNP_SIMP,singleSNP_locusTable_SIMP,sampleMetaData,filename="polyGenResults_singleSNP_rubias_SIMP.txt")
-```
 
 export Rubias format with poor quality loci and contaminated sample removed
 
@@ -971,10 +960,6 @@ View(amplicon_txt)
 
 dat2fasta(amplicon_txt, outfile = "ampliconRefSeqs_laLab_run1.fasta")
 ```
-
-
-
-
 
 Text file first:
 
