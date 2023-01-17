@@ -14,6 +14,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(janitor)
+library(related) # (install from tar.gz file); pairwise relatedness
 ```
 
 # 1 Overview
@@ -24,33 +26,54 @@ investigation of mismatches.
 
 # 2 Data
 
+## 2.1 Metadata
+
+Below is the metadata for samples included in tamRun3. I've also included columns to indicate whether samples were included in either of the two previous runs (tamRun1 and tamRun2) so that we can compare genotypes when possible.
+
+```{r}
+# tamGenetics_run1
+md_tamRun1 <- read.csv("./../../00_tamRun1_optimization/metadata_run1.csv") %>%
+  select(c(sampleID, animalID, sampleType)) %>%
+  distinct() %>%
+  na.omit() %>%
+  group_by(animalID, sampleType) %>%
+  summarise(tamRun1 = toString(sampleID)) %>%
+  ungroup()
+
+# tamGenetics_run2
+md_tamRun2 <- read.csv("./../../01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv") %>%
+  filter(included_inRun == "yes") %>%
+  select(c(sampleID, animalID, sampleType)) %>%
+  distinct() %>%
+  na.omit() %>%
+  group_by(animalID, sampleType) %>%
+  summarise(tamRun2 = toString(sampleID)) %>%
+  ungroup()
+
+# tamGenetics_run3 (current run)
+md_tamRun3 <- read.csv("./../03_run3GTscore/tamRun3_metadata_12Jan2022.csv") %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  #mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
+  #unite(pcr1, pcr1Plate, pcr1Row, sep = "-", remove = T) %>%
+  #unite(pcr1, pcr1, pcr1Col, sep = "", remove = T) %>%
+  merge(., md_tamRun1, by = c("animalID", "sampleType"), all.x = T) %>%
+  merge(., md_tamRun2, by = c("animalID", "sampleType"), all.x = T)
+```
+
+## 2.2 Genotypes
+
 Genotypes and metadata are below. Note that genotypes were only called
 for loci with at least 10x coverage.
 
 Genotypes from tamRun3
+
 ```{r}
 genos_fullSet <- read.table("./../03_run3GTscore/fullSet_polyGenResults_singleSNP.txt", header = T)
 ```
 
-Metadata for tamRun3; adding columns for whether samples were also included in optimization run (tamRun1) and/or tamRun2
-
-```{r}
-md_tamRun1 <- read.csv("./../../00_tamRun1_optimization/metadata_run1.csv")
-md_tamRun2 <- read.csv("./../../01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv")
-
-md_tamRun3 <- read.csv("./../03_run3GTscore/tamRun3_metadata.csv") %>%
-  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
-  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
-  mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
-  unite(pcr1, pcr1Plate, pcr1Row, sep = "-", remove = T) %>%
-  unite(pcr1, pcr1, pcr1Col, sep = "", remove = T)
-```
-
-
 # 3 Species assignments
 
-For all samples, including chimeric blood samples, we should expect 100%
-congruence with metadata.
+For all samples, including chimeric blood samples, we should expect 100% congruence with metadata.
 
 Things to keep in mind:
 
@@ -95,21 +118,19 @@ genos_species <- genos_fullSet %>%
 
 ## 3.2 Metadata comparison
 
-Metadata comparisons show that we have 41 mismatches total; 8 hair
-samples, 1 PCR1 (-), 1 XTN (-), and 31 blood samples. Note that the
-negative controls shouldn't have any genotypes at all; these are part of
-a separate troubleshooting analysis.
-
-We'll proceed to SEXID analyses before doing more investigating into
-species mismatches.
+316 out of 438 samples were assigned a species. After comparing with metadata, we see that we have 17 mismatches total.
 
 ```{r}
+# How many assignments were made?
+length(na.omit(genos_species$speciesAssigned))
+
 # Check (mis)matches
-genos_species_md <- md %>%
-  select(c(sampleID, species, sampleType)) %>%
+genos_species_md <- md_tamRun3 %>%
+  select(c(sampleID, animalID, species, sampleType, tamRun1, tamRun2)) %>%
   merge(., genos_species, by = "sampleID") %>%
   mutate(mdMatch_sp = ifelse(species == speciesAssigned,"TRUE", "FALSE")) %>%
-  relocate(mdMatch_sp, .after = sampleID)
+  relocate(animalID, .after = sampleID) %>%
+  relocate(mdMatch_sp, .after = animalID)
 
 # Extract samples with mismatches
 genos_species_mismatch <- genos_species_md %>%
@@ -136,7 +157,7 @@ and 2 LWED-specific
     -   209
     -   215
 
-# 4.1 Assign sex to genotypes
+## 4.1 Assign sex to genotypes
 
 Sex key:
 
@@ -176,11 +197,9 @@ genos_sex <- genos_fullSet %>%
   relocate(c(SEXID_SIMP_197, SEXID_SIMP_198, SEXID_200, SEXID_SIMP_203, SEXID_SIMP_218, SEXID_219, SEXID_222), .after = propGenos_sex)
 ```
 
-# 4.2 Metadata comparisons
+## 4.2 Metadata comparisons
 
-Here we're pulling sex assignment mismatches among hair samples only,
-since chimerism in blood is likely to result in mismatches if the
-individual is part of a F/M twin pair.
+237 out of 438 samples were assigned a sex. For mismatches, we're pulling sex assignment mismatches among hair samples only, since chimerism in blood is likely to result in mismatches if the individual is part of a F/M twin pair.
 
 Among hair samples, we have 9 mismatches total. Some things to note:
 
@@ -189,20 +208,47 @@ Among hair samples, we have 9 mismatches total. Some things to note:
     assignments were in 100% agreement
 
 ```{r}
+# How many assignments were made?
+length(na.omit(genos_sex$sexAssigned))
+
 # Check (mis)matches
-genos_sex_md <- md %>%
+genos_sex_md <- md_tamRun3 %>%
   select(c(sampleID, sex, sampleType)) %>%
   merge(., genos_sex, by = "sampleID") %>%
   mutate(mdMatch_sex = ifelse(sex == sexAssigned,"TRUE", "FALSE")) %>%
   relocate(mdMatch_sex, .after = sampleID)
 
-# Extract samples with mismatches - hair samples only for now
+# Extract samples with mismatches
 genos_sex_mismatch <- genos_sex_md %>%
-  filter(mdMatch_sex == "FALSE") %>%
+  filter(mdMatch_sex == "FALSE")
+
+# Extract samples with mismatches - hair samples only for now
+genos_sex_mismatch_hair <- genos_sex_mismatch %>%
   filter(sampleType == "hair")
 ```
 
 # 5 Investigating mismatches
+
+## 5.1 Species mismatches
+
+Of the 17 mismatches, we have 8 hair samples, 1 PCR1 (-), and 8 blood samples. Note that the negative controls shouldn't have any genotypes at all; these are part of a separate troubleshooting analysis.
+
+```{r}
+# Hair sample mismatches
+sum(str_count(genos_species_mismatch$sampleType, "hair"))
+
+# Blood sample mismatches
+sum(str_count(genos_species_mismatch$sampleType, "blood"))
+```
+
+Are any animalIDs mismatched in both hair and blood samples? -- yes, we have one pair
+
+```{r}
+genos_species_mismatch %>%
+  get_dupes(animalID)
+```
+
+#########IGNORE ALL BELOW#########
 
 First let's make a dataframe combining samples with mismatched species
 and/or sex assignments:
@@ -264,3 +310,5 @@ genos_mismatches_hair <- genos_fullSet %>%
   merge(., splitPools, by = "Locus") %>%
   relocate(primerPool, .after = "Locus")
 ```
+
+
