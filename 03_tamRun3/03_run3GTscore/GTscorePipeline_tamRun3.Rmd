@@ -24,7 +24,7 @@ The GTscore pipeline was originally created by Garrett McKinney (see the associa
 
 ## 1.2 About the data
 
-The sequence data used in this pipeline is from tamRun3, the third MiSeq sequencing run with the full set of hair and blood samples. This run has a total of **438 samples**.
+The sequence data used in this pipeline is from tamRun3, the third MiSeq sequencing run with the full set of hair and blood samples. This run has a total of **438 samples**, including 235 hair samples (138 LWED, 97 SIMP), 194 blood samples (112 LWED, 82 SIMP), and 9 negative controls.
 
 # 2 Packages
 
@@ -53,6 +53,8 @@ cpan App::cpanminus
 # Install necessary perl modules
 sudo cpanm Algorithm::Combinatorics
 ```
+
+I also recently had issues with installing perl modules with "cpanm" -- installing with "cpan" instead solved things.
 
 # 3 Prep sequencing results
 
@@ -236,7 +238,7 @@ sf_fullSet <- read.table("sampleFiles_fullSet.txt")
 First we need to load in the metadata for all of the samples and make a few formatting adjustments
 
 ```{r}
-md <- read.csv("tamRun3_metadata_12Jan2022.csv") %>%
+md <- read.csv("tamRun3_metadata_12Jan2023.csv") %>%
   mutate(sampleID = gsub("_","-", sampleID)) %>%
   mutate(sampleFile = paste0(sampleID, ".fastq"))
 ```
