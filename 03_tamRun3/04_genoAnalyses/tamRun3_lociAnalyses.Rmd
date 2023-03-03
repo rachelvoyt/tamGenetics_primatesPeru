@@ -1,0 +1,1221 @@
+---
+title: "tamRun3_lociAnalyses"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+This pipeline is to investigate locus performance using the sequencing results from tamRun3 (MiSeq v2 300 cycles). The pipeline includes some scripts from McKinney's GTscore pipeline as well as my own.
+
+# 2 Packages
+
+```{r}
+library(gsubfn)
+library(tidyverse)
+library(matrixStats)
+library(janitor)
+source("GTscore.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager", version = "3.16")
+BiocManager::install("Biostrings")
+```
+
+# 3 Data
+
+## 3.1 Data summaries
+
+Here I'm loading in the master locus and sample summaries, both products of GTscorePipeline_tamRun3.Rmd. The sample master summary includes all metadata as well.
+
+Note that genotype rate is based on genotypes given only to loci with at least 10x coverage.
+
+```{r}
+# Locus summaries
+locusSum <- read.csv("./../03_run3GTscore/summaryFiles/master_locusSummary.csv")
+locusSum_hair <- read.csv("./../03_run3GTscore/summaryFiles/hair_complete_locusSummary.csv")
+
+# Sample summaries
+sampleSum <- read.csv("./../03_run3GTscore/summaryFiles/master_sampleSummary.csv") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
+
+sampleSum_blood <- sampleSum %>%
+  filter(sampleType == "blood")
+
+sampleSum_hair <- sampleSum %>%
+  filter(sampleType == "hair")
+
+# Negatives 
+negatives <- sampleSum %>%
+  filter(sampleType %in% c("XTN (-)", "PCR1 (-)")) %>%
+  select(sampleID) %>%
+  distinct()
+```
+
+## 3.2 Genotypes
+
+Genotypes are from hair samples only and are only called for loci with at least 10x coverage.
+
+```{r}
+genos_hair_fullSet <- read.table("./../03_run3GTscore/fullSetH_polyGenResults_singleSNP.txt", header = T)
+genos_hair_lwed <- read.table("./../03_run3GTscore/lwedH_polyGenResults_singleSNP.txt", header = T)
+genos_hair_simp <- read.table("./../03_run3GTscore/simpH_polyGenResults_singleSNP.txt", header = T)
+```
+
+## 3.3 Locus info
+```{r}
+# Alleles for each locus
+locusTable <- read.table("./../03_run3GTscore/fullSet_LocusTable_singleSNPs.txt", header = T) %>%
+  select(!ploidy)
+
+# LWED loci set
+lociLWED <- read.table("./../03_run3GTscore/primerProbeFile_LWED.txt", header = T) %>%
+  select(Locus)
+
+# SIMP loci set
+lociSIMP <- read.table("./../03_run3GTscore/primerProbeFile_SIMP.txt", header = T) %>%
+  select(Locus)
+```
+
+## 3.4 Sample info
+
+```{r}
+samplesLWED <- sampleSum %>%
+  filter(species == "LWED") %>%
+  select(Sample) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+samplesSIMP <- sampleSum %>%
+  filter(species == "SIMP") %>%
+  select(Sample) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+```
+
+
+
+# 4 Preliminary locus assessment
+## 4.1 Fixed alleles
+
+Across all samples (blood and hair from both species), there are two loci that seem to be entirely fixed, LWED_248 and SIMP_318.
+
+```{r}
+fixedLoci <- locusSum %>%
+  filter(majAF == 1)
+```
+
+## 4.2 High majAF
+
+I'm also checking to see which loci have a high major allele frequency (> 90%). 
+
+```{r}
+highMajAF <- locusSum %>%
+  filter(majAF > 0.9)
+
+highMajAF_hair <- locusSum_hair %>%
+  filter(majAF > 0.9)
+```
+
+## 4.3 Consistently heterozygous loci
+
+To see if any loci are consistently heterozygous, I'm looking at the hair genotypes only since blood samples are more likely to be heterozygous due to chimerism.
+
+I'm also assessing each species separately, since some loci are informative for only one species but will still amplify in the other.
+
+#### Count genotypes for each locus
+
+```{r}
+genoSum_hair_lwed <- genos_hair_lwed %>%
+  mutate("AA" = rowSums(. == "A,A")) %>%
+  mutate("AC" = rowSums(. == "A,C")) %>%
+  mutate("AG" = rowSums(. == "A,G")) %>%
+  mutate("AT" = rowSums(. == "A,T")) %>%
+  mutate("CC" = rowSums(. == "C,C")) %>%
+  mutate("CG" = rowSums(. == "C,G")) %>%
+  mutate("CT" = rowSums(. == "C,T")) %>%
+  mutate("GG" = rowSums(. == "G,G")) %>%
+  mutate("GT" = rowSums(. == "G,T")) %>%
+  mutate("TT" = rowSums(. == "T,T")) %>%
+  mutate(lociSet = "LWED") %>%
+  dplyr::select(c(AA, AC, AG, AT, CC, CG, CT, GG, GT, TT, lociSet)) %>%
+  rownames_to_column("Locus_ID") %>%
+  as.data.frame() %>%
+  merge(., locusTable, by = "Locus_ID", all.x = T, all.y = F) %>%
+  column_to_rownames("Locus_ID") %>%
+  mutate(alleles = gsub(",", "", alleles)) %>%
+  mutate(totalGenos = rowSums(.[1:10])) %>%
+  mutate(propHet = (rowSums(select(., matches(alleles))))/totalGenos)
+
+genoSum_hair_simp <- genos_hair_simp %>%
+  mutate("AA" = rowSums(. == "A,A")) %>%
+  mutate("AC" = rowSums(. == "A,C")) %>%
+  mutate("AG" = rowSums(. == "A,G")) %>%
+  mutate("AT" = rowSums(. == "A,T")) %>%
+  mutate("CC" = rowSums(. == "C,C")) %>%
+  mutate("CG" = rowSums(. == "C,G")) %>%
+  mutate("CT" = rowSums(. == "C,T")) %>%
+  mutate("GG" = rowSums(. == "G,G")) %>%
+  mutate("GT" = rowSums(. == "G,T")) %>%
+  mutate("TT" = rowSums(. == "T,T")) %>%
+  mutate(lociSet = "SIMP") %>%
+  dplyr::select(c(AA, AC, AG, AT, CC, CG, CT, GG, GT, TT, lociSet)) %>%
+  rownames_to_column("Locus_ID") %>%
+  as.data.frame() %>%
+  merge(., locusTable, by = "Locus_ID", all.x = T, all.y = F) %>%
+  column_to_rownames("Locus_ID") %>%
+  mutate(alleles = gsub(",", "", alleles)) %>%
+  mutate(totalGenos = rowSums(.[1:10])) %>%
+  mutate(propHet = (rowSums(select(., matches(alleles))))/totalGenos)
+```
+
+#### Identify loci heterozygous for >90% of samples
+
+There are only four loci in the SIMP subset that are consistently heterozygous, but none are concerning at present because 1) all have less than 5 genotypes called, and 2) these are dual-species INDID SNPs, and one has homozygous genotypes for LWED samples (the other loci had no LWED genotypes called).
+
+```{r}
+highHet_lwed <- genoSum_hair_lwed %>%
+  filter(propHet > 0.9)
+
+highHet_simp <- genoSum_hair_simp %>%
+  filter(propHet > 0.9)
+
+genoSum_hair_lwed %>%
+  filter(row.names(.) %in% row.names(highHet_simp))
+```
+
+
+
+There are only a handful of loci that have 100% heterozygous calls, but this is based on less than 5 genotypes total. As such, we can't say at this point whether we have any loci consistently giving heterozygous calls.
+
+## 4.4 Overamplifiers
+
+### Sum allele reads for each locus
+
+Load read counts
+```{r}
+# Load read counts
+readCounts <- read.table("./../03_run3GTscore/fullSet_AlleleReads_singleSNPs.txt")
+```
+
+Set up a function to sum allele reads for each locus (use package gsubfn) and apply to readCounts
+```{r}
+# Define function
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Sum allele reads for each locus
+readCounts_all <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
+  rownames_to_column("Locus") %>%
+  mutate(Locus = sub("_[^_]+$", "\\1", Locus)) %>%
+  column_to_rownames("Locus")
+```
+
+Recode species-specific loci with "NA" for samples of the non-informative species
+```{r}
+readCounts_lwedSIMP <- readCounts_all %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "readCounts") %>%
+  mutate(readCounts =
+           ifelse(sampleID %in% samplesLWED$Sample & grepl("SIMP", locus), NA, 
+                  ifelse(sampleID %in% samplesSIMP$Sample & grepl("LWED", locus), NA, readCounts))) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = readCounts) %>%
+  column_to_rownames("locus")
+```
+
+Assess locus performance for each species
+
+```{r}
+readCounts_lwedSIMP_summary <- readCounts_lwedSIMP %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(species = ifelse(row.names(.) %in% samplesLWED$Sample, "LWED",
+                          ifelse(row.names(.) %in% samplesSIMP$Sample, "SIMP", NA))) %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!c(species, sampleID),
+               names_to = "locus",
+               values_to = "readCounts") %>%
+  select(!sampleID) %>%
+  filter(!is.na(species)) %>%
+  group_by(species, locus) %>%
+  summarise(readSum = sum(as.numeric(readCounts)),
+            readMedian = median(as.numeric(readCounts))) %>%
+  as.data.frame()
+```
+
+### Find overamplifiers
+
+First define a function to find outliers. The function is set so that it will return the name of the locus when applied to our dataset. 
+
+```{r}
+findoutlier <- function(x) {
+  return(x < quantile(x, .25) - 1.5*IQR(x) | x > quantile(x, .75) + 1.5*IQR(x))
+}
+```
+
+Then apply the function - here we're identifying loci that are outliers based on their total reads as well as their median reads (run separately for each species).
+
+```{r}
+# LWED
+readCounts_outliers_lwed <- readCounts_lwedSIMP_summary %>%
+  filter(species == "LWED") %>%
+  select(!species) %>%
+  na.omit() %>%
+  mutate(sumOutlier = ifelse(findoutlier(readSum), locus, NA)) %>%
+  relocate(sumOutlier, .after = readSum) %>%
+  mutate(medianOutlier = ifelse(findoutlier(readMedian), locus, NA)) %>%
+  relocate(medianOutlier, .after = readMedian) %>%
+  arrange(-readSum)
+
+# SIMP
+readCounts_outliers_simp <- readCounts_lwedSIMP_summary %>%
+  filter(species == "SIMP") %>%
+  select(!species) %>%
+  na.omit() %>%
+  mutate(sumOutlier = ifelse(findoutlier(readSum), locus, NA)) %>%
+  relocate(sumOutlier, .after = readSum) %>%
+  mutate(medianOutlier = ifelse(findoutlier(readMedian), locus, NA)) %>%
+  relocate(medianOutlier, .after = readMedian) %>%
+  arrange(-readSum)
+
+# Outliers present in both species
+outliers_readSum_lwedSIMP <- readCounts_outliers_lwed %>%
+  filter(sumOutlier %in% readCounts_outliers_simp$sumOutlier) %>%
+  select(c(sumOutlier, readSum)) %>%
+  na.omit() %>%
+  rename("readSum" = "readSum_lwed") %>%
+  merge(., readCounts_outliers_simp, by = "sumOutlier") %>%
+  rename("readSum" = "readSum_simp") %>%
+  select(c(sumOutlier, readSum_lwed, readSum_simp))
+
+outliers_readMedian_lwedSIMP <- readCounts_outliers_lwed %>%
+  filter(medianOutlier %in% readCounts_outliers_simp$medianOutlier) %>%
+  select(c(medianOutlier, readMedian)) %>%
+  na.omit() %>%
+  rename("readMedian" = "readMedian_lwed") %>%
+  merge(., readCounts_outliers_simp, by = "medianOutlier") %>%
+  rename("readMedian" = "readMedian_simp") %>%
+  select(c(medianOutlier, readMedian_lwed, readMedian_simp))
+```
+
+### Plots
+
+```{r}
+ggplot(readCounts_lwedSIMP_summary, aes(x=readSum, y=species)) +
+  geom_boxplot() +
+  labs(title = "Total reads per locus", x = "Total number of reads", y = "") +
+  theme_bw()
+```
+
+```{r}
+ggplot(readCounts_lwedSIMP_summary, aes(x=readMedian, y=species)) +
+  geom_boxplot() +
+  labs(title = "Median reads per locus per sample", x = "Total number of reads", y = "") +
+  theme_bw()
+```
+
+
+
+# 3 Identify & remove underperforming samples
+
+## 3.1 Identify underperforming samples
+
+To make sure our assessment of loci success isn't skewed by underperforming samples, first we need to remove any samples that did not work well in the run.
+
+To do that, first we need to take out any loci with zero reads -- turns out we don't have any, which is good!
+
+```{r}
+noReads <- loci %>%
+  filter(Primer.Probe.Reads == "0")
+```
+
+Next we'll remove samples with \<50% of loci genotyped successfully - we have a total of 222 failed samples, including 79 blood, 134 hair, and all negative controls. 
+
+```{r}
+failedSamples <- samples %>%
+  filter(GenotypeRate < 0.5) %>%
+  distinct_at(vars(sampleID), .keep_all = T)
+length(failedSamples$sampleID) # 222 samples out of 438
+table(failedSamples$sampleType)
+```
+
+## 3.2 Create new sample files
+
+Now we need to create new samples with only the samples that have greater or equal to 50% genotype success. That leaves us with 216 samples total, with 120 LWED samples and 96 SIMP samples.
+
+```{r}
+# Original sample files
+sf_fullSet <- read.table("./../03_run3GTscore/sampleFiles_fullSet.txt")
+sf_lwed <- read.table("./../03_run3GTscore/sampleFiles_LWED.txt")
+sf_simp <- read.table("./../03_run3GTscore/sampleFiles_SIMP.txt")
+
+# Remove failed samples from each sample file
+sf_fullSet_filtered <- sf_fullSet %>%
+  filter(!V1 %in% failedSamples$sampleFile) %>%
+  filter(!V1 == "Undetermined.fastq")
+length(sf_fullSet_filtered$V1)
+sf_lwed_filtered <- sf_lwed %>%
+  filter(!V1 %in% failedSamples$sampleFile) %>%
+  filter(!V1 == "Undetermined.fastq")
+length(sf_lwed_filtered$V1)
+sf_simp_filtered <- sf_simp %>%
+  filter(!V1 %in% failedSamples$sampleFile) %>%
+  filter(!V1 == "Undetermined.fastq")
+length(sf_simp_filtered$V1)
+
+# Export new sample files
+write.table(sf_fullSet_filtered, file = "postFilter_sampleFiles_fullSet.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_filtered, file = "postFilter_sampleFiles_LWED.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_simp_filtered, file = "postFilter_sampleFiles_SIMP.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+# 4 Rerun GTscore post-filtering failed samples
+
+We can now rerun the pertinent GTscore scripts with the filtered sample files.
+
+## 4.1 Count amplicon reads
+
+First step of the pipeline is to count amplicon reads - this includes updated counts for each locus.
+
+```{r}
+# All samples, all loci
+system2("perl",
+        args="./../03_run3GTscore/AmpliconReadCounter.pl -p ./../03_run3GTscore/primerProbeFile_fullSet.txt --files postFilter_sampleFiles_fullSet.txt --prefix postFilter_fullSet_ --inDir ./../03_run3GTscore/")
+
+# LWED
+system2("perl",
+        args="./../03_run3GTscore/AmpliconReadCounter.pl -p ./../03_run3GTscore/primerProbeFile_LWED.txt --files postFilter_sampleFiles_LWED.txt --prefix postFilter_LWED_ --inDir ./../03_run3GTscore/")
+
+# SIMP
+system2("perl",
+        args="./../03_run3GTscore/AmpliconReadCounter.pl -p ./../03_run3GTscore/primerProbeFile_SIMP.txt --files postFilter_sampleFiles_SIMP.txt --prefix postFilter_SIMP_ --inDir ./../03_run3GTscore/")
+```
+
+## 4.2 Identify loci \<10x coverage
+
+Next we need to recode loci with \<10x coverage in the full set of allele read counts to prepare for genotyping
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts <- read.table("postFilter_fullSet_AlleleReads_singleSNPs.txt")
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts[readCounts_sum < 10] <- "0,0"
+```
+
+This includes creating new lwed & simp subsets & new AlleleReads_singleSNPs files
+
+```{r}
+# List of LWED and SIMP file names (with failed samples excluded)
+lwed <- sf_lwed_filtered %>%
+  mutate(V1 = gsub("\\..*","", V1)) %>% # adjust sample names to ditch everything after "."
+  mutate(V1 = gsub("-", "\\.", V1)) %>% # change "-" to "."
+  as.character()
+simp <- sf_simp_filtered %>%
+  mutate(V1 = gsub("\\..*","", V1)) %>% # adjust sample names to ditch everything after "."
+  mutate(V1 = gsub("-", "\\.", V1)) %>% # change "-" to "."
+  as.character()
+
+# Get lists of lwed- and simp-specific loci
+lwed_loci <- read.delim("postFilter_LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+simp_loci <- read.delim("postFilter_SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+
+readCounts_lwed <- readCounts %>%
+  select_(.dots = lwed) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% lwed_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+readCounts_simp <- readCounts %>%
+  select_(.dots = simp) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% simp_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+```
+
+Export new AlleleReads_singleSNPs files
+
+```{r}
+write.table(readCounts,"postFilter_fullSet_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_lwed,"postFilter_LWED_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_simp,"postFilter_SIMP_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+```
+
+## 4.3 Genotyping
+
+With our filtered and re-coded files, we can then run the GTscore genotyping script - I'm running it three times so that we have genotypes for the full set of samples + full set of loci as well as species-specific sets with their species-specific loci.
+
+Full set
+
+```{r, Genotyping}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable<-read.delim("postFilter_fullSet_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads_10x<-read.delim("postFilter_fullSet_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP<-polyGen(fullSet_singleSNP_locusTable,fullSet_singleSNP_alleleReads_10x)
+
+#write results
+write.table(fullSet_polyGenResults_singleSNP,"postFilter_fullSet_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+LWED 
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+LWED_singleSNP_locusTable<-read.delim("postFilter_LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+LWED_singleSNP_alleleReads_10x<-read.delim("postFilter_LWED_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP<-polyGen(LWED_singleSNP_locusTable,LWED_singleSNP_alleleReads_10x)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP,"postFilter_LWED_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+SIMP
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+SIMP_singleSNP_locusTable<-read.delim("postFilter_SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_singleSNP_alleleReads_10x<-read.delim("postFilter_SIMP_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP<-polyGen(SIMP_singleSNP_locusTable,SIMP_singleSNP_alleleReads_10x)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP,"postFilter_SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+## 4.4 Locus summaries
+
+We can now re-create our locus summaries. Note that for these summaries, we're the allele read counts PRIOR to recoding those with less than 10x coverage.
+
+### Single-SNP locus summary
+
+```{r}
+# Read in original allele read counts
+fullSet_singleSNP_alleleReads<-read.delim("postFilter_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+LWED_singleSNP_alleleReads<-read.delim("postFilter_LWED_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+SIMP_singleSNP_alleleReads<-read.delim("postFilter_SIMP_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+# Summarize single SNP results
+fullSet_singleSNP_summary <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP)
+
+LWED_singleSNP_summary<-summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP)
+
+SIMP_singleSNP_summary<-summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP)
+
+#write results
+write.table(fullSet_singleSNP_summary,"postFilter_fullSet_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(LWED_singleSNP_summary,"postFilter_LWED_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(SIMP_singleSNP_summary,"postFilter_SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+```
+
+### "Complete" locus summary
+
+I also found it helpful to create a "master" locus summary file - this way, we have a single file for all loci that provides performance metrics that are specific to that locus's species. This file includes data from both the locus summaries and single SNP summaries created earlier.
+
+In doing so, this means that...
+
+-   values for LWED-specific loci reflect performance with LWED individuals only
+-   values for SIMP-specific loci reflect performance with SIMP individuals only
+-   all other loci reflect performance with LWED and SIMP individuals combined
+
+```{r}
+# Load locus summaries
+ls <- read.table("postFilter_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t")
+lwed_ls <- read.table("postFilter_LWED_GTscore_locusSummary.txt", header = T, sep = "\t")
+simp_ls <- read.table("postFilter_SIMP_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## Locus summaries
+ls1 <- ls %>%
+  filter(!str_detect(Locus, "LWED|SIMP"))
+lwed1_ls <- lwed_ls %>%
+  filter(str_detect(Locus, "LWED"))
+simp1_ls <- simp_ls %>%
+  filter(str_detect(Locus, "SIMP"))
+
+## SingleSNP summaries
+ss <- fullSet_singleSNP_summary %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP"))
+lwed_ss <- LWED_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "LWED"))
+simp_ss <- SIMP_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "SIMP"))
+
+# Recombine locus summaries & single snp summary files, then merge the two
+ls_recombine <- rbind(ls1, lwed1_ls, simp1_ls)
+
+ss_recombine <- rbind(ss, lwed_ss, simp_ss)
+ss_recombine$Locus_ID <- sub("_[^_]+$", "", ss_recombine$Locus_ID)
+
+ls_ss <- merge(ls_recombine, ss_recombine, by.x = "Locus", by.y = "Locus_ID") 
+
+# Export
+write.csv(ls_ss, "postFilter_master_locusSummary.csv", row.names = F)
+```
+
+# 5 Locus genotype success
+
+Now that we're looking at only samples that "passed", we can begin to assess the performance of individual loci. First we'll look at genotype success rate.
+
+## 5.1 Full set of loci
+
+In total, there are **56 loci with <50% genotype success** (i.e., were genotyped in less than 50% of all samples). Of these, we have 42 INDID, 4 LWED, 2 SIMP, 3 SPECIES, and 5 SEXID loci (including 3 general and 1 each of species-specific sex loci).
+
+```{r}
+# First add a column to note which set each locus belongs to
+loci_postFilter <- read.csv("postFilter_master_locusSummary.csv") %>%
+  mutate(set = ifelse(str_detect(Locus, "INDID"),"INDID",
+                      ifelse(str_detect(Locus, "SEXID_LWED"), "SEXID_LWED",
+                             ifelse(str_detect(Locus, "SEXID_SIMP"), "SEXID_SIMP",
+                                    ifelse(str_detect(Locus, "SEXID"), "SEXID",
+                                           ifelse(str_detect(Locus, "LWED"), "LWED",
+                                                  ifelse(str_detect(Locus, "SIMP"), "SIMP",
+                                                         ifelse(str_detect(Locus, "SPECIES"), "SPECIES",
+                                                                NA
+                                                                ))))))))
+
+# Get loci with under 50% genotype rate & create column for locus set
+lociPF_under50 <- loci_postFilter %>%
+  filter(GenotypeRate < 0.5)
+
+length(lociPF_under50$Locus)
+
+table(lociPF_under50$set)
+```
+
+## 5.2 Sex & species loci
+
+Of the sex and species loci that failed, I think that SEXID_215 and SEXID_219 are the only two worth pulling from the primer pool. They have the lowest percentage of genotype success of this group, and are the only two loci with an average read depth under 10.
+
+```{r}
+lociPF_under50_sexSpecies <- lociPF_under50 %>%
+  filter(set %in% c("SEXID", "SEXID_LWED", "SEXID_SIMP", "SPECIES"))
+```
+
+## 5.3 Hair vs. blood samples
+
+I also want to check to see if locus performance differs between hair and blood samples, especially since hair samples were run with split primer pools.
+
+```{r}
+# Subset [[REWORK THIS]]
+genos_md <- genos_fullSet %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  merge(., md_tamRun3[,c("sampleID", "animalID", "sampleType")], by = "sampleID")
+
+genos_hair <- genos_md %>%
+  filter(sampleType == "hair")
+
+genos_blood <- genos_md %>%
+  filter(sampleType == "blood")
+```
+
+
+
+
+# 7 Species loci performance
+
+Beyond genotype success, we also need to know if loci are actually informative. So that we have as much data as possible, I'm going to include genotypes from samples with under 50% overall genotyping success.
+
+## 7.1 Genotypes & species key
+
+```{r}
+# Genotypes
+genos_fullSet <- read.table("./../03_run3GTscore/fullSet_polyGenResults_singleSNP.txt", header = T)
+
+# Species key
+speciesKey <- read.csv("speciesSNP_key_14Dec2022.csv")
+```
+
+## 7.2 Species assignments
+
+The following script uses the speciesKey to replace genotypes with either "LWED" or "SIMP" and includes the following columns: 
+- the species assigned based on genotyped loci, where species is only assigned when 100% of genotypes are either F or M
+- the total number of species loci genotyped
+- the proportion of species loci genotyped relative to total species loci (n = 12)
+- the proportion of loci genotyped as LWED vs. SIMP
+- the proportion of mismatches if there's a mix of LWED vs. SIMP assignments
+
+```{r}
+genos_species <- genos_fullSet %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SPECIES")) %>%
+  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!Locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  left_join(speciesKey, by = c("Locus", "genotype")) %>%
+  mutate(species = coalesce(species, genotype)) %>%
+  select(c(Locus, sampleID, species)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = species) %>%
+  column_to_rownames("Locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalGenos_sp = (rowSums(. == "LWED") + rowSums(. == "SIMP"))) %>%
+  mutate(propGenos_sp = (totalGenos_sp/12)) %>%
+  mutate(propLWED = (rowSums(. == "LWED")/totalGenos_sp)) %>%
+  mutate(propSIMP = (rowSums(. == "SIMP")/totalGenos_sp)) %>%
+  mutate(propMismatch_species = (1 - abs(propLWED - propSIMP))) %>%
+  mutate(speciesAssigned = ifelse(propLWED == 1, "LWED", ifelse(propSIMP == 1, "SIMP", NA))) %>%
+  rownames_to_column("sampleID") %>%
+  filter(!sampleID %in% negatives$sampleID) %>%
+  filter(!sampleID == "Undetermined") %>%
+  relocate(c(speciesAssigned, totalGenos_sp, propMismatch_species, propLWED, propSIMP, propGenos_sp), .after = sampleID)
+```
+
+315 out of 429 samples (excluding the 9 negatives) received species genotypes.
+
+```{r}
+# Number of samples assigned species
+length(na.omit(genos_species$speciesAssigned))
+
+# Total samples minus negatives & undetermined
+length(genos_species$sampleID)
+```
+
+For all 315 samples, the species assigned were in 100% agreement across all genotyped loci (propMismatch = 0).
+
+```{r}
+table(genos_species$propMismatch_species)
+```
+
+
+## 7.3 Mismatch checks
+
+Out of those 315 samples that received a species assignment, 15 received assignments that do not match the metadata. 8 of these mismatches are hair samples and 9 are blood samples.
+
+```{r}
+# Identify (mis)matches
+genos_species_md <- samples %>%
+  select(c(sampleID, animalID, species, sampleType)) %>%
+  merge(., genos_species, by = "sampleID") %>%
+  mutate(mdMatch_sp = ifelse(species == speciesAssigned,"TRUE", "FALSE")) %>%
+  relocate(animalID, .after = sampleID) %>%
+  relocate(mdMatch_sp, .after = animalID)
+
+# Extract mismatches
+genos_species_mismatch <- genos_species_md %>%
+  filter(mdMatch_sp == "FALSE")
+length(genos_species_mismatch$sampleID)
+
+# How many hair mismatches?
+genos_species_mismatch %>%
+  filter(sampleType == "hair")
+```
+
+One individual (animalID 276) was mismatched in both hair and blood samples, suggesting an issue with the metadata vs. the sample/sequencing.
+
+```{r}
+genos_species_mismatch %>%
+  get_dupes(animalID)
+```
+
+
+# 8 Sex loci performance
+
+As with species-loci performance checks, I'll be including samples with under 50% genotype success to check sex-loci performance as well.
+
+## 8.1 Sex key
+
+```{r}
+# Sex key
+sexKey <- read.csv("sexSNP_key_8Dec2022.csv") %>%
+  na.omit() %>%
+  unique()
+```
+
+## 8.2 Sex assignments
+
+The following script uses the sexKey to replace genotypes with either "F" or "M" and includes the following columns: 
+- the sex assigned based on genotyped loci, where sex is only assigned when 100% of genotypes are either F or M
+- the total number of sex loci genotyped
+- the proportion of sex loci genotyped relative to total sex loci (n = 12)
+- the proportion of loci genotyped as F and M
+- the proportion of mismatches if there's a mix of F and M assignments
+
+```{r}
+genos_sex <- genos_fullSet %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SEXID")) %>%
+  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!Locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  left_join(sexKey, by = c("Locus", "genotype")) %>%
+  mutate(sex = coalesce(sex, genotype)) %>%
+  select(c(Locus, sampleID, sex)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = sex) %>%
+  column_to_rownames("Locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalGenos_sex = (rowSums(. == "F") + rowSums(. == "M"))) %>%
+  mutate(propGenos_sex = (totalGenos_sex/12)) %>%
+  mutate(propF = (rowSums(. == "F")/totalGenos_sex)) %>%
+  mutate(propM = (rowSums(. == "M")/totalGenos_sex)) %>%
+  mutate(propMismatch_sex = (1 - abs(propF - propM))) %>%
+  mutate(sexAssigned = ifelse(propF == 1, "F", ifelse(propM == 1, "M", NA))) %>%
+  rownames_to_column("sampleID") %>%
+  relocate(c(sexAssigned, totalGenos_sex, propMismatch_sex, propF, propM, propGenos_sex), .after = sampleID) %>%
+  filter(!sampleID %in% negatives$sampleID) %>%
+  filter(!sampleID == "Undetermined") %>%
+  relocate(c(SEXID_SIMP_197, SEXID_SIMP_198, SEXID_200, SEXID_SIMP_203, SEXID_SIMP_218, SEXID_219, SEXID_222), .after = propGenos_sex)
+```
+
+Add metadata
+
+```{r}
+genos_sex_md <- samples %>%
+  select(c(sampleID, sex, species, sampleType)) %>%
+  merge(., genos_sex, by = "sampleID") %>%
+  mutate(mdMatch_sex = ifelse(sex == sexAssigned,"TRUE", "FALSE")) %>%
+  relocate(mdMatch_sex, .after = sampleID)
+```
+
+235 out of 429 samples (excluding the 9 negatives) received sex genotypes. Of these samples, 162 are blood samples and 235 are hair samples.
+
+```{r}
+# Number of samples assigned sex
+length(na.omit(genos_sex$sexAssigned))
+
+# Sample types
+table(genos_sex_md$sampleType)
+```
+
+## 8.3 Mismatch checks (hair only)
+
+Next I'm checking to see which hair samples were assigned a sex that doesn't match the metadata. I'm excluding samples that were already identified as having a species assignment mismatch, since these likely have other issues.
+
+Of the 227 hair samples that i) were successfully assigned a sex (i.e., all loci were 100% F or M) and ii) whose species assignment matches the metadata, 6 of these have sex assignments that do not match the metadata. 
+
+- 5 of these have only one genotype called, 1 has 3 genotypes called
+
+```{r}
+# Subset to hair samples only
+genos_sex_hair <- genos_sex_md %>%
+  filter(!sampleID %in% genos_species_mismatch$sampleID) %>%
+  filter(sampleType == "hair")
+length(genos_sex_hair$sampleID)
+
+# Identify samples that don't match metadata
+genos_sex_hair_mismatch <- genos_sex_hair %>%
+  filter(mdMatch_sex == "FALSE")
+
+length(genos_sex_hair_mismatch$sampleID)
+```
+
+## 8.4 Mixed calls
+
+An additional 25 hair samples were assigned sex genotypes that were mixed (i.e., some loci were called as F, some as M). 
+
+```{r}
+genos_sex_hair_mixed <- genos_sex_hair %>%
+  filter(propMismatch_sex > 0)
+
+length(genos_sex_hair_mixed$sampleID)
+
+table(genos_sex_hair_mixed$totalGenos_sex)
+```
+
+### 8.4.1 Loci leading to the mixed calls?
+
+Among metadata-females, there are 7 loci contributing to M genotypes. 4 of these loci only had one M call; 2 loci had two M calls, and 1 loci had 3 M calls. Note that no species-specific sex loci were called for the other species.
+
+```{r}
+mixedSex_lociF <- genos_sex_hair_mixed %>%
+  filter(sex == "F") %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SEXID")) %>%
+  mutate(totalM = (rowSums(. == "M"))) %>%
+  filter(totalM > 0)
+
+table(mixedSex_lociF$totalM)
+```
+
+Among metadata-males, there are 4 loci contributing to F genotypes. 
+- SEXID_LWED_208 has 10 F calls; but that 9 of these are SIMP individuals
+- SEXID_222 has 5 F calls
+- SEXID_SIMP_198 has 2 F calls (both for SIMP individuals)
+- SEXID_209 has 1 F call
+
+```{r}
+mixedSex_lociM <- genos_sex_hair_mixed %>%
+  filter(sex == "M") %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Locus") %>%
+  #filter(str_detect(Locus, "SEXID")) %>%
+  mutate(totalM = (rowSums(. == "F"))) %>%
+  filter(totalM > 0)
+```
+
+## 8.4 Species-specific sex loci
+
+Next I want to see if species-specific sex loci are being genotyped in the other species. For now, I'm excluding samples whose species assignments did not match metadata.
+
+### 8.4.1 LWED samples
+
+No LWED samples were genotyped for simp-specific sex loci.
+
+```{r}
+# LWED sex genotypes
+genos_sex_lwed <- genos_sex_md %>%
+  filter(!sampleID %in% genos_species_mismatch$sampleID) %>%
+  filter(species == "LWED") %>%
+  filter(!is.na(sexAssigned))
+
+table(genos_sex_lwed$SEXID_SIMP_197)
+table(genos_sex_lwed$SEXID_SIMP_198)
+table(genos_sex_lwed$SEXID_SIMP_203)
+table(genos_sex_lwed$SEXID_SIMP_218)
+```
+
+### 8.4.2 SIMP samples
+
+No SIMP samples received genotypes for SEXID_LWED_195, but 12 SIMP samples received genotypes for SEXID_LWED_208 (all genotyped as F).
+
+```{r}
+# SIMP sex genotypes
+genos_sex_simp <- genos_sex_md %>%
+  filter(!sampleID %in% genos_species_mismatch$sampleID) %>%
+  filter(species == "SIMP") %>%
+  filter(!is.na(sexAssigned))
+
+table(genos_sex_simp$SEXID_LWED_195)
+table(genos_sex_simp$SEXID_LWED_208)
+```
+
+#### 8.4.2.1 SEXID_LWED_208
+
+Of the 12 SIMP samples that were genotyped at SEXID_LWED_208, 7 are blood samples and 5 are hair samples. 
+
+```{r}
+sexLWED208 <- genos_sex_simp %>%
+  filter(SEXID_LWED_208 == "F") %>%
+  merge(., samples[, c("sampleID", "animalID")], by = "sampleID") %>%
+  relocate("animalID", .after = "sampleID")
+
+table(sexLWED208$sampleType)
+```
+
+One SIMP individual (animalID 73) is genotyped at SEXID_LWED_208 in both the blood and hair samples.
+
+```{r}
+sexLWED208 %>%
+  get_dupes(animalID)
+```
+
+Does this matter?? Does this mean we should ditch SEXID_LWED_208 or just treat it with caution? 
+
+
+
+Since twin chimerism will affect sex assignments in blood samples, I'm going to look at hair samples only. 
+
+```{r}
+# Extract samples with mismatches
+genos_sex_mismatch <- genos_sex_md %>%
+  filter(mdMatch_sex == "FALSE")
+
+# Extract samples with mismatches - hair samples only for now
+genos_sex_mismatch_hair <- genos_sex_mismatch %>%
+  filter(sampleType == "hair")
+
+# Hair only
+samplesHair <- samples %>%
+  filter(sampleType == "hair") %>%
+  select(Sample)
+
+genos_sex_hair <- genos_sex %>%
+  filter(sampleID %in% samplesHair$Sample) %>%
+  filter(!is.na(sexAssigned))
+```
+
+Mismatches in hair due to allelic dropout?? 7 out of 9 were assigned female when should have been male
+
+88, 177, 192 - has simp sex genos, but supposed to be lwed; next question - do SIMP loci often give genotypes for LWED individuals?
+
+# 9 GTscore locus diagnostics
+
+This section is taken directly from the GTscore pipeline - I've transferred it here so that all locus analyses are in one place.
+
+Diagnostic functions are provided to help in identifying patterns of sequence variation for loci. This can assist in identifying SNPs that were not accounted for in the initial probe design and in adjusting the in-silico probes to exclude off-target sequence from genotyping.
+
+There are two approaches used by GTscore: First, plotting the number of nucleotide mismatches by position in the sequence data relative to the reference sequence for each locus, and second, performing sequence alignments using the program MSA (Bodenhofer et al. 2015). Plotting the mismatches by position is fast and easy to interpret except in the case of indels. The MSA alignments take longer to complete but facilitate the visualization of indels.
+
+The first step for both methods is to get the sequences that aligned to each locus, this can be done based on primer alignments or primer-probe alignments using the script matchReads.pl.
+
+### Sequence alignment to each locus (Perl)
+
+NOTE - I made a small edit to the matchReads.pl script from GTscore; I added an option to designate an "inDir" to avoid having to copy/paste all of the sequences into another folder.
+
+Input flags for this script are:
+
+-   --p a tab delimited file containing primer/probe information for each locus
+-   --files a text file containing a list of .fastq sequence files to count reads from
+-   --matchType the match type chosen for retaining sequences for each locus. Options are "primer" to retain sequences that match the primer for a locus or "primerProbe" to retain sequences that match both the primer and probe. primerProbe is the default if no option is specified.
+
+Optional flags:
+
+-   --prefix optional prefix for output file names
+
+You can run matchReads.pl from the command line using the following example: perl matchReads.pl -p primerProbeFile.txt --files sampleFiles.txt --matchType primerProbe [--prefix]
+
+Alternatively, you can also run it through R:
+
+```{r match reads, eval=FALSE}
+#primer match
+system2("perl",
+        args="./../03_run3GTscore/matchReads.pl -p ./../03_run3GTscore/primerProbeFile_fullSet.txt --files ./../03_run3GTscore/sampleFiles_fullSet.txt --matchType primer --prefix fullSet_ --inDir ./../03_run3GTscore/")
+
+system2("perl",
+        args="./../03_run3GTscore/matchReads.pl -p ./../03_run3GTscore/primerProbeFile_LWED.txt --files ./../03_run3GTscore/sampleFiles_LWED.txt --matchType primer --prefix LWED_ --inDir ./../03_run3GTscore/")
+
+system2("perl",
+        args="./../03_run3GTscore/matchReads.pl -p ./../03_run3GTscore/primerProbeFile_SIMP.txt --files ./../03_run3GTscore/sampleFiles_SIMP.txt --matchType primer --prefix SIMP_ --inDir ./../03_run3GTscore/")
+
+#primer AND probe match
+system2("perl",
+        args="./../03_run3GTscore/matchReads.pl -p ./../03_run3GTscore/primerProbeFile_fullSet.txt --files ./../03_run3GTscore/sampleFiles_fullSet.txt --matchType primerProbe --prefix fullSet_ --inDir ./../03_run3GTscore/")
+
+system2("perl",
+        args="./../03_run3GTscore/matchReads.pl -p ./../03_run3GTscore/primerProbeFile_LWED.txt --files ./../03_run3GTscore/sampleFiles_LWED.txt --matchType primerProbe --prefix LWED_ --inDir ./../03_run3GTscore/")
+
+system2("perl",
+        args="./../03_run3GTscore/matchReads.pl -p ./../03_run3GTscore/primerProbeFile_SIMP.txt --files ./../03_run3GTscore/sampleFiles_SIMP.txt --matchType primerProbe --prefix SIMP_ --inDir ./../03_run3GTscore/")
+```
+
+The default output file names are matchReads_primerAligned.txt or matchReads_primerProbeAligned.txt depending on which match type was chosen.
+
+### Create reference amplicon sequences file
+
+To conduct locus diagnostics, we need both a text file and fasta file of reference amplicon sequences. These sequences are in Sam's pos_amplicon.csv file, which I reformatted in the first sequencing run for use in this pipeline. Now we just need to do a bit more tweaking to ensure that 1) we have only the optimized amplicon sequences and 2) the names match up correctly
+
+*NOTE* - we're missing some references sequences; this file only contains the 226 sequences that had no bp3 error.
+
+Text file first:
+
+```{r}
+# Original file
+refseqs_original <- read.table("ampliconRefSeqs_psRun1.txt", header = T) %>%
+  mutate(Locus = gsub("\\..*","", Locus)) %>% # adjust locus names to ditch everything after "."
+  mutate(Locus = str_replace(Locus, 'SEXID_195', 'SEXID_LWED_195')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_197', 'SEXID_SIMP_197')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_198', 'SEXID_SIMP_198')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_203', 'SEXID_SIMP_203')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_208', 'SEXID_LWED_208')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_211', 'SEXID_LWED_211')) %>%
+  mutate(Locus = str_replace(Locus, 'SEXID_218', 'SEXID_SIMP_218'))
+
+# Subset to optimized loci only
+refseqs_updated <- refseqs_original %>%
+  filter(Locus %in% pp_original_v3$Locus)
+
+# Export
+write.table(refseqs_updated, "./ampliconRefSeqs_laLab_run1.txt", sep= "\t", row.names = F, quote = F)
+```
+
+Then fasta file:
+
+```{r}
+library(phylotools)
+
+amplicon_txt <- read.table("ampliconRefSeqs_laLab_run1.txt", header = T) %>%
+  dplyr::rename(c(seq.name=Locus, seq.text=refSeq))
+View(amplicon_txt)
+
+dat2fasta(amplicon_txt, outfile = "ampliconRefSeqs_laLab_run1.fasta")
+```
+
+Text file first:
+
+```{r create reference sequences file}
+# Packages
+library(Biostrings)
+library(tidyverse)
+
+# Import data
+amplicon_csv <- read.csv("pos_amplicon.csv", sep = ",")
+View(amplicon_csv)
+translation <- read.csv("primers_seqName_to_shortName.csv")
+View(translation)
+
+# Subset to get names and amplicon sequences only & remove brackets
+amplicons <- amplicon_csv %>%
+  select(c("SNP_name", "amplicon")) %>%
+  mutate(amplicon = str_replace_all(amplicon, "\\[|\\]", ""))
+View(amplicons)
+
+# Add short names to to amplicon seqs
+amplicons_shortnames <- merge(amplicons, translation, by.x = "SNP_name", by.y = "seqID1") %>%
+  select(c("primerName2", "amplicon")) %>%
+  dplyr::rename(Locus=primerName2, refSeq=amplicon)
+View(amplicons_shortnames)
+length(amplicons_shortnames$Locus) #226 - good!
+
+# Create LWED and SIMP subsets
+amplicons_lwed <- amplicons_shortnames %>%
+  filter(!str_detect(Locus, "SIMP"))
+
+amplicons_simp <- amplicons_shortnames %>%
+  filter(!str_detect(Locus, "LWED"))
+
+
+# Export
+write.table(amplicons_shortnames, "./ampliconRefSeqs.txt", sep= "\t", row.names = F, quote = F)
+write.table(amplicons_lwed, "./ampliconRefSeqs_LWED.txt", sep= "\t", row.names = F, quote = F)
+write.table(amplicons_simp, "./ampliconRefSeqs_SIMP.txt", sep= "\t", row.names = F, quote = F)
+```
+
+Then fasta file:
+
+```{r create amplicon fasta file}
+library(phylotools)
+
+amplicon_txt <- read.table("ampliconRefSeqs.txt", header = T) %>%
+  dplyr::rename(c(seq.name=Locus, seq.text=refSeq))
+View(amplicon_txt)
+
+dat2fasta(amplicon_txt, outfile = "ampliconRefSeqs.fasta")
+
+amplicon_txt_lwed <- read.table("ampliconRefSeqs_LWED.txt", header = T) %>%
+  dplyr::rename(c(seq.name=Locus, seq.text=refSeq))
+View(amplicon_txt_lwed)
+
+dat2fasta(amplicon_txt_lwed, outfile = "ampliconRefSeqs_LWED.fasta")
+
+amplicon_txt_simp <- read.table("ampliconRefSeqs_SIMP.txt", header = T) %>%
+  dplyr::rename(c(seq.name=Locus, seq.text=refSeq))
+View(amplicon_txt_simp)
+
+dat2fasta(amplicon_txt_simp, outfile = "ampliconRefSeqs_SIMP.fasta")
+```
+
+### MSA alignment (GTscore.R)
+
+MSA alignment of the matched reads can be done directly on the output from matchReads.pl using the alignMatchedSeqs command in GTscore. Probe sequence is incorporated into the alignment to visualize how probes may be affecting read counting, and reference sequence can optionally be included to facilitate comparison of the observed sequence with the target locus. The probe sequence is obtained from the primer-probe file originally used by AmpliconReadCounter.pl; the reference sequence file has a two column format where the first column is the locus name and the second column is the reference sequence for the locus amplicon. MSA will take a very long time to run if too many sequences are included for alignment so a minimum read threshold (minReads) is included as an option in the alignment command (suggest begin with minReads=20). In addition, a maximum of 100 unique sequences (ranked by number of reads) will be aligned. The maximum number of reads allowed for alignment can be changed using the maxAlignedSeqs option. Be sure the required perl package has been installed (Excel-Writer-XLSX).
+
+```{r MSA alignment}
+#load reference sequences in table format
+referenceSeqs<-read.delim("ampliconRefSeqs_laLab_run1.txt", header=TRUE, stringsAsFactors=FALSE )
+referenceSeqs_LWED<-read.delim("ampliconRefSeqs_LWED.txt", header=TRUE, stringsAsFactors=FALSE )
+referenceSeqs_SIMP<-read.delim("ampliconRefSeqs_SIMP.txt", header=TRUE, stringsAsFactors=FALSE )
+View(referenceSeqs)
+length(referenceSeqs$Locus)
+
+#load primer probe file
+primerProbes<-read.delim("fullSet_primerProbeFile.txt", header=TRUE, stringsAsFactors=FALSE)
+primerProbes_LWED<-read.delim("primerProbeFile_LWED.txt", header=TRUE, stringsAsFactors=FALSE)
+primerProbes_SIMP<-read.delim("primerProbeFile_SIMP.txt", header=TRUE, stringsAsFactors=FALSE)
+View(primerProbes)
+length(primerProbes$Locus)
+
+#primer aligned reads
+primerMatchedReads<-read.delim("matchedReads_primerAligned.txt", header=TRUE, stringsAsFactors=FALSE)
+View(primerMatchedReads)
+alignMatchedSeqs(referenceSeqs=referenceSeqs,primerProbes=primerProbes,matchedReads=primerMatchedReads,minReads=20, maxAlignedSeqs=100,type="primer",saveDir="MSA_primerMatched")
+
+primerMatchedReads_LWED<-read.delim("LWED_matchedReads_primerAligned.txt", header=TRUE, stringsAsFactors=FALSE)
+View(primerMatchedReads_LWED)
+alignMatchedSeqs(referenceSeqs=referenceSeqs_LWED,primerProbes=primerProbes_LWED,matchedReads=primerMatchedReads_LWED,minReads=20, maxAlignedSeqs=100,type="primer",saveDir="MSA_primerMatched_LWED")
+
+primerMatchedReads_SIMP<-read.delim("SIMP_matchedReads_primerAligned.txt", header=TRUE, stringsAsFactors=FALSE)
+View(primerMatchedReads_SIMP)
+alignMatchedSeqs(referenceSeqs=referenceSeqs_SIMP,primerProbes=primerProbes_SIMP,matchedReads=primerMatchedReads_SIMP,minReads=20, maxAlignedSeqs=100,type="primer",saveDir="MSA_primerMatched_SIMP")
+
+#primer probe aligned reads
+primerProbeMatchedReads<-read.delim("matchedReads_primerProbeAligned.txt", header=TRUE, stringsAsFactors=FALSE)
+alignMatchedSeqs(referenceSeqs=referenceSeqs, primerProbes=primerProbes, matchedReads=primerProbeMatchedReads,minReads=20, maxAlignedSeqs=100,type="primerProbe",saveDir="MSA_primerProbeMatched")
+
+primerProbeMatchedReads_LWED<-read.delim("LWED_matchedReads_primerProbeAligned.txt", header=TRUE, stringsAsFactors=FALSE)
+alignMatchedSeqs(referenceSeqs=referenceSeqs_LWED, primerProbes=primerProbes_LWED, matchedReads=primerProbeMatchedReads_LWED,minReads=20, maxAlignedSeqs=100,type="primerProbe",saveDir="MSA_primerProbeMatched_LWED")
+
+primerProbeMatchedReads_SIMP<-read.delim("SIMP_matchedReads_primerProbeAligned.txt", header=TRUE, stringsAsFactors=FALSE)
+alignMatchedSeqs(referenceSeqs=referenceSeqs_SIMP, primerProbes=primerProbes_SIMP, matchedReads=primerProbeMatchedReads_SIMP,minReads=20, maxAlignedSeqs=100,type="primerProbe",saveDir="MSA_primerProbeMatched_SIMP")
+```
+
+Excel files are output for each locus within the directory specified by savDir. The first row is a consensus sequence based on the sequence alignments. This is followed by the probes, reference sequence if included, and then the sequence alignments.
+
+### Plotting mismatches by position (Perl and GTscore.R)
+
+#### Calculate sequence mismatches by position (Perl)
+
+Plotting the number of mismatches by position requires first comparing each matched sequence against the reference sequence and summing the number of mismatches for each nucleotide position. This is done with the perl script seqMismatchPositions.pl.
+
+Input flags for this script are \* --amplicon a fasta file containing the reference amplicon sequence for each locus \* --matchedSeqs a tab delimited file containing sequences that matched each locus. This file is generated by matchReads.pl \* --matchType the match type chosen for retaining sequences for each locus. Options are "primer" to retain sequences that match the primer for a locus or "primerProbe" to retain sequences that match both the primer and probe. primerProbe is the default if no option is specified.
+
+Optional flags \* --prefix optional prefix for output file names
+
+You can run matchReads.pl from the command line using the following example: perl seqMismatchPositions.pl --amplicon ampliconRefSeqs.fasta --matchedSeqs matchedReads_primerAligned.txt --matchType primer [--prefix]
+
+Alternatively, you can also run it through R:
+
+```{r sequence mismatches, eval=FALSE}
+# fullSet
+system2("perl",
+        args="seqMismatchPositions.pl --amplicon ampliconRefSeqs.fasta --matchedSeqs matchedReads_primerAligned.txt --matchType primer")
+system2("perl",
+        args="seqMismatchPositions.pl --amplicon ampliconRefSeqs.fasta --matchedSeqs matchedReads_primerProbeAligned.txt --matchType primerProbe")
+
+# LWED
+system2("perl",
+        args="seqMismatchPositions.pl --amplicon ampliconRefSeqs_LWED.fasta --matchedSeqs LWED_matchedReads_primerAligned.txt --matchType primer --prefix LWED_")
+system2("perl",
+        args="seqMismatchPositions.pl --amplicon ampliconRefSeqs_LWED.fasta --matchedSeqs LWED_matchedReads_primerProbeAligned.txt --matchType primerProbe --prefix LWED_")
+
+# SIMP
+system2("perl",
+        args="seqMismatchPositions.pl --amplicon ampliconRefSeqs_SIMP.fasta --matchedSeqs SIMP_matchedReads_primerAligned.txt --matchType primer --prefix SIMP_")
+system2("perl",
+        args="seqMismatchPositions.pl --amplicon ampliconRefSeqs_SIMP.fasta --matchedSeqs SIMP_matchedReads_primerProbeAligned.txt --matchType primerProbe --prefix SIMP_")
+```
+
+The default output file names are mismatchPositions_primer.txt or mismatchPositions_primerProbe.txt depending on which match type was chosen. The output files will be used by the summarizeMismatches function in GTscore to generate plots of mismatches by position for each locus.
+
+#### Plot of sequence mismatches by position (GTscore.R)
+
+```{r}
+#load results from seqMismatchPositions.pl
+#primer matched sequences
+mismatchPositionData_primer<-read.delim("mismatchPositions_primer.txt", header=TRUE, stringsAsFactors=FALSE)
+mismatchPositionData_primer_LWED<-read.delim("mismatchPositions_LWED_primer.txt", header=TRUE, stringsAsFactors=FALSE)
+mismatchPositionData_primer_SIMP<-read.delim("mismatchPositions_SIMP_primer.txt", header=TRUE, stringsAsFactors=FALSE)
+#primer probe matched sequences
+mismatchPositionData_primerProbe<-read.delim("mismatchPositions_primerProbe.txt", header=TRUE, stringsAsFactors=FALSE)
+mismatchPositionData_primerProbe_LWED<-read.delim("mismatchPositions_LWED_primerProbe.txt", header=TRUE, stringsAsFactors=FALSE)
+mismatchPositionData_primerProbe_SIMP<-read.delim("mismatchPositions_SIMP_primerProbe.txt", header=TRUE, stringsAsFactors=FALSE)
+
+
+#generate plots of mismatches by position
+#primer matched sequences
+summarizeMismatches(mismatchPositionData_primer,saveDir="mismatchPositionPlots_primer")
+summarizeMismatches(mismatchPositionData_primer_LWED,saveDir="mismatchPositionPlots_primer_LWED")
+summarizeMismatches(mismatchPositionData_primer_SIMP,saveDir="mismatchPositionPlots_primer_SIMP")
+#primer probe matched sequences
+summarizeMismatches(mismatchPositionData_primerProbe,saveDir="mismatchPositionPlots_primerProbe")
+summarizeMismatches(mismatchPositionData_primerProbe_LWED,saveDir="mismatchPositionPlots_primerProbe_LWED")
+summarizeMismatches(mismatchPositionData_primerProbe_SIMP,saveDir="mismatchPositionPlots_primerProbe_SIMP")
+```
