@@ -1,12 +1,10 @@
 ---
 title: "How-to guide for GT-seq data analysis (pt. 1)"
-author: Rachel Voyt
-output: 
-  rmdformats::downcute:
-    downcute_theme: "chaos"
+author: "Rachel Voyt"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-editor_options: 
-  markdown: 
+output: pdf_document
+editor_options:
+  markdown:
     wrap: 72
 ---
 
