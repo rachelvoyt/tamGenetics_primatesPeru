@@ -230,7 +230,6 @@ readCounts_lwedSIMP <- readCounts_all %>%
 ```
 
 Assess locus performance for each species
-
 ```{r}
 readCounts_lwedSIMP_summary <- readCounts_lwedSIMP %>%
   t() %>%
