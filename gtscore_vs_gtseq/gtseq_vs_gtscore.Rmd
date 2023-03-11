@@ -43,11 +43,11 @@ Beyond these additions, there are a few other differences to keep in mind:
 # 2 Packages
 
 ```{r}
-library(tidyverse)
+library(data.table)
 library(ggpubr)
 library(ggthemes)
-library(data.table)
 library(magrittr)
+library(tidyverse)
 ```
 
 # 3 Data
@@ -86,7 +86,6 @@ samplesSIMP <- md_tamRun3 %>%
 ### Genotypes
 
 ```{r}
-# Genotypes
 genos_gtseq <- read.csv("./gtscore_vs_gtseq/genos/compiledGenos_gtseq_tamRun3.csv", header = T) %>%
   mutate(Sample = sub("\\_.*", "", Sample))
 ```
@@ -94,17 +93,22 @@ genos_gtseq <- read.csv("./gtscore_vs_gtseq/genos/compiledGenos_gtseq_tamRun3.cs
 ### Locus summaries
 
 From what I could tell, the GTseq pipeline doesn't have a script that provides metrics per locus.
-Instead, we need to create this based on the results from GTseq_SeqTest.pl.
-This script outputs files for each sample that contain three columns, which represent counts of the following:
+Instead, we need to create this based on the results from seqTest and genos files.
+We can use the seqTest files to give us total read counts per locus and the genos files to give read counts for each allele per locus.
+
+#### Locus read counts
+
+GTseq_seqTest.pl outputs files for each sample that contain three columns, which represent counts of the following:
 
 -   primer reads
 -   probe reads
 -   reads when both primer and probe occur in the sequence
 
-```{r}
-# Set working directory
-setwd("./gtscore_vs_gtseq/seqTest/")
+We can sum these sample-specific read counts to get loci-specific read counts by combining all of the different seqTest sample files.
+I've also included species-specific subsets, where read counts per locus include only those from LWED or SIMP samples.
 
+```{r}
+# use full.names = T to list full sample path (avoid changing wd)
 seqTestFiles_gtseq <- list.files(path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/gtscore_vs_gtseq/seqTest", pattern = "*.csv", full.names = T)
 
 # Read in individual sample seqTest files and combine
@@ -123,22 +127,23 @@ seqTest_compiled <- lapply(seqTestFiles_gtseq, fread, select = c("V1", "V2", "V3
   dplyr::mutate(sample = sub("-", "\\.", sample))
 
 # Remove negative controls
-readCounts_lwedSIMP <- seqTest_compiled %>%
+lociReadCounts_lwedSIMP <- seqTest_compiled %>%
   filter(sample %in% samples_noNeg$sample) %>%
   dplyr::group_by(locus) %>%
   dplyr::summarise_if(is.numeric, sum) %>%
   as.data.frame() %>%
   dplyr::mutate(primerProbeProportion = primerProbeReads/primerReads)
 
-# Subset to 
-readCounts_lwed <- seqTest_compiled %>%
+# Loci counts for LWED samples only
+lociReadCounts_lwed <- seqTest_compiled %>%
   filter(sample %in% samplesLWED$sampleID) %>%
   dplyr::group_by(locus) %>%
   dplyr::summarise_if(is.numeric, sum) %>%
   as.data.frame() %>%
   dplyr::mutate(primerProbeProportion = primerProbeReads/primerReads)
 
-readCounts_simp <- seqTest_compiled %>%
+# Loci counts for SIMP samples only
+lociReadCounts_simp <- seqTest_compiled %>%
   filter(sample %in% samplesSIMP$sampleID) %>%
   dplyr::group_by(locus) %>%
   dplyr::summarise_if(is.numeric, sum) %>%
@@ -146,28 +151,33 @@ readCounts_simp <- seqTest_compiled %>%
   dplyr::mutate(primerProbeProportion = primerProbeReads/primerReads)
 ```
 
-Below is the summary of primer, probe, and primer-probe counts per locus:
+Using the species-subsets created above, we can then create a final locus read-count summary that's species-specific, such that:
+
+-   values for LWED-specific loci reflect performance with LWED individuals only
+-   values for SIMP-specific loci reflect performance with SIMP individuals only
+-   all other loci reflect performance with LWED and SIMP individuals combined
 
 ```{r}
-rc <- locusSum_lwedSIMP %>%
+lociRC <- locusSum_lwedSIMP %>%
   filter(!str_detect(locus, "LWED|SIMP"))
-lwed_rc <- locusSum_lwed %>%
+lociRC_lwed <- locusSum_lwed %>%
   filter(str_detect(locus, "LWED"))
-simp_rc <- locusSum_simp %>%
+lociRC_simp <- locusSum_simp %>%
   filter(str_detect(locus, "SIMP"))
 
-readCounts_combine <- rbind(ls, lwed_ls, simp_ls)
+lociReadCounts_combine <- rbind(lociRC, lociRC_lwed, lociRC_simp)
 ```
 
-However, we also need allele frequency metrics per locus.
+#### Allele frequencies
+
+We also need allele frequency metrics per locus.
 To do this, we need to get the allele count data from the .genos files and compile.
 
-Note that reading in all of the .genos files will give a warning; this is because these files are output with two extra (empty) columns
+*Note that reading in all of the .genos files will give a warning; this is because these files are output with two extra (empty) columns*
 
 ```{r}
 # use full.names = T to list full sample path (avoid changing wd)
 genoFiles_gtseq <- list.files(path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/gtscore_vs_gtseq/genos", pattern = "*interleaved.genos", full.names = T)
-head(genoFiles_gtseq)
 
 # use skip = 1 to skip reading the header
 alleleReads_gtseq <- lapply(genoFiles_gtseq, fread, skip = 1, sep = ",", header = F, select = c("V1", "V2", "V3")) %>%
@@ -191,9 +201,6 @@ alleleReads_lwedSIMP <- alleleReads_gtseq %>%
   dplyr::summarise_if(is.numeric, sum) %>%
   as.data.frame()
 
-test <- alleleReads_lwedSIMP %>%
-  distinct(sample)
-
 alleleReads_lwed <- alleleReads_gtseq %>%
   filter(sample %in% samplesLWED$sampleID) %>%
   dplyr::group_by(locus, allele1, allele2) %>%
@@ -207,30 +214,26 @@ alleleReads_simp <- alleleReads_gtseq %>%
   as.data.frame()
 ```
 
-Now combine allele read info...
+Now we can combine the allele read-counts per locus, again species-specific so that species-specific loci only reflect read counts for samples of that species:
 
 ```{r}
-ar <- alleleReads_lwedSIMP %>%
+alleleRC <- alleleReads_lwedSIMP %>%
   filter(!str_detect(locus, "LWED|SIMP"))
-lwed_ar <- alleleReads_lwed %>%
+alleleRC_lwed <- alleleReads_lwed %>%
   filter(str_detect(locus, "LWED"))
-simp_ar <- alleleReads_simp %>%
+alleleRC_simp <- alleleReads_simp %>%
   filter(str_detect(locus, "SIMP"))
 
-alleleReads_combine <- rbind(ar, lwed_ar, simp_ar)
+alleleReads_combine <- rbind(alleleRC, alleleRC_lwed, alleleRC_simp)
 ```
 
-And finally create the full locus summary for GTseq:
+And finally we can combine total read counts and allele read counts into a single locus summary file for GTseq:
 
 ```{r}
 # Combined
 locusSum_gtseq <- merge(readCounts_combine, alleleReads_combine, by = "locus") %>%
   dplyr::mutate(alleleReadsTotal = allele1Reads + allele2Reads) %>%
   dplyr::mutate(maf_gtseq = pmax(allele1Reads, allele2Reads)/alleleReadsTotal)
-
-# LWED samples only
-
-# SIMP samples only
 ```
 
 ## 3.3 GTscore data
@@ -266,355 +269,28 @@ indivSum_gtscore <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_GTscore_indi
 ssSum_gtscore <- read.csv("./03_tamRun3/03_run3GTscore/fullSet_singleSNP_sampleSummary.csv")
 ```
 
-# 4 Sample performance
+# 4 Loci performance
 
-## 4.1 Total reads per sample
+For the first comparison between the two pipelines, I'm going to look at results in relative to loci (vs. relative to samples, which is in the next section).
+Specifically, I'm looking at what each pipeline shows relative to:
 
-Both GTseq and GTscore pipelines give the same number of total reads per sample.
+1.  The proportion of primer-probe reads relative to primer reads
+2.  Whether an loci have fixed alleles
+3.  Whether particular loci are overamplifying relative to the others
 
-```{r, echo = F}
-totalReads <- indivSum_gtscore %>%
-  select(c(Sample, Total.Reads)) %>%
-  dplyr::rename("totalReads_gtscore" = "Total.Reads") %>%
-  merge(., genos_gtseq[, c("Sample", "Raw.Reads")], by = "Sample") %>%
-  dplyr::rename("totalReads_gtseq" = "Raw.Reads") %>%
-  mutate(totalReads_diff = totalReads_gtseq - totalReads_gtscore) %>%
-  mutate(totalReads_avg = (totalReads_gtseq + totalReads_gtscore)/2)
-```
+## 4.1 Primer-probe proportion
 
-```{r}
-summary(totalReads$totalReads_diff)
-```
+The proportion of primer-probe reads to primer reads is helpful in assessing primer performance, where large discrepancies in primer, probe, and primer-probe reads can indicate artifact sequences, unaccounted for in-silico probe variations, or an in-silico probe sequence that's not specific to the target amplicon.
+As such, it's important to determine whether the GTseq and GTscore pipelines are providing similar values for primer, probe, and primer-probe reads.
 
-## 4.2 On-target reads per sample
+GTseq documentation provides the following as examples:
 
-On-target read counts are usually HIGHER for GTseq vs. GTscore.
-This difference is proportional, where GTseq has 0.33% more on-target reads for any given number of on-target reads from GTscore.
-
-```{r, echo = F}
-otReads <- indivSum_gtscore %>%
-  select(c(Sample, Primer.Probe.Reads)) %>%
-  dplyr::rename("otReads_gtscore" = "Primer.Probe.Reads") %>%
-  select(c(Sample, otReads_gtscore)) %>%
-  merge(., genos_gtseq[, c("Sample", "On.Target.Reads")], by = "Sample") %>%
-  dplyr::rename("otReads_gtseq" = "On.Target.Reads") %>%
-  mutate(otReads_avg = (otReads_gtseq + otReads_gtscore)/2) %>%
-  mutate(otReads_diff = otReads_gtseq - otReads_gtscore) %>%
-  mutate(otReads_propDiff = (otReads_diff)/otReads_avg)
-```
-
-```{r}
-summary(otReads$otReads_propDiff)
-```
-
-Quick normality test - neither GTseq or GTscore on-target reads have a normal distribution
-
-```{r}
-shapiro.test(otReads$otReads_gtseq)
-shapiro.test(otReads$otReads_gtscore)
-```
-
-### Visualize otReads_diff
-
-Plotting the log-transformed on-target reads show that GTseq on-target reads increase 1% for every 1% increase in GTscore on-target reads
-
-```{r, echo = F}
-ggplot(otReads, aes(x = log(otReads_gtseq), y = log(otReads_gtscore))) +
-  geom_point() +
-  geom_smooth(method = "lm", se=FALSE, color="mediumvioletred", formula = y ~ x, size = 0.75) +
-  ggpubr::stat_regline_equation(label.y = 11, aes(label = ..eq.label..)) +
-  ggpubr::stat_regline_equation(label.y = 10, aes(label = ..rr.label..)) +
-  xlab("log(GTseq) on-target read counts per sample") +
-  ylab("log(GTscore) on-target read counts per sample") +
-  theme_pander()
-```
-
-And a Bland-Altman analysis shows us that on average, GTseq has 0.33% higher on-target reads relative to GTscore.
-
-*Note that the "Percent difference" here is equivalent to log(GTseq) - log(GTscore)*
-
-```{r, echo = F}
-ggplot(otReads, aes(x = otReads_avg, y = otReads_propDiff)) +
-  geom_point(alpha = 0.5) +
-  geom_hline(yintercept = mean(otReads$otReads_propDiff, na.rm = T), colour = "mediumvioletred", size = 0.5) +
-  geom_hline(yintercept = mean(otReads$otReads_propDiff, na.rm = T) - (1.96 * sd(otReads$otReads_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
-  geom_hline(yintercept = mean(otReads$otReads_propDiff, na.rm = T) + (1.96 * sd(otReads$otReads_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
-  annotate(geom = "label", label = "Mean % diff = 0.33%", x = 90000, y = mean(otReads$otReads_propDiff, na.rm = T), hjust = 0, vjust = 0) +
-  ylab("Percent difference \n (GTseq - GTscore)/((GTseq + GTscore)/2)") +
-  xlab("Mean on-target read counts per sample \n ((GTseq + GTscore)/2)") +
-  theme_pander()
-```
-
-## 5.4 Genotype success per sample
-
-Genotype success per sample was LOWER for GTseq vs. GTscore.
-This difference is proportional, where the proportion of loci genotyped by GTscore is 7.3% lower than by GTseq.
-
-```{r}
-genoRate <- ssSum_gtscore %>%
-  select(c(sample, GenotypeRate)) %>%
-  dplyr::rename("Sample" = "sample") %>%
-  dplyr::rename("genoRate_gtscore" = "GenotypeRate") %>%
-  select(c(Sample, genoRate_gtscore)) %>%
-  merge(., genos_gtseq[, c("Sample", "X.GT")], by = "Sample") %>%
-  dplyr::rename("genoRate_gtseq" = "X.GT") %>%
-  mutate(genoRate_gtseq = genoRate_gtseq/100) %>%
-  mutate_if(is.numeric, round, 2) %>%
-  mutate(genoRate_avg = (genoRate_gtseq + genoRate_gtscore)/2) %>%
-  mutate(genoRate_diff = genoRate_gtseq - genoRate_gtscore) %>%
-  mutate(genoRate_propDiff = genoRate_diff/genoRate_avg)
-```
-
-```{r}
-summary(genoRate$genoRate_propDiff, na.rm = T)
-```
-
-Quick normality test - neither GTseq or GTscore genotype rates have a normal distribution
-
-```{r}
-shapiro.test(genoRate$genoRate_gtseq)
-shapiro.test(genoRate$genoRate_gtscore)
-```
-
-### Visualize genoRate_diff
-
-Plotting the log-transformed genotype rates show that GTseq on-target reads increase 1% for every 1% increase in GTscore on-target reads
-
-```{r, echo = F}
-ggplot(genoRate, aes(x = log(genoRate_gtseq), y = log(genoRate_gtscore))) +
-  geom_point() +
-  geom_smooth(method = "lm", se=FALSE, color="mediumvioletred", formula = y ~ x, size = 0.75) +
-  ggpubr::stat_regline_equation(label.y = -0.5, aes(label = ..eq.label..)) +
-  ggpubr::stat_regline_equation(label.y = -1, aes(label = ..rr.label..)) +
-  xlab("log(GTseq) % loci genotyped per sample") +
-  ylab("log(GTscore) % loci genotyped per sample") +
-  theme_pander()
-```
-
-And a Bland-Altman analysis shows us that on average, GTseq provides 7.3% FEWER genotypes per sample relative to GTscore.
-
-*Note that the "Percent difference" here is equivalent to log(GTseq) - log(GTscore)*
-
-```{r}
-ggplot(genoRate, aes(x = genoRate_avg, y = genoRate_propDiff)) +
-  geom_point(alpha = 0.5) +
-  geom_hline(yintercept = mean(genoRate$genoRate_propDiff, na.rm = T), colour = "springgreen4", size = 0.5) +
-  geom_hline(yintercept = mean(genoRate$genoRate_propDiff, na.rm = T) - (1.96 * sd(genoRate$genoRate_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
-  geom_hline(yintercept = mean(genoRate$genoRate_propDiff, na.rm = T) + (1.96 * sd(genoRate$genoRate_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
-  annotate(geom = "label", label = "Mean % diff = -7.3%", x = 0, y = mean(genoRate$genoRate_propDiff, na.rm = T), hjust = 0, vjust = 0, fontface = "bold") +
-  ylab("Percent difference \n (GTseq - GTscore)/((GTseq + GTscore)/2)") +
-  xlab("Mean % loci genotyped per sample \n ((GTseq + GTscore)/2)") +
-  theme_pander()
-```
-
-## 5.5 Genotypes assigned per sample
-
-Despite the differences in read counts and genotype success, there were no sample/loci combinations where gtscore and gtseq made different genotype calls.
-
-```{r}
-genos_gtscore_l <- genos_gtscore %>%
-  rownames_to_column("locus") %>%
-  mutate(locus = sub("_[^_]+$", "", locus)) %>%
-  column_to_rownames("locus") %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column("sample") %>%
-  pivot_longer(!sample,
-               names_to = "locus",
-               values_to = "genotype") %>%
-  dplyr::rename("gtscore" = "genotype") %>%
-  mutate(gtscore = sub(",", "", gtscore))
-  
-genos_gtseq_l <- genos_gtseq %>%
-  select(!c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
-  pivot_longer(!Sample,
-               names_to = "locus",
-               values_to = "genotype") %>%
-  dplyr::rename("gtseq" = "genotype") %>%
-  mutate(Sample = sub("-", "\\.", Sample)) %>%
-  rename("sample" = "Sample")
-
-genos_seqScore <- merge(genos_gtscore_l, genos_gtseq_l, by = c("sample", "locus"), all = T) %>%
-  mutate(genosCalled = rowSums(select(., -sample, -locus) != 0, na.rm = T)) %>%
-  mutate(zerosCalled = rowSums(select(., -sample, -locus, -genosCalled) == 0, na.rm = T)) %>%
-  rowwise() %>%
-  mutate(uniqueGenos = ifelse(zerosCalled > 0,
-                              (n_distinct(c_across(gtscore:gtseq), na.rm = T)) - 1,
-                              (n_distinct(c_across(gtscore:gtseq), na.rm = T))
-                              ))
-
-max(genos_seqScore$uniqueGenos)
-```
-
-However, there were 3262 sample/loci combinations where only one pipeline called a genotype.
-
-Of these, GTseq called 87 genotypes where GTscore did not, and GTscore called 3175 genotypes when GTseq did not.
-
-Perhaps of note, of the instances where GTseq called genotypes when GTscore didn't, the vast majority were homozygous.
-
-```{r}
-genos_seqScore_zeros <- genos_seqScore %>%
-  filter(genosCalled == 1)
-
-length(genos_seqScore_zeros$sample)
-length(which(genos_seqScore_zeros$gtscore == 0))
-length(which(genos_seqScore_zeros$gtseq == 0))
-```
-
-## 5.6 Loci performance
-
-### 5.6.1 Prep
-
-##### GTscore
-
-The GTscore pipeline includes scripts that provide locus-specific metrics; e.g., primer reads, probe reads, genotype rate, etc. per locus.
-
-I compiled the locus-specific metrics from the GTscore pipeline into a "master summary", in which...
-
--   values for LWED-specific loci reflect performance with LWED individuals only
--   values for SIMP-specific loci reflect performance with SIMP individuals only
--   all other loci reflect performance with LWED and SIMP individuals combined
-
-```{r}
-locusSum_gtscore <- read.csv("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/03_run3GTscore/summaryFiles/master_locusSummary.csv")
-```
-
-##### GTseq
-
-The GTseq pipeline, however, doesn't have a script that provides metrics per locus from what I could tell.
-Instead, we need to create this based on the results from GTseq_SeqTest.pl
-
-The GTseq_SeqTest.pl script outputs files for each sample that contain three columns, which represent counts of each... - primer - probe - primer-probe combination
-
-```{r}
-setwd("./gtscore_vs_gtseq/seqTest/")
-
-library(data.table)
-library(magrittr)
-
-seqTest_compiled <- lapply(list.files(pattern = "*.csv"), fread, select = c("V1", "V2", "V3", "V4")) %>%
-  set_names(list.files(pattern = "*.csv")) %>%
-  rbindlist(idcol = "sample") %>%
-  as.data.frame() %>%
-  dplyr::rename("locus" = "V1",
-                "primerReads" = "V2",
-                "probeReads" = "V3", 
-                "primerProbeReads" = "V4") %>%
-  dplyr::mutate(sample = sub("\\_.*", "", sample)) %>%
-  dplyr::mutate(sample = sub("-", "\\.", sample))
-
-readCounts_lwedSIMP <- seqTest_compiled %>%
-  filter(sample %in% samples_noNeg$sample) %>%
-  dplyr::group_by(locus) %>%
-  dplyr::summarise_if(is.numeric, sum) %>%
-  as.data.frame() %>%
-  dplyr::mutate(primerProbeProportion = primerProbeReads/primerReads)
-
-readCounts_lwed <- seqTest_compiled %>%
-  filter(sample %in% samplesLWED$sampleID) %>%
-  dplyr::group_by(locus) %>%
-  dplyr::summarise_if(is.numeric, sum) %>%
-  as.data.frame() %>%
-  dplyr::mutate(primerProbeProportion = primerProbeReads/primerReads)
-
-readCounts_simp <- seqTest_compiled %>%
-  filter(sample %in% samplesSIMP$sampleID) %>%
-  dplyr::group_by(locus) %>%
-  dplyr::summarise_if(is.numeric, sum) %>%
-  as.data.frame() %>%
-  dplyr::mutate(primerProbeProportion = primerProbeReads/primerReads)
-```
-
-Below is the summary of primer, probe, and primer-probe counts per locus:
-
-```{r}
-rc <- locusSum_lwedSIMP %>%
-  filter(!str_detect(locus, "LWED|SIMP"))
-lwed_rc <- locusSum_lwed %>%
-  filter(str_detect(locus, "LWED"))
-simp_rc <- locusSum_simp %>%
-  filter(str_detect(locus, "SIMP"))
-
-readCounts_combine <- rbind(ls, lwed_ls, simp_ls)
-```
-
-However, we also need allele frequency metrics per locus.
-To do this, we need to get the allele count data from the .genos files and compile.
-
-Note that reading in all of the .genos files will give a warning; this is because these files are output with two extra (empty) columns
-
-```{r}
-# use full.names = T to list full sample path
-genoFiles_gtseq <- list.files(path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/gtscore_vs_gtseq/genos", pattern = "*interleaved.genos", full.names = T)
-head(genoFiles_gtseq)
-
-# use skip = 1 to skip reading the header
-alleleReads_gtseq <- lapply(genoFiles_gtseq, fread, skip = 1, sep = ",", header = F, select = c("V1", "V2", "V3")) %>%
-  set_names(genoFiles_gtseq) %>%
-  rbindlist(idcol = "sample") %>%
-  as.data.frame() %>%
-  dplyr::mutate(sample = sub(".*genos/", "", sample)) %>%
-  dplyr::mutate(sample = sub("\\_.*", "", sample)) %>%
-  dplyr::mutate(sample = gsub("-","\\.", sample)) %>%
-  dplyr::rename("locus" = "V1") %>%
-  dplyr::mutate(allele1 = substr(V2, 1, 1)) %>%
-  dplyr::mutate(allele2 = substr(V3, 1, 1)) %>%
-  dplyr::mutate(allele1Reads = sub(".*=", "", V2)) %>%
-  dplyr::mutate(allele2Reads = sub(".*=", "", V3)) %>%
-  dplyr::mutate_at(c("allele1Reads", "allele2Reads"), as.numeric) %>%
-  select(c(sample, locus, allele1, allele2, allele1Reads, allele2Reads))
-
-alleleReads_lwedSIMP <- alleleReads_gtseq %>%
-  filter(sample %in% samples_noNeg$sampleID) %>%
-  dplyr::group_by(locus, allele1, allele2) %>%
-  dplyr::summarise_if(is.numeric, sum) %>%
-  as.data.frame()
-
-test <- alleleReads_lwedSIMP %>%
-  distinct(sample)
-
-alleleReads_lwed <- alleleReads_gtseq %>%
-  filter(sample %in% samplesLWED$sampleID) %>%
-  dplyr::group_by(locus, allele1, allele2) %>%
-  dplyr::summarise_if(is.numeric, sum) %>%
-  as.data.frame()
-
-alleleReads_simp <- alleleReads_gtseq %>%
-  filter(sample %in% samplesSIMP$sampleID) %>%
-  dplyr::group_by(locus, allele1, allele2) %>%
-  dplyr::summarise_if(is.numeric, sum) %>%
-  as.data.frame()
-```
-
-Now combine allele read info...
-
-```{r}
-ar <- alleleReads_lwedSIMP %>%
-  filter(!str_detect(locus, "LWED|SIMP"))
-lwed_ar <- alleleReads_lwed %>%
-  filter(str_detect(locus, "LWED"))
-simp_ar <- alleleReads_simp %>%
-  filter(str_detect(locus, "SIMP"))
-
-alleleReads_combine <- rbind(ar, lwed_ar, simp_ar)
-```
-
-And finally create the full locus summary for GTseq:
-
-```{r}
-# Combined
-locusSum_gtseq <- merge(readCounts_combine, alleleReads_combine, by = "locus") %>%
-  dplyr::mutate(alleleReadsTotal = allele1Reads + allele2Reads) %>%
-  dplyr::mutate(maf_gtseq = pmax(allele1Reads, allele2Reads)/alleleReadsTotal)
-
-# LWED samples only
-
-# SIMP samples only
-```
-
-In looking at the full summary, the total allele reads (adding up allele1Reads and allele2Reads) are often VERY different from the primerProbeReads value-- perhaps this is because the allele reads are based off the genotype files vs. raw data, so it's not counting all the reads from loci that were under 10x?
-
-### 5.6.2 Primer-probe proportion
+-   Example 1: Artifact sequences.
+    -   LocusName1, 325096 ,2609, 2367	
+-   Example 2: Unaccounted for in-silico probe variation or possibly entirely off-target amplification.
+    -   LocusName2, 32252, 0, 0
+-   Example 3: in-silico probe not specific enough.
+    -   LocusName3, 34435, 3400826, 33213
 
 The proportion of primer-probe reads to primer reads was overall LOWER with GTscore vs. GTseq, though the mean difference was less than 1%.
 
@@ -627,12 +303,15 @@ ppProp <- locusSum_gtscore %>%
   dplyr::rename("ppProp_gtseq" = "primerProbeProportion") %>%
   mutate(ppProp_diff = ppProp_gtscore - ppProp_gtseq) %>%
   mutate_if(is.numeric, round, 2)
+```
 
+```{r}
 summary(ppProp$ppProp_diff)
 t.test(ppProp$ppProp_gtscore, ppProp$ppProp_gtseq, paired = T)
 ```
 
-### 5.6.3 Fixed alleles
+
+## 4.2 Fixed alleles
 
 GTscore gives two loci as fixed.
 GTseq, however, shows these same loci as *almost* fixed, but not 100%.
@@ -650,7 +329,7 @@ maf <- locusSum_gtscore %>%
 summary(maf$mafDiff)
 ```
 
-### 5.6.4 Overamplifiers
+## 4.3 Overamplifiers
 
 First define a function to find outliers.
 The function is set so that it will return the name of the locus when applied to our dataset.
@@ -720,6 +399,223 @@ ggplot(readCounts_lwedSIMP_summary, aes(x=readMedian, y=species)) +
   geom_boxplot() +
   labs(title = "Median reads per locus per sample", x = "Total number of reads", y = "") +
   theme_bw()
+```
+
+# 5 Sample performance
+
+## 5.1 Total reads per sample
+
+Both GTseq and GTscore pipelines give the same number of total reads per sample.
+
+```{r, echo = F}
+totalReads <- indivSum_gtscore %>%
+  select(c(Sample, Total.Reads)) %>%
+  dplyr::rename("totalReads_gtscore" = "Total.Reads") %>%
+  merge(., genos_gtseq[, c("Sample", "Raw.Reads")], by = "Sample") %>%
+  dplyr::rename("totalReads_gtseq" = "Raw.Reads") %>%
+  mutate(totalReads_diff = totalReads_gtseq - totalReads_gtscore) %>%
+  mutate(totalReads_avg = (totalReads_gtseq + totalReads_gtscore)/2)
+```
+
+```{r}
+summary(totalReads$totalReads_diff)
+```
+
+## 5.2 On-target reads per sample
+
+On-target read counts are usually HIGHER for GTseq vs. GTscore.
+This difference is proportional, where GTseq has 0.33% more on-target reads for any given number of on-target reads from GTscore.
+
+```{r, echo = F}
+otReads <- indivSum_gtscore %>%
+  select(c(Sample, Primer.Probe.Reads)) %>%
+  dplyr::rename("otReads_gtscore" = "Primer.Probe.Reads") %>%
+  select(c(Sample, otReads_gtscore)) %>%
+  merge(., genos_gtseq[, c("Sample", "On.Target.Reads")], by = "Sample") %>%
+  dplyr::rename("otReads_gtseq" = "On.Target.Reads") %>%
+  mutate(otReads_avg = (otReads_gtseq + otReads_gtscore)/2) %>%
+  mutate(otReads_diff = otReads_gtseq - otReads_gtscore) %>%
+  mutate(otReads_propDiff = (otReads_diff)/otReads_avg)
+```
+
+```{r}
+summary(otReads$otReads_propDiff)
+t.test(otReads$otReads_gtseq, otReads$otReads_gtscore, paired = T)
+```
+
+Quick normality test - neither GTseq or GTscore on-target reads have a normal distribution
+
+```{r}
+shapiro.test(otReads$otReads_gtseq)
+shapiro.test(otReads$otReads_gtscore)
+```
+
+### Visualize otReads_diff
+
+Plotting the log-transformed on-target reads show that GTseq on-target reads increase 1% for every 1% increase in GTscore on-target reads
+
+```{r, echo = F}
+ggplot(otReads, aes(x = log(otReads_gtseq), y = log(otReads_gtscore))) +
+  geom_point() +
+  geom_smooth(method = "lm", se=FALSE, color="mediumvioletred", formula = y ~ x, size = 0.75) +
+  ggpubr::stat_regline_equation(label.y = 11, aes(label = ..eq.label..)) +
+  ggpubr::stat_regline_equation(label.y = 10, aes(label = ..rr.label..)) +
+  xlab("log(GTseq) on-target read counts per sample") +
+  ylab("log(GTscore) on-target read counts per sample") +
+  theme_pander()
+```
+
+And a Bland-Altman analysis shows us that on average, GTseq has 0.33% higher on-target reads relative to GTscore.
+
+*Note that the "Percent difference" here is equivalent to log(GTseq) - log(GTscore)*
+
+```{r, echo = F}
+ggplot(otReads, aes(x = otReads_avg, y = otReads_propDiff)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = mean(otReads$otReads_propDiff, na.rm = T), colour = "mediumvioletred", size = 0.5) +
+  geom_hline(yintercept = mean(otReads$otReads_propDiff, na.rm = T) - (1.96 * sd(otReads$otReads_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  geom_hline(yintercept = mean(otReads$otReads_propDiff, na.rm = T) + (1.96 * sd(otReads$otReads_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  annotate(geom = "label", label = "Mean % diff = 0.33%", x = 90000, y = mean(otReads$otReads_propDiff, na.rm = T), hjust = 0, vjust = 0) +
+  ylab("Percent difference \n (GTseq - GTscore)/((GTseq + GTscore)/2)") +
+  xlab("Mean on-target read counts per sample \n ((GTseq + GTscore)/2)") +
+  theme_pander()
+
+ggplot(otReads, aes(x = otReads_avg, y = otReads_diff)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = mean(otReads$otReads_diff, na.rm = T), colour = "mediumvioletred", size = 0.5) +
+  geom_hline(yintercept = mean(otReads$otReads_diff, na.rm = T) - (1.96 * sd(otReads$otReads_diff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  geom_hline(yintercept = mean(otReads$otReads_diff, na.rm = T) + (1.96 * sd(otReads$otReads_diff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  annotate(geom = "label", label = "Mean % diff = 0.33%", x = 90000, y = mean(otReads$otReads_diff, na.rm = T), hjust = 0, vjust = 0) +
+  ylab("Percent difference \n (GTseq - GTscore)/((GTseq + GTscore)/2)") +
+  xlab("Mean on-target read counts per sample \n ((GTseq + GTscore)/2)") +
+  theme_pander()
+```
+
+## 5.4 Genotype success per sample
+
+Genotype success per sample was LOWER for GTseq vs. GTscore.
+This difference is proportional, where the proportion of loci genotyped by GTscore is 7.3% lower than by GTseq.
+
+```{r}
+genoRate <- ssSum_gtscore %>%
+  select(c(sample, GenotypeRate)) %>%
+  dplyr::rename("Sample" = "sample") %>%
+  dplyr::rename("genoRate_gtscore" = "GenotypeRate") %>%
+  select(c(Sample, genoRate_gtscore)) %>%
+  merge(., genos_gtseq[, c("Sample", "X.GT")], by = "Sample") %>%
+  dplyr::rename("genoRate_gtseq" = "X.GT") %>%
+  mutate(genoRate_gtseq = genoRate_gtseq/100) %>%
+  mutate_if(is.numeric, round, 2) %>%
+  mutate(genoRate_avg = (genoRate_gtseq + genoRate_gtscore)/2) %>%
+  mutate(genoRate_diff = genoRate_gtseq - genoRate_gtscore) %>%
+  mutate(genoRate_propDiff = genoRate_diff/genoRate_avg)
+```
+
+```{r}
+summary(genoRate$genoRate_diff, na.rm = T)
+t.test(genoRate$genoRate_gtseq, genoRate$genoRate_gtscore, paired = T)
+```
+
+Quick normality test - neither GTseq or GTscore genotype rates have a normal distribution
+
+```{r}
+shapiro.test(genoRate$genoRate_gtseq)
+shapiro.test(genoRate$genoRate_gtscore)
+```
+
+### Visualize genoRate_diff
+
+Plotting the log-transformed genotype rates show that GTseq on-target reads increase 1% for every 1% increase in GTscore on-target reads
+
+```{r, echo = F}
+ggplot(genoRate, aes(x = log(genoRate_gtseq), y = log(genoRate_gtscore))) +
+  geom_point() +
+  geom_smooth(method = "lm", se=FALSE, color="mediumvioletred", formula = y ~ x, size = 0.75) +
+  ggpubr::stat_regline_equation(label.y = -0.5, aes(label = ..eq.label..)) +
+  ggpubr::stat_regline_equation(label.y = -1, aes(label = ..rr.label..)) +
+  xlab("log(GTseq) % loci genotyped per sample") +
+  ylab("log(GTscore) % loci genotyped per sample") +
+  theme_pander()
+```
+
+And a Bland-Altman analysis shows us that on average, GTseq provides 7.3% FEWER genotypes per sample relative to GTscore.
+
+*Note that the "Percent difference" here is equivalent to log(GTseq) - log(GTscore)*
+
+```{r}
+ggplot(genoRate, aes(x = genoRate_avg, y = genoRate_diff)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = mean(genoRate$genoRate_diff, na.rm = T), colour = "springgreen4", size = 0.5) +
+  geom_hline(yintercept = mean(genoRate$genoRate_diff, na.rm = T) - (1.96 * sd(genoRate$genoRate_diff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  geom_hline(yintercept = mean(genoRate$genoRate_diff, na.rm = T) + (1.96 * sd(genoRate$genoRate_diff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  annotate(geom = "label", label = "Mean % diff = -7.3%", x = 0, y = mean(genoRate$genoRatgenoRate_diffe_propDiff, na.rm = T), hjust = 0, vjust = 0, fontface = "bold") +
+  ylab("Percent difference \n (GTseq - GTscore)/((GTseq + GTscore)/2)") +
+  xlab("Mean % loci genotyped per sample \n ((GTseq + GTscore)/2)") +
+  theme_pander()
+
+ggplot(genoRate, aes(x = genoRate_avg, y = genoRate_propDiff)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = mean(genoRate$genoRate_propDiff, na.rm = T), colour = "springgreen4", size = 0.5) +
+  geom_hline(yintercept = mean(genoRate$genoRate_propDiff, na.rm = T) - (1.96 * sd(genoRate$genoRate_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  geom_hline(yintercept = mean(genoRate$genoRate_propDiff, na.rm = T) + (1.96 * sd(genoRate$genoRate_propDiff, na.rm = T)), colour = "cornflowerblue", size = 0.5) +
+  annotate(geom = "label", label = "Mean % diff = -7.3%", x = 0, y = mean(genoRate$genoRate_propDiff, na.rm = T), hjust = 0, vjust = 0, fontface = "bold") +
+  ylab("Percent difference \n (GTseq - GTscore)/((GTseq + GTscore)/2)") +
+  xlab("Mean % loci genotyped per sample \n ((GTseq + GTscore)/2)") +
+  theme_pander()
+```
+
+## 5.5 Genotypes assigned per sample
+
+Despite the differences in read counts and genotype success, there were no sample/loci combinations where gtscore and gtseq made different genotype calls.
+
+```{r}
+genos_gtscore_l <- genos_gtscore %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub("_[^_]+$", "", locus)) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sample") %>%
+  pivot_longer(!sample,
+               names_to = "locus",
+               values_to = "genotype") %>%
+  dplyr::rename("gtscore" = "genotype") %>%
+  mutate(gtscore = sub(",", "", gtscore))
+  
+genos_gtseq_l <- genos_gtseq %>%
+  select(!c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
+  pivot_longer(!Sample,
+               names_to = "locus",
+               values_to = "genotype") %>%
+  dplyr::rename("gtseq" = "genotype") %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  rename("sample" = "Sample")
+
+genos_seqScore <- merge(genos_gtscore_l, genos_gtseq_l, by = c("sample", "locus"), all = T) %>%
+  mutate(genosCalled = rowSums(select(., -sample, -locus) != 0, na.rm = T)) %>%
+  mutate(zerosCalled = rowSums(select(., -sample, -locus, -genosCalled) == 0, na.rm = T)) %>%
+  rowwise() %>%
+  mutate(uniqueGenos = ifelse(zerosCalled > 0,
+                              (n_distinct(c_across(gtscore:gtseq), na.rm = T)) - 1,
+                              (n_distinct(c_across(gtscore:gtseq), na.rm = T))
+                              ))
+
+max(genos_seqScore$uniqueGenos)
+```
+
+However, there were 3262 sample/loci combinations where only one pipeline called a genotype.
+
+Of these, GTseq called 87 genotypes where GTscore did not, and GTscore called 3175 genotypes when GTseq did not.
+
+Perhaps of note, of the instances where GTseq called genotypes when GTscore didn't, the vast majority were homozygous.
+
+```{r}
+genos_seqScore_zeros <- genos_seqScore %>%
+  filter(genosCalled == 1)
+
+length(genos_seqScore_zeros$sample)
+length(which(genos_seqScore_zeros$gtscore == 0))
+length(which(genos_seqScore_zeros$gtseq == 0))
 ```
 
 # X Compare genotypes without the 10x gtscore cutoff
