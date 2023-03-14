@@ -2,10 +2,9 @@
 title: "tamGenetics_gtseq_vs_gtscore"
 author: "Rachel Voyt"
 date: "`r Sys.Date()`"
-output: html_document
-editor_options: 
-  markdown: 
-    wrap: sentence
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
 ---
 
 ```{r setup, include=FALSE}
@@ -20,9 +19,7 @@ The current document provides a comparison of GTscore vs. GTseq data analysis pi
 
 ## 1.2 Background on GTseq vs. GTscore pipelines
 
-There are two main pipelines for the analysis of data acquired via genotyping-in-thousands by sequencing (GT-seq).
-The original pipeline is the "GTseq pipeline" ([GitHub link](https://github.com/GTseq/GTseq-Pipeline)) created by Nate Campbell, who developed the original protocol for GT-seq.
-The second pipeline is the "GTscore pipeline" ([Github link](https://github.com/gjmckinney/GTscore)) created by Garrett McKinney, Carita Pascal, and Lisa Seeb.
+There are two main pipelines for the analysis of data acquired via genotyping-in-thousands by sequencing (GT-seq). The original pipeline is the "GTseq pipeline" ([GitHub link](https://github.com/GTseq/GTseq-Pipeline)) created by Nate Campbell, who developed the original protocol for GT-seq. The second pipeline is the "GTscore pipeline" ([Github link](https://github.com/gjmckinney/GTscore)) created by Garrett McKinney, Carita Pascal, and Lisa Seeb.
 
 The GTscore pipeline follows the same general format as GTseq, but includes the following additions:
 
@@ -46,6 +43,7 @@ Beyond these additions, there are a few other differences to keep in mind:
 library(data.table)
 library(ggpubr)
 library(ggthemes)
+library(gsubfn)
 library(magrittr)
 library(tidyverse)
 ```
@@ -86,15 +84,13 @@ samplesSIMP <- md_tamRun3 %>%
 ### Genotypes
 
 ```{r}
-genos_gtseq <- read.csv("./gtscore_vs_gtseq/genos/compiledGenos_gtseq_tamRun3.csv", header = T) %>%
+genos_gtseq <- read.csv("./gtscore_vs_gtseq/compiledGenos_gtseq_tamRun3.csv", header = T) %>%
   mutate(Sample = sub("\\_.*", "", Sample))
 ```
 
 ### Locus summaries
 
-From what I could tell, the GTseq pipeline doesn't have a script that provides metrics per locus.
-Instead, we need to create this based on the results from seqTest and genos files.
-We can use the seqTest files to give us total read counts per locus and the genos files to give read counts for each allele per locus.
+From what I could tell, the GTseq pipeline doesn't have a script that provides metrics per locus. Instead, we need to create this based on the results from seqTest and genos files. We can use the seqTest files to give us total read counts per locus and the genos files to give read counts for each allele per locus.
 
 #### Locus read counts
 
@@ -104,8 +100,7 @@ GTseq_seqTest.pl outputs files for each sample that contain three columns, which
 -   probe reads
 -   reads when both primer and probe occur in the sequence
 
-We can sum these sample-specific read counts to get loci-specific read counts by combining all of the different seqTest sample files.
-I've also included species-specific subsets, where read counts per locus include only those from LWED or SIMP samples.
+We can sum these sample-specific read counts to get loci-specific read counts by combining all of the different seqTest sample files. I've also included species-specific subsets, where read counts per locus include only those from LWED or SIMP samples.
 
 ```{r}
 # use full.names = T to list full sample path (avoid changing wd)
@@ -158,11 +153,11 @@ Using the species-subsets created above, we can then create a final locus read-c
 -   all other loci reflect performance with LWED and SIMP individuals combined
 
 ```{r}
-lociRC <- locusSum_lwedSIMP %>%
+lociRC <- lociReadCounts_lwedSIMP %>%
   filter(!str_detect(locus, "LWED|SIMP"))
-lociRC_lwed <- locusSum_lwed %>%
+lociRC_lwed <- lociReadCounts_lwed %>%
   filter(str_detect(locus, "LWED"))
-lociRC_simp <- locusSum_simp %>%
+lociRC_simp <- lociReadCounts_simp %>%
   filter(str_detect(locus, "SIMP"))
 
 lociReadCounts_combine <- rbind(lociRC, lociRC_lwed, lociRC_simp)
@@ -170,8 +165,7 @@ lociReadCounts_combine <- rbind(lociRC, lociRC_lwed, lociRC_simp)
 
 #### Allele frequencies
 
-We also need allele frequency metrics per locus.
-To do this, we need to get the allele count data from the .genos files and compile.
+We also need allele frequency metrics per locus. To do this, we need to get the allele count data from the .genos files and compile.
 
 *Note that reading in all of the .genos files will give a warning; this is because these files are output with two extra (empty) columns*
 
@@ -227,11 +221,13 @@ alleleRC_simp <- alleleReads_simp %>%
 alleleReads_combine <- rbind(alleleRC, alleleRC_lwed, alleleRC_simp)
 ```
 
+#### Locus summary
+
 And finally we can combine total read counts and allele read counts into a single locus summary file for GTseq:
 
 ```{r}
 # Combined
-locusSum_gtseq <- merge(readCounts_combine, alleleReads_combine, by = "locus") %>%
+locusSum_gtseq <- merge(lociReadCounts_combine, alleleReads_combine, by = "locus") %>%
   dplyr::mutate(alleleReadsTotal = allele1Reads + allele2Reads) %>%
   dplyr::mutate(maf_gtseq = pmax(allele1Reads, allele2Reads)/alleleReadsTotal)
 ```
@@ -271,8 +267,7 @@ ssSum_gtscore <- read.csv("./03_tamRun3/03_run3GTscore/fullSet_singleSNP_sampleS
 
 # 4 Loci performance
 
-For the first comparison between the two pipelines, I'm going to look at results in relative to loci (vs. relative to samples, which is in the next section).
-Specifically, I'm looking at what each pipeline shows relative to:
+For the first set of comparisons between the two pipelines, I'm going to look at results in relative to loci (vs. relative to samples, which is in the next section). Specifically, I'm looking at what each pipeline shows relative to:
 
 1.  The proportion of primer-probe reads relative to primer reads
 2.  Whether an loci have fixed alleles
@@ -280,19 +275,18 @@ Specifically, I'm looking at what each pipeline shows relative to:
 
 ## 4.1 Primer-probe proportion
 
-The proportion of primer-probe reads to primer reads is helpful in assessing primer performance, where large discrepancies in primer, probe, and primer-probe reads can indicate artifact sequences, unaccounted for in-silico probe variations, or an in-silico probe sequence that's not specific to the target amplicon.
-As such, it's important to determine whether the GTseq and GTscore pipelines are providing similar values for primer, probe, and primer-probe reads.
+The proportion of primer-probe reads to primer reads is helpful in assessing primer performance, where large discrepancies in primer, probe, and primer-probe reads can indicate artifact sequences, unaccounted for in-silico probe variations, or an in-silico probe sequence that's not specific to the target amplicon. As such, it's important to determine whether the GTseq and GTscore pipelines are providing similar values for primer, probe, and primer-probe reads.
 
 GTseq documentation provides the following as examples:
 
 -   Example 1: Artifact sequences.
-    -   LocusName1, 325096 ,2609, 2367	
+    -   LocusName1, 325096 ,2609, 2367\
 -   Example 2: Unaccounted for in-silico probe variation or possibly entirely off-target amplification.
     -   LocusName2, 32252, 0, 0
 -   Example 3: in-silico probe not specific enough.
     -   LocusName3, 34435, 3400826, 33213
 
-The proportion of primer-probe reads to primer reads was overall LOWER with GTscore vs. GTseq, though the mean difference was less than 1%.
+The proportion of primer-probe reads to primer reads was overall LOWER with GTscore vs. GTseq, but the mean difference was less than 1%. As such, it looks like both are providing similar values for locus reads.
 
 ```{r}
 ppProp <- locusSum_gtscore %>%
@@ -310,12 +304,11 @@ summary(ppProp$ppProp_diff)
 t.test(ppProp$ppProp_gtscore, ppProp$ppProp_gtseq, paired = T)
 ```
 
-
 ## 4.2 Fixed alleles
 
-GTscore gives two loci as fixed.
-GTseq, however, shows these same loci as *almost* fixed, but not 100%.
-Given that there aren't any mismatched genotypes, we can assume that the allele reads for those "almost-fixed" loci are from the cases where GTseq gave a genotype, but GTscore did not.
+Any loci with fixed alleles are ones that we would ultimately want to take out of the primer pool; however, if they're not 100% fixed it would likely be better to keep them, since individuals with variations.
+
+GTscore gives two loci as fixed. GTseq, however, shows these same loci as *almost* fixed, but not 100%. Given that there aren't any mismatched genotypes (see section 5.5), we can assume that the allele reads for those "almost-fixed" loci are from the cases where GTseq gave a genotype, but GTscore did not.
 
 ```{r}
 maf <- locusSum_gtscore %>%
@@ -331,8 +324,83 @@ summary(maf$mafDiff)
 
 ## 4.3 Overamplifiers
 
-First define a function to find outliers.
-The function is set so that it will return the name of the locus when applied to our dataset.
+To identify loci that are overamplifying in each pipeline, we'll be looking at primer-probe read counts for each locus in each pipeline.
+
+### Primer-probe reads
+
+First we'll set up species-specific dataframes for primer-probe reads from GTseq and GTscore and GTscore pipelines
+
+GTseq & GTscore full dataframes
+
+```{r}
+# GTseq
+ppReads_gtseq <- seqTest_compiled %>%
+  select(!c(primerReads, probeReads)) %>%
+  mutate(primerProbeReads =
+           ifelse(sample %in% samplesLWED$sampleID & grepl("SIMP", locus), NA, 
+                  ifelse(sample %in% samplesSIMP$sampleID & grepl("LWED", locus), NA, primerProbeReads))) %>%
+  dplyr::rename("ppReads_gtseq" = "primerProbeReads")
+  
+# GTscore
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+ppReads_gtscore <- read.table("./03_tamRun3/03_run3GTscore/fullSet_AlleleReads_singleSNPs.txt") %>%
+  replace(., TRUE, lapply(., repl)) %>%
+  rownames_to_column("Locus") %>%
+  mutate(Locus = sub("_[^_]+$", "\\1", Locus)) %>%
+  column_to_rownames("Locus") %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sample",
+               values_to = "ppReads_gtscore") %>%
+  mutate(ppReads_gtscore =
+           ifelse(sample %in% samplesLWED$sampleID & grepl("SIMP", locus), NA, 
+                  ifelse(sample %in% samplesSIMP$sampleID & grepl("LWED", locus), NA, ppReads_gtscore)))
+```
+
+Merge dataframes & add species
+
+```{r}
+ppReads_seqScore <- merge(ppReads_gtseq, ppReads_gtscore, by = c("sample", "locus")) %>%
+  mutate(species = ifelse(sample %in% samplesLWED$sampleID, "LWED",
+                          ifelse(sample %in% samplesSIMP$sampleID, "SIMP", NA)))
+```
+
+Species-specific dataframes
+
+```{r}
+# LWED
+ppReads_seqScore_lwed <- ppReads_seqScore %>%
+  filter(species == "LWED") %>%
+  select(!c(sample, species)) %>%
+  mutate(ppReads_gtseq = as.numeric(ppReads_gtseq)) %>%
+  mutate(ppReads_gtscore = as.numeric(ppReads_gtscore)) %>%
+  dplyr::group_by(locus) %>%
+  dplyr::summarise_if(is.numeric, sum) %>%
+  as.data.frame() %>%
+  na.omit()
+
+# SIMP
+ppReads_seqScore_simp <- ppReads_seqScore %>%
+  filter(species == "SIMP") %>%
+  select(!c(sample, species)) %>%
+  mutate(ppReads_gtseq = as.numeric(ppReads_gtseq)) %>%
+  mutate(ppReads_gtscore = as.numeric(ppReads_gtscore)) %>%
+  dplyr::group_by(locus) %>%
+  dplyr::summarise_if(is.numeric, sum) %>%
+  as.data.frame() %>%
+  na.omit()
+```
+
+Summary dataframe with species-specific read counts for each locus
+
+```{r}
+ppReads_seqScore_summary <- rbind(ppReads_seqScore_lwed %>%
+                                    mutate(species = "LWED"), ppReads_seqScore_simp %>%
+                                    mutate(species = "SIMP"))
+```
+
+Next we need define a function to find outliers. The function is set so that it will return the name of the locus when applied to our dataset.
 
 ```{r}
 findoutlier <- function(x) {
@@ -340,64 +408,53 @@ findoutlier <- function(x) {
 }
 ```
 
-Then apply the function - here we're identifying loci that are outliers based on their total reads as well as their median reads (run separately for each species).
+After applying the function, we can see that the same outliers occur in both pipelines for each species.
 
 ```{r}
 # LWED
-readCounts_outliers_lwed <- readCounts_lwedSIMP_summary %>%
-  filter(species == "LWED") %>%
-  select(!species) %>%
-  na.omit() %>%
-  mutate(sumOutlier = ifelse(findoutlier(readSum), locus, NA)) %>%
-  relocate(sumOutlier, .after = readSum) %>%
-  mutate(medianOutlier = ifelse(findoutlier(readMedian), locus, NA)) %>%
-  relocate(medianOutlier, .after = readMedian) %>%
-  arrange(-readSum)
+ppReads_outliers_lwed <- ppReads_seqScore_lwed %>%
+  mutate(gtseqOutlier = ifelse(findoutlier(ppReads_gtseq), locus, NA)) %>%
+  mutate(gtscoreOutlier = ifelse(findoutlier(ppReads_gtscore), locus, NA)) %>%
+  mutate(species = "LWED")
 
 # SIMP
-readCounts_outliers_simp <- readCounts_lwedSIMP_summary %>%
-  filter(species == "SIMP") %>%
-  select(!species) %>%
-  na.omit() %>%
-  mutate(sumOutlier = ifelse(findoutlier(readSum), locus, NA)) %>%
-  relocate(sumOutlier, .after = readSum) %>%
-  mutate(medianOutlier = ifelse(findoutlier(readMedian), locus, NA)) %>%
-  relocate(medianOutlier, .after = readMedian) %>%
-  arrange(-readSum)
+ppReads_outliers_simp <- ppReads_seqScore_simp %>%
+  mutate(gtseqOutlier = ifelse(findoutlier(ppReads_gtseq), locus, NA)) %>%
+  mutate(gtscoreOutlier = ifelse(findoutlier(ppReads_gtscore), locus, NA)) %>%
+  mutate(species = "SIMP")
+```
 
-# Outliers present in both species
-outliers_readSum_lwedSIMP <- readCounts_outliers_lwed %>%
-  filter(sumOutlier %in% readCounts_outliers_simp$sumOutlier) %>%
-  select(c(sumOutlier, readSum)) %>%
-  na.omit() %>%
-  rename("readSum" = "readSum_lwed") %>%
-  merge(., readCounts_outliers_simp, by = "sumOutlier") %>%
-  rename("readSum" = "readSum_simp") %>%
-  select(c(sumOutlier, readSum_lwed, readSum_simp))
+Below is a summary dataframe containing the following:
 
-outliers_readMedian_lwedSIMP <- readCounts_outliers_lwed %>%
-  filter(medianOutlier %in% readCounts_outliers_simp$medianOutlier) %>%
-  select(c(medianOutlier, readMedian)) %>%
-  na.omit() %>%
-  rename("readMedian" = "readMedian_lwed") %>%
-  merge(., readCounts_outliers_simp, by = "medianOutlier") %>%
-  rename("readMedian" = "readMedian_simp") %>%
-  select(c(medianOutlier, readMedian_lwed, readMedian_simp))
+-   Generic loci (i.e., those that are informative for both species), with species-specific read counts from each pipeline
+-   Species-specific loci, with species-specific read counts from each pipeline
+
+```{r}
+ppReads_outliers_summary <- ppReads_outliers_lwed %>%
+  filter(gtseqOutlier %in% ppReads_outliers_simp$gtseqOutlier) %>%
+  rbind(.,
+        ppReads_outliers_simp %>%
+          filter(gtseqOutlier %in% ppReads_outliers_lwed$gtseqOutlier)) %>%
+  rbind(.,
+        ppReads_outliers_lwed %>%
+          filter(str_detect(gtseqOutlier, "LWED"))) %>%
+  rbind(.,
+        ppReads_outliers_simp %>%
+          filter(str_detect(gtseqOutlier, "SIMP"))) %>%
+  na.omit()
 ```
 
 ### Plots
 
-```{r}
-ggplot(readCounts_lwedSIMP_summary, aes(x=readSum, y=species)) +
-  geom_boxplot() +
-  labs(title = "Total reads per locus", x = "Total number of reads", y = "") +
-  theme_bw()
-```
 
 ```{r}
-ggplot(readCounts_lwedSIMP_summary, aes(x=readMedian, y=species)) +
+ggplot(ppReads_seqScore_summary, aes(x=ppReads_gtscore, y=species)) +
   geom_boxplot() +
-  labs(title = "Median reads per locus per sample", x = "Total number of reads", y = "") +
+  geom_point(data = ppReads_outliers_summary %>%
+               filter(!str_detect(locus, "LWED|SIMP")) %>%
+               na.omit(),
+             aes(color = locus)) +
+  labs(title = "Total reads per locus (GTscore)", x = "Total number of reads", y = "") +
   theme_bw()
 ```
 
@@ -423,8 +480,7 @@ summary(totalReads$totalReads_diff)
 
 ## 5.2 On-target reads per sample
 
-On-target read counts are usually HIGHER for GTseq vs. GTscore.
-This difference is proportional, where GTseq has 0.33% more on-target reads for any given number of on-target reads from GTscore.
+On-target read counts are usually HIGHER for GTseq vs. GTscore. This difference is proportional, where GTseq has 0.33% more on-target reads for any given number of on-target reads from GTscore.
 
 ```{r, echo = F}
 otReads <- indivSum_gtscore %>%
@@ -493,8 +549,7 @@ ggplot(otReads, aes(x = otReads_avg, y = otReads_diff)) +
 
 ## 5.4 Genotype success per sample
 
-Genotype success per sample was LOWER for GTseq vs. GTscore.
-This difference is proportional, where the proportion of loci genotyped by GTscore is 7.3% lower than by GTseq.
+Genotype success per sample was LOWER for GTseq vs. GTscore. This difference is proportional, where the proportion of loci genotyped by GTscore is 7.3% lower than by GTseq.
 
 ```{r}
 genoRate <- ssSum_gtscore %>%
