@@ -1,0 +1,300 @@
+---
+title: "GTscorePipeline_tamRun3_hairOnly"
+output: html_document
+date: "`r Sys.Date()`"
+editor_options: 
+  markdown: 
+    wrap: 72
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+# 2 Packages
+
+```{r load packages, include=FALSE}
+library(gsubfn)
+library(phylotools)
+library(TidyMultiqc)
+library(tidyverse)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager", version = "3.16")
+BiocManager::install("Biostrings")
+source("GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+```
+
+# 3 Input files
+
+## 3.1 Sample files
+
+We need sample files for the hair samples only for this run, so will need to subset the original sample file created for tamRun3.
+
+First we need to load in the metadata for all of the samples and make a few formatting adjustments
+
+```{r}
+md <- read.csv("tamRun3_metadata_12Jan2023.csv") %>%
+  mutate(sampleID = gsub("_","-", sampleID)) %>%
+  mutate(sampleFile = paste0(sampleID, ".fastq"))
+```
+
+Then we can subset to hair samples only. Note that we're including all nine negative controls, so total samples are as follows for each subset:
+* all hair samples + negatives: n = 244
+* lwed hair samples + negatives: n = 147
+* simp hair samples + negatives: n = 106
+
+```{r}
+# Hair samples in metadata
+hair <- filter(md, is.na(sampleType) | !sampleType == "blood")
+hair_lwed <- filter(hair, is.na(species) | !species == "SIMP")
+hair_simp <- filter(hair, is.na(species) | !species == "LWED")
+
+# Original tamRun3 sample file
+sf_fullSet <- read.table("sampleFiles_fullSet.txt")
+
+# Subset to hair samples only
+sf_hair <- sf_fullSet %>%
+  filter(V1 %in% hair$sampleFile)
+
+# Split by species
+sf_hair_lwed <- sf_hair %>%
+  filter(V1 %in% hair_lwed$sampleFile)
+sf_hair_simp <- sf_hair %>%
+  filter(V1 %in% hair_simp$sampleFile)
+
+# Export sample files
+write.table(sf_hair, file = "sampleFiles_fullSet_hair.txt",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_hair_lwed, file = "sampleFiles_lwed_hair.txt",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_hair_simp, file = "sampleFiles_simp_hair.txt",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+## 3.2 Primer-probe files
+
+Primer probe information is the same as that used for the full set of tamRun3 samples (can view below). 
+
+```{r}
+pp_fullSet <- read.table("primerProbeFile_fullSet.txt", header = T)
+pp_lwed <- read.table("primerProbeFile_LWED.txt", header = T)
+pp_simp <- read.table("primerProbeFile_SIMP.txt", header = T)
+```
+# 4 Count reads for amplicons
+
+```{r count reads for amplicons, eval=FALSE}
+# All samples, all loci
+system2("perl",
+        args="AmpliconReadCounter.pl -p primerProbeFile_fullSet.txt --files sampleFiles_fullSet_hair.txt --prefix fullSetH_")
+
+# LWED
+system2("perl",
+        args="AmpliconReadCounter.pl -p primerProbeFile_LWED.txt --files sampleFiles_lwed_hair.txt --prefix lwedH_")
+
+# SIMP
+system2("perl",
+        args="AmpliconReadCounter.pl -p primerProbeFile_SIMP.txt --files sampleFiles_simp_hair.txt --prefix simpH_")
+```
+
+# 5 Genotyping
+
+## 5.1 Identify loci \<10x coverage
+
+Step 1: Recode loci with \<10x coverage in the full set of allele read counts
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts <- read.table("fullSetH_AlleleReads_singleSNPs.txt")
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts[readCounts_sum < 10] <- "0,0"
+```
+
+Step 2: Create lwed & simp subsets & create new AlleleReads_singleSNPs files
+
+```{r}
+# Reformat lists with . vs. -
+lwed_point <- hair_lwed %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID)) %>%
+  select(sampleID) %>%
+  as.character()
+simp_point <- hair_simp %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID)) %>%
+  select(sampleID) %>%
+  as.character()
+
+# Get lists of lwed- and simp-specific loci
+lwed_loci <- read.delim("lwedH_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+simp_loci <- read.delim("simpH_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+
+readCounts_lwed <- readCounts %>%
+  select_(.dots = lwed_point) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% lwed_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+readCounts_simp <- readCounts %>%
+  select_(.dots = simp_point) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% simp_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+  
+# Export new AlleleReads_singleSNPs files
+write.table(readCounts,"fullSetH_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_lwed,"lwedH_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_simp,"simpH_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+```
+
+## 5.2 Genotyping
+
+### Full set
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable<-read.delim("fullSetH_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads<-read.delim("fullSetH_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP<-polyGen(fullSet_singleSNP_locusTable,fullSet_singleSNP_alleleReads)
+
+#write results
+write.table(fullSet_polyGenResults_singleSNP,"fullSetH_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+### LWED
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+LWED_singleSNP_locusTable<-read.delim("lwedH_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+LWED_singleSNP_alleleReads<-read.delim("lwedH_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP<-polyGen(LWED_singleSNP_locusTable,LWED_singleSNP_alleleReads)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP,"lwedH_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+### SIMP
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+SIMP_singleSNP_locusTable<-read.delim("simpH_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_singleSNP_alleleReads<-read.delim("simpH_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP<-polyGen(SIMP_singleSNP_locusTable,SIMP_singleSNP_alleleReads)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP,"simpH_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+# 6 Data summaries
+
+## 6.1 Locus summaries
+
+### Single-SNP locus summary
+
+```{r}
+#summarize single SNP results
+fullSet_singleSNP_summary <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP)
+
+LWED_singleSNP_summary<-summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP)
+
+SIMP_singleSNP_summary<-summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP)
+
+#write results
+write.table(fullSet_singleSNP_summary,"fullSetH_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(LWED_singleSNP_summary,"lwedH_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(SIMP_singleSNP_summary,"lwedH_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+```
+
+### "Complete" locus summary
+
+```{r}
+# Load locus summaries
+ls <- read.table("fullSetH_GTscore_locusSummary.txt", header = T, sep = "\t")
+lwed_ls <- read.table("lwedH_GTscore_locusSummary.txt", header = T, sep = "\t")
+simp_ls <- read.table("simpH_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## Locus summaries
+ls1 <- ls %>%
+  filter(!str_detect(Locus, "LWED|SIMP"))
+lwed1_ls <- lwed_ls %>%
+  filter(str_detect(Locus, "LWED"))
+simp1_ls <- simp_ls %>%
+  filter(str_detect(Locus, "SIMP"))
+
+## SingleSNP summaries
+ss <- fullSet_singleSNP_summary %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP"))
+lwed_ss <- LWED_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "LWED"))
+simp_ss <- SIMP_singleSNP_summary %>%
+  filter(str_detect(Locus_ID, "SIMP"))
+
+# Recombine locus summaries & single snp summary files, then merge the two
+ls_recombine <- rbind(ls1, lwed1_ls, simp1_ls)
+
+ss_recombine <- rbind(ss, lwed_ss, simp_ss)
+ss_recombine$Locus_ID <- sub("^([^_]*_[^_]*).*", "\\1", ss_recombine$Locus_ID)
+
+ls_ss <- merge(ls_recombine, ss_recombine, by.x = "Locus", by.y = "Locus_ID") 
+
+# Export
+write.csv(ls_ss, "./summaryFiles/hair_complete_locusSummary.csv", row.names = F)
+```
+
+## 6.2 Sample summaries
+
+load sample summaries from AmpliconReadCounter
+
+```{r}
+LWED_GTscore_individualSummary<-read.delim("lwedH_GTscore_individualSummary.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_GTscore_individualSummary<-read.delim("simpH_GTscore_individualSummary.txt",header=TRUE,stringsAsFactors=FALSE)
+```
+
+### Single-SNP sample summary
+
+The summarizeSamples function changes the "-" to a "." -- be sure to change this back.
+
+```{r}
+LWED_singleSNP_sampleSummary<-summarizeSamples(LWED_polyGenResults_singleSNP,LWED_singleSNP_alleleReads) %>%
+  mutate(sample = gsub("\\.", "-", sample))
+SIMP_singleSNP_sampleSummary<-summarizeSamples(SIMP_polyGenResults_singleSNP,SIMP_singleSNP_alleleReads) %>%
+  mutate(sample = gsub("\\.", "-", sample))
+```
+
+### "Complete" sample summary
+
+```{r}
+# Make new copies & add column to note which loci-set the values are based on
+LWED_gtIndivSummary <- LWED_GTscore_individualSummary %>%
+  mutate(lociSet = "LWED") %>%
+  merge(., LWED_singleSNP_sampleSummary, by.x="Sample",by.y="sample")
+SIMP_gtIndivSummary <- SIMP_GTscore_individualSummary %>%
+  mutate(lociSet = "SIMP") %>%
+  merge(., SIMP_singleSNP_sampleSummary, by.x="Sample",by.y="sample")
+
+# Combine LWED & SIMP to form one, adjust sample name
+lwedSIMP_gtIndivSummary <- rbind(LWED_gtIndivSummary, SIMP_gtIndivSummary) %>%
+  mutate(sampleFile = paste0(Sample, ".fastq"))
+
+# Merge metadata & fullSet sample summaries
+master_sampleSummary <- merge(lwedSIMP_gtIndivSummary, md, by = "sampleFile")
+
+# Export
+write.csv(master_sampleSummary, "./summaryFiles/hair_complete_sampleSummary.csv", row.names = F)
+```
