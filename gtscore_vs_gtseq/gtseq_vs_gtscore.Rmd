@@ -941,7 +941,15 @@ ppReads_outliers_summary %>%
   tally()
 
 # Shared generic overamplifiers
-sum(duplicated(ppReads_outliers_summary$locus))
+ppReads_outliers_shared <- ppReads_outliers_lwed %>%
+  filter(locus %in% ppReads_outliers_simp$locus) %>%
+  rbind(.,
+        ppReads_outliers_simp %>%
+          filter(locus %in% ppReads_outliers_lwed$locus))
+
+ppReads_outliers_shared %>%
+  distinct(locus) %>%
+  tally()
 
 # LWED overamplifiers
 ## LWED generic loci
@@ -970,14 +978,12 @@ ppReads_outliers_summary %>%
 
 ### Visualize overamplifiers
 
-Below are boxplots showing primer-probe reads per locus within LWED and SIMP sample subsets, with overamplifiers highlighted when present in both species. Primer-probe reads counts are based on GTscore values.
+Below are boxplots showing primer-probe reads per locus within LWED and SIMP sample subsets, where generic overamplifiers present in both species are highlighted. Primer-probe reads counts are based on GTscore values.
 
 ```{r, echo = F}
 ggplot(ppReads_seqScore_summary, aes(x=ppReads_gtscore, y=species)) +
   geom_boxplot() +
-  geom_point(data = ppReads_outliers_summary %>%
-               filter(!str_detect(locus, "LWED|SIMP")) %>%
-               na.omit(),
+  geom_point(data = ppReads_outliers_shared,
              aes(color = locus)) +
   labs(title = "Total primer-probe reads per locus (GTscore)", x = "Total primer-probe reads per locus", y = "", color = "Shared overamplifiers") +
   theme_pander()
