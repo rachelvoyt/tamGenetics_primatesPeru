@@ -81,7 +81,7 @@ The key findings from my comparison of GTseq and GTscore data analysis pipelines
 
 ## 1.4 Recommendations
 
-Based on my comparisons of GTseq and GTscore data analysis pipelines, **I recommend using the GTscore pipeline for the analysis of GT-seq data moving forward**. Given that the sample/locus metrics are comparable between the two pipelines, I'm primarily basing this recommendation on the higher number of genotypes provided by GTscore. While the lower number of genotypes from GTseq suggests that its genotyping algorithm is more conservative, I don't think a more conservative approach is necessary given that there were no differences in the genotypes called by both pipelines.
+Based on my comparisons of GTseq and GTscore data analysis pipelines, **I recommend using the GTscore pipeline for the analysis of GT-seq data moving forward**, though with the addition of a 10x cutoff for genotyping. Given that the sample/locus metrics are comparable between the two pipelines, I'm primarily basing this recommendation on the higher number of genotypes provided by GTscore. While the lower number of genotypes from GTseq suggests that its genotyping algorithm is more conservative, I don't think a more conservative approach is necessary given that there were no differences in the genotypes called by both pipelines.
 
 Beyond the higher percentage of genotypes called, I also think that the detailed documentation and incorporation of troubleshooting scripts within the GTscore pipeline make it a better choice, particularly when first developing a GT-seq protocol.
 
