@@ -24,7 +24,7 @@ The GTscore pipeline was originally created by Garrett McKinney (see the associa
 
 ## 1.2 About the data
 
-The sequence data used in this pipeline is from tamRun3, the third MiSeq sequencing run with the full set of hair and blood samples. This run has a total of **438 samples**, including 235 hair samples (138 LWED, 97 SIMP), 194 blood samples (112 LWED, 82 SIMP), and 9 negative controls.
+The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **438 samples**, including 235 hair samples (138 LWED, 97 SIMP), 194 blood samples (112 LWED, 82 SIMP), and 9 negative controls.
 
 # 2 Packages
 
@@ -54,7 +54,7 @@ cpan App::cpanminus
 sudo cpanm Algorithm::Combinatorics
 ```
 
-I also recently had issues with installing perl modules with "cpanm" -- installing with "cpan" instead solved things.
+I also recently had issues with installing perl modules with "cpanm" -- installing with "cpan" instead solved things. Generally speaking, perl continues to be a massive pain in new fun ways every time I open this up to re-run something.
 
 # 3 Prep sequencing results
 
@@ -76,8 +76,8 @@ Once authentication is complete, you can download the desired files as follows:
 # Check Project IDs (outputs Project IDs for tamRun3_L1Raquel and Unindexed Reads)
 bs list projects
 
-# Sample sequences (tamRun3_L1Raquel)
-bs download project -i 374444071 -o /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/00_run3Seqs --extension=fastq.gz
+# Sample sequences (tamRun3_L1Raquel, tamRun3b_L1)
+bs download project -i 384884910 -o /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/00_run3Seqs --extension=fastq.g]
 
 # Unindexed Reads
 bs download project -i 374582211 -o /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/00_run3Seqs/unindexedReads --extension=fastq.gz
@@ -96,19 +96,28 @@ mv */* ./
 gunzip -r .
 ```
 
-## 3.3 Interleave files
+## 3.3 Merge the two runs
+
+```{bash}
+# Merge
+for i in tamRun3-*; do f=${i##*tamRun3}; cat $i tamRun3b$f > cat_$i ; done
+
+# Check to see that total runs add up
+for i in tamRun3-*; do f=${i##*tamRun3}; r1=$[$(cat cat_${i} | wc -l)/4 | bc]; echo ${i%_*} concatenated $r1; r2=$[$(cat ${i} | wc -l)/4 + $(cat tamRun3b${f} | wc -l)/4 | bc]; echo ${i%_*} separated $r2; diff=$[${r1}-${r2}]; echo ${i%_*} diff $diff; done
+```
+
+## 3.4 Interleave files
 
 To prep for the GTscore pipeline, we need to combine reads 1 & 2 for each sample into a single interleaved file - leave a set of non-interleaved files in the original folder though to keep for fastq quality checks.
+
+Note that we have interleaved files for tamRun3, tamRun3b, and the merged version of the two.
 
 ```{bash Interleave fasta seqs, eval = FALSE}
 # Interleave reads 1 & 2 for each sample and place in a new folder
 for i in ./00_run3Seqs/*_R1_001.fastq; do name=$(basename $i _R1_001.fastq); reformat.sh in=00_run3Seqs/${name}_R1_001.fastq in2=00_run3Seqs/${name}_R2_001.fastq out=02_run3Interleaved/${name}_interleaved.fastq; done
 
-# Copy files to GTscore folder
-cp * ../03_run3GTscore/
-
 # Trim filenames to make them more manageable
-for f in *.fastq; do   g="${f%%_*}.fastq"; mv "${f}" "${g}"; done
+for f in *.fastq; do g="${f%%_S*}.fastq"; mv "${f}" "${g}"; done
 ```
 
 # 4 Quality checks
@@ -217,14 +226,14 @@ Prior to running the GTscore pipeline itself, we need to make a few files, inclu
 
 ## 5.1 Sample files
 
-We need three sets of sample files total: 1) all samples 2) LWED samples only + all negatives 3) SIMP samples only + all negatives
+We need three sets of sample files total: 1) all samples 2) LWED samples only + all negatives 3) SIMP samples only + all negatives. Note that all sample files contain sampleIDs for separate (tamRun3 and tamRun3b) and combined (cat_tamRun3) sequencing runs.
 
 ### 5.1.1 All samples
 
 Create file for all samples in bash
 
 ```{bash}
-for i in *fastq; do echo $i; done > sampleFiles_fullSet.txt
+for i in *fastq; do echo $i; done > ./../03_run3GTscore/sampleFiles_fullSet.txt
 ```
 
 Load into R
@@ -233,32 +242,78 @@ Load into R
 sf_fullSet <- read.table("./03_tamRun3/03_run3GTscore/sampleFiles_fullSet.txt")
 ```
 
-### 5.1.2 Species subsets
-
-First we need to load in the metadata for all of the samples and make a few formatting adjustments
+Create separate tamRun3, tamRun3b, and cat_tamRun3 sample files
 
 ```{r}
-md <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_12Jan2023.csv") %>%
-  mutate(sampleID = gsub("_","-", sampleID)) %>%
-  mutate(sampleFile = paste0(sampleID, ".fastq"))
+sf_fullSet_a <- sf_fullSet %>%
+  filter(., grepl("tamRun3-", V1)) %>%
+  filter(., !grepl("cat_", V1))
+
+sf_fullSet_b <- sf_fullSet %>%
+  filter(., grepl("tamRun3b", V1))
+
+sf_fullSet_cat <- sf_fullSet %>%
+  filter(., grepl("cat_", V1))
+
+write.table(sf_fullSet_a, file = "./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_a.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_fullSet_b, file = "./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_b.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_fullSet_cat, file = "./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_cat.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 ```
 
-Then we can create our sample file species subsets. Note that we're including the negative controls in both species subsets
+
+### 5.1.2 Species subsets
+
+First we need to 1) load in the metadata for all of the samples, 2) make a few formatting adjustments, and 3) create a metadata file that includes sampleIDs that allow for analysis of genotypes called for each of the tamRun3 runs separately (tamRun3\_ and tamRun3b\_ sampleIDs) as well as the genotypes called when the sequencing results from the two runs are combined (cat_tamRun3\_ sampleIDs).
+
+```{r}
+# Original tamRun3 md
+md_a <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_12Jan2023.csv") %>%
+  mutate(sampleID = gsub("_","-", sampleID)) %>%
+  mutate(sampleFile = paste0(sampleID, ".fastq"))
+
+# Create tamRun3b version of md
+md_b <- md_a %>%
+  mutate(sampleID = gsub("tamRun3", "tamRun3b", sampleID)) %>%
+  mutate(sampleFile = gsub("tamRun3", "tamRun3b", sampleFile))
+
+# Create tamRun3cat version of md
+md_cat <- md_a %>%
+  mutate(sampleID = gsub("tamRun3", "cat_tamRun3", sampleID)) %>%
+  mutate(sampleFile = gsub("tamRun3", "cat_tamRun3", sampleFile))
+
+# Combine all versions of md into one
+md <- rbind(md_a, md_b, md_cat)
+```
+
+Then we can create our sample file species subsets. Note that we're including the negative controls in both species subsets 
 
 ```{r}
 # Create subsets
 lwed <- filter(md, is.na(species) | !species == "SIMP")
 simp <- filter(md, is.na(species) | !species == "LWED")
 
-sf_lwed <- sf_fullSet %>%
+sf_lwed_a <- sf_fullSet_a %>%
+  filter(V1 %in% lwed$sampleFile)
+sf_lwed_b <- sf_fullSet_b %>%
+  filter(V1 %in% lwed$sampleFile)
+sf_lwed_cat <- sf_fullSet_cat %>%
   filter(V1 %in% lwed$sampleFile)
 
-sf_simp <- sf_fullSet %>%
+sf_simp_a <- sf_fullSet_a %>%
+  filter(V1 %in% simp$sampleFile)
+sf_simp_b <- sf_fullSet_b %>%
+  filter(V1 %in% simp$sampleFile)
+sf_simp_cat <- sf_fullSet_cat %>%
   filter(V1 %in% simp$sampleFile)
 
 # Export sample files
-write.table(sf_lwed, file = "sampleFiles_LWED.txt", sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(sf_simp, file = "sampleFiles_SIMP.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_a, file = "./03_tamRun3/03_run3GTscore/sampleFiles_LWED_a.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_b, file = "./03_tamRun3/03_run3GTscore/sampleFiles_LWED_b.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_cat, file = "./03_tamRun3/03_run3GTscore/sampleFiles_LWED_cat.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_simp_a, file = "./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_a.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_simp_b, file = "./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_b.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_simp_cat, file = "./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_cat.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 ```
 
 ## 4.2 Primer probe files
@@ -315,22 +370,54 @@ Optional flags:
 
 ## 5.2 Run AmpliconReadCounterl.pl
 
-To run from the command line, use: perl AmpliconReadCounter.pl -p primerProbeFile.txt --files sampleList.txt
+To run from the command line, use: perl AmpliconReadCounter.pl -p primerProbeFile.txt --files sampleList.txt. To run from R, use the scripts below.
 
-To run from R, use:
+### 5.2.1 tamRun3
 
 ```{r count reads for amplicons, eval=FALSE}
 # All samples, all loci
 system2("perl",
-        args="AmpliconReadCounter.pl -p primerProbeFile_fullSet.txt --files sampleFiles_fullSet.txt --prefix fullSet_")
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_fullSet.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_a.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix fullSet_a_")
 
 # LWED
 system2("perl",
-        args="AmpliconReadCounter.pl -p primerProbeFile_LWED.txt --files sampleFiles_LWED.txt --prefix LWED_")
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_LWED.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_LWED_a.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix LWED_a_")
 
 # SIMP
 system2("perl",
-        args="AmpliconReadCounter.pl -p primerProbeFile_SIMP.txt --files sampleFiles_SIMP.txt --prefix SIMP_")
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_SIMP.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_a.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix SIMP_a_")
+```
+
+### 5.2.2 tamRun3b
+
+```{r count reads for amplicons, eval=FALSE}
+# All samples, all loci
+system2("perl",
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_fullSet.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_b.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix fullSet_b_")
+
+# LWED
+system2("perl",
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_LWED.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_LWED_b.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix LWED_b_")
+
+# SIMP
+system2("perl",
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_SIMP.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_b.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix SIMP_b_")
+```
+
+### 5.2.3 cat_tamRun3
+
+```{r count reads for amplicons, eval=FALSE}
+# All samples, all loci
+system2("perl",
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_fullSet.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_cat.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix fullSet_cat_")
+
+# LWED
+system2("perl",
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_LWED.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_LWED+_cat.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix LWED_cat_")
+
+# SIMP
+system2("perl",
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_SIMP.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_cat.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix SIMP_cat_")
 ```
 
 AmpliconReadCounter.pl outputs a LocusTable file and an AlleleReads file for single-SNP and haplotype data, plus two summary files.
@@ -344,8 +431,6 @@ The default names for these files are as follows, with LWED and SIMP appended to
 -   GTscore_individualSummary.txt - counts by individual of total reads, off-target reads, primer-only reads, and primer probe reads
 -   GTscore_locusSummary.txt - counts by locus of primer reads and primer probe reads
 
-
-
 # 6 Genotyping
 
 ## 6.1 Identify loci \<10x coverage
@@ -356,7 +441,10 @@ Step 1: Recode loci with \<10x coverage in the full set of allele read counts
 
 ```{r}
 # Read in allele counts for the full dataset
-readCounts <- read.table("./03_tamRun3/03_run3GTscore/fullSet_AlleleReads_singleSNPs.txt")
+readCounts_a <- read.table("./03_tamRun3/03_run3GTscore/fullSet_a_AlleleReads_singleSNPs.txt")
+readCounts_b <- read.table("./03_tamRun3/03_run3GTscore/fullSet_b_AlleleReads_singleSNPs.txt")
+readCounts_cat <- read.table("./03_tamRun3/03_run3GTscore/fullSet_cat_AlleleReads_singleSNPs.txt")
+readCounts <- cbind(readCounts_a, readCounts_b, readCounts_cat)
 
 # Set up a function to sum the read counts per allele for each locus, using package gsubfn
 repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
@@ -383,8 +471,8 @@ simp_point <- simp %>%
   as.character()
 
 # Get lists of lwed- and simp-specific loci
-lwed_loci <- read.delim("./03_tamRun3/03_run3GTscore/LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-simp_loci <- read.delim("./03_tamRun3/03_run3GTscore/SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+lwed_loci <- read.delim("./03_tamRun3/03_run3GTscore/LWED_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+simp_loci <- read.delim("./03_tamRun3/03_run3GTscore/SIMP_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
 
 readCounts_lwed <- readCounts %>%
   select_(.dots = lwed_point) %>%
@@ -398,9 +486,9 @@ readCounts_simp <- readCounts %>%
   column_to_rownames("Locus")
   
 # Export new AlleleReads_singleSNPs files
-write.table(readCounts,"fullSet_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
-write.table(readCounts_lwed,"LWED_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
-write.table(readCounts_simp,"SIMP_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts,"./03_tamRun3/03_run3GTscore/fullSet_abcat_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_lwed,"./03_tamRun3/03_run3GTscore/LWED_abcat_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_simp,"./03_tamRun3/03_run3GTscore/SIMP_abcat_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
 ```
 
 Genotyping is accomplished using the polyGen function. The genotyping algorithm is described in McKinney et al. 2018 and is a maximum likelihood algorithm capable of genotyping any number of alleles and ploidy per locus. This allows genoyping of single SNPs as well as microhaplotypes, and loci with elevated ploidy.
@@ -420,62 +508,64 @@ Note also that I'm making three genotype files, one for all loci vs. all samples
 
 ```{r}
 #load locus table and 10x allele reads file
-fullSet_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/fullSet_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-fullSet_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/fullSet_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+fullSet_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/fullSet_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
 fullSet_polyGenResults_singleSNP<-polyGen(fullSet_singleSNP_locusTable,fullSet_singleSNP_alleleReads)
 
 #write results
-write.table(fullSet_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
+write.table(fullSet_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_abcat_10x.txt",quote=FALSE,sep="\t")
 
 # rubias format
-sampleMetaData <- data.frame(sample_type="NA",repunit=NA,collection="NA",indiv=colnames(fullSet_polyGenResults_singleSNP))
-exportRubias(fullSet_polyGenResults_singleSNP,fullSet_singleSNP_locusTable,sampleMetaData,filename="fullSet_polyGenResults_singleSNP_rubias.txt")
+#sampleMetaData <- data.frame(sample_type="NA",repunit=NA,collection="NA",indiv=colnames(fullSet_polyGenResults_singleSNP))
+#exportRubias(fullSet_polyGenResults_singleSNP,fullSet_singleSNP_locusTable,sampleMetaData,filename="fullSet_polyGenResults_singleSNP_rubias.txt")
 ```
 
 Genotype without ditching loci under 10x
 
 ```{r}
 #load locus table and allele reads file
-fullSet_singleSNP_locusTable_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_LocusTable_singleSNPs.txt", header=TRUE, stringsAsFactors = FALSE)
+fullSet_singleSNP_locusTable_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_LocusTable_singleSNPs.txt", header=TRUE, stringsAsFactors = FALSE)
 
-fullSet_singleSNP_alleleReads_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
 fullSet_polyGenResults_singleSNP_no10x <- polyGen(fullSet_singleSNP_locusTable_no10x, fullSet_singleSNP_alleleReads_no10x)
 
 #write results
-write.table(fullSet_polyGenResults_singleSNP_no10x,"./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_no10x.txt",quote=FALSE,sep="\t")
+write.table(fullSet_polyGenResults_singleSNP_no10x,"./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_abcat_no10x.txt",quote=FALSE,sep="\t")
 ```
 
 ## 6.2 Genotyping: LWED
 
 ```{r Genotyping}
 #load locus table and 10x allele reads file
-LWED_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/LWED_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-LWED_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/LWED_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+LWED_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/LWED_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+LWED_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/LWED_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm
 LWED_polyGenResults_singleSNP<-polyGen(LWED_singleSNP_locusTable,LWED_singleSNP_alleleReads)
 
 #write results
-write.table(LWED_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/LWED_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(LWED_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/LWED_abcat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
 ## 6.3 Genotyping: SIMP
 
 ```{r Genotyping}
 #load locus table and 10x allele reads file
-SIMP_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-SIMP_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+SIMP_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm
 SIMP_polyGenResults_singleSNP<-polyGen(SIMP_singleSNP_locusTable,SIMP_singleSNP_alleleReads)
 
 #write results
-write.table(SIMP_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/SIMP_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(SIMP_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/SIMP_abcat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
+
+[STOPPED UPDATING HERE 24 MAY 2023]
 
 # 7 Data summaries
 
