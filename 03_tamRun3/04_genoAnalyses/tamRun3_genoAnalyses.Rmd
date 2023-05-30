@@ -12,76 +12,153 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
-library(tidyverse)
-library(janitor)
-library(related) # (install from tar.gz file); pairwise relatedness
-```
-
-# 1 Overview
+# Overview
 
 This pipeline is for the analysis of genotypes acquired via
 GTscorePipeline_tamRun3.Rmd, including comparisons to metadata and
-investigation of mismatches.
+investigation of mismatches. Note that genotypes were called based on
+sequencing results from BOTH MiSeq runs (tamRun3 and tamRun3b) of the
+library.
+
+# 1 Packages
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(kableExtra)
+```
 
 # 2 Data
 
 ## 2.1 Metadata
 
-Below is the metadata for samples included in tamRun3. I've also included columns to indicate whether samples were included in either of the two previous runs (tamRun1 and tamRun2) so that I can compare genotypes when possible.
+Below is the metadata for samples included in tamRun3. I've also
+included columns to indicate whether samples were included in either of
+the two previous runs (tamRun1 and tamRun2) so that I can compare
+genotypes when possible.
+
+### 2.1.1 tamRun1 md
 
 ```{r}
-# tamGenetics_run1
-md_tamRun1 <- read.csv("./../../00_tamRun1_optimization/metadata_run1.csv") %>%
+md_tamRun1 <- read.csv("./00_tamRun1_optimization/metadata_run1.csv")
+
+samples_tamRun1 <- md_tamRun1 %>%
   select(c(sampleID, animalID, sampleType)) %>%
   distinct() %>%
   na.omit() %>%
   group_by(animalID, sampleType) %>%
   summarise(tamRun1 = toString(sampleID)) %>%
   ungroup()
+```
 
-# tamGenetics_run2
-md_tamRun2 <- read.csv("./../../01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv") %>%
-  filter(included_inRun == "yes") %>%
+### 2.1.2 tamRun2 md
+
+```{r}
+md_tamRun2 <- read.csv("./01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv") %>%
+  filter(included_inRun == "yes")
+
+samples_tamRun2 <- md_tamRun2 %>%
   select(c(sampleID, animalID, sampleType)) %>%
   distinct() %>%
   na.omit() %>%
   group_by(animalID, sampleType) %>%
   summarise(tamRun2 = toString(sampleID)) %>%
   ungroup()
+```
 
-# tamGenetics_run3 (current run)
-md_tamRun3 <- read.csv("./../03_run3GTscore/tamRun3_metadata_12Jan2022.csv") %>%
+### 2.1.3 tamRun3 combo md
+
+Below I'm creating a metadata file that includes sampleIDs that allow
+for analysis of genotypes called for each of the tamRun3 runs separately
+(tamRun3\_ and tamRun3b\_ sampleIDs) as well as the genotypes called
+when the sequencing results from the two runs are combined
+(cat_tamRun3\_ sampleIDs).
+
+```{r}
+# tamRun3 original md
+md_tamRun3_a <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_12Jan2023.csv") %>%
   mutate(sampleID = gsub("_","\\.", sampleID)) %>%
-  #mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
-  #unite(pcr1_p12, pcr1Plate_p12, pcr1Row_p12, sep = "-", remove = T) %>%
-  #unite(pcr1_p12, pcr1_p12, pcr1Col_p12, sep = "", remove = T) %>%
-  merge(., md_tamRun1, by = c("animalID", "sampleType"), all.x = T) %>%
-  merge(., md_tamRun2, by = c("animalID", "sampleType"), all.x = T)
+  mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
+  unite(pcr1_p12, pcr1Plate_p12, pcr1Row_p12, sep = "-", remove = T) %>%
+  unite(pcr1_p12, pcr1_p12, pcr1Col_p12, sep = "", remove = T) %>%
+  merge(., samples_tamRun1, by = c("animalID", "sampleType"), all.x = T) %>%
+  merge(., samples_tamRun2, by = c("animalID", "sampleType"), all.x = T) %>%
+  mutate(seqRun = "a")
+
+# Create tamRun3b version of md
+md_tamRun3_b <- md_tamRun3_a %>%
+  mutate(sampleID = gsub("tamRun3", "tamRun3b", sampleID)) %>%
+  mutate(seqRun = "b")
+
+# Create tamRun3cat version of md
+md_tamRun3_cat <- md_tamRun3_a %>%
+  mutate(sampleID = gsub("tamRun3", "cat_tamRun3", sampleID))%>%
+  mutate(seqRun = "combo")
+
+# Combine all versions of md into one
+md_tamRun3 <- rbind(md_tamRun3_a, md_tamRun3_b, md_tamRun3_cat)
 ```
 
 ## 2.2 Genotypes
 
-Genotypes for all runs are below. Note that except for tamRun1, genotypes were only called for loci with at least 10x coverage.
+Genotypes for all runs are below. Note the following:
+
+-   Except for tamRun1, genotypes were only called for loci with at
+    least 10x coverage
+-   For tamRun1 and tamRun2, some locus names need to be recoded to
+    reflect species-specificity
+-   tamRun3 genotypes include those called separately for each library
+    run as well as those called when the sequencing results from both
+    runs were combined
 
 ```{r}
-genos_tamRun1 <- read.table("./../../00_tamRun1_optimization/polyGenResults_singleSNP.txt", header = T)
-genos_tamRun2 <- read.table("./../../01_run2_fecalHairBlood/03_run2GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T)
-genos_tamRun3 <- read.table("./../03_run3GTscore/fullSet_polyGenResults_singleSNP.txt", header = T)
+genos_tamRun1 <- read.table("./00_tamRun1_optimization/polyGenResults_singleSNP.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('\\..*', '', locus)) %>%
+  mutate(locus = recode(locus,
+                        'SEXID_195' = 'SEXID_LWED_195',
+                        'SEXID_197' = 'SEXID_SIMP_197',
+                        'SEXID_198' = 'SEXID_SIMP_198',
+                        'SEXID_203' = 'SEXID_SIMP_203',
+                        'SEXID_208' = 'SEXID_LWED_208',
+                        'SEXID_211' = 'SEXID_LWED_211',
+                        'SEXID_218' = 'SEXID_SIMP_218')) %>%
+  column_to_rownames("locus")
+
+genos_tamRun2 <- read.table("./01_run2_fecalHairBlood/03_run2GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('\\..*', '', locus)) %>%
+  mutate(locus = recode(locus,
+                        'SEXID_195' = 'SEXID_LWED_195',
+                        'SEXID_197' = 'SEXID_SIMP_197',
+                        'SEXID_198' = 'SEXID_SIMP_198',
+                        'SEXID_203' = 'SEXID_SIMP_203',
+                        'SEXID_208' = 'SEXID_LWED_208',
+                        'SEXID_211' = 'SEXID_LWED_211',
+                        'SEXID_218' = 'SEXID_SIMP_218')) %>%
+  column_to_rownames("locus")
+
+genos_tamRun3 <- read.table("./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_abcat_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
 ```
 
 ## 2.3 Summaries
 
-Here I'm loading in the master locus and sample summaries for tamRun3, both products of GTscorePipeline_tamRun3.Rmd. Both provide summary metrics such as genotype rate and on-/off-target coverage depth. The sample master summary includes all metadata as well. 
+Here I'm loading in the master locus and sample summaries for tamRun3,
+both products of GTscorePipeline_tamRun3.Rmd. Both provide summary
+metrics such as genotype rate and on-/off-target coverage depth. The
+sample master summary includes all metadata as well.
 
 Note that genotype rate is based on genotypes given only to loci with at least 10x coverage.
 
 ```{r}
 # Locus summary
-locusSum <- read.csv("./../03_run3GTscore/summaryFiles/master_locusSummary.csv")
+locusSum <- read.csv("./03_tamRun3/03_run3GTscore/summaryFiles/master_locusSummary.csv")
 
 # Sample summaries
-sampleSum <- read.csv("./../03_run3GTscore/summaryFiles/master_sampleSummary.csv") %>%
+sampleSum <- read.csv("./03_tamRun3/03_run3GTscore/summaryFiles/master_sampleSummary.csv") %>%
   mutate(sampleID = gsub("-", "\\.", sampleID))
 
 sampleSum_blood <- sampleSum %>%
@@ -96,72 +173,72 @@ negatives <- sampleSum %>%
   distinct()
 ```
 
-
 # 2 General metrics - tamRun3
 
 ## 2.1 Sample overview
 
 Samples run in tamRun3 include the following:
-- 429 samples plus 9 negatives (438 total)
-- 250 LWED samples, including 138 hair and 112 blood
-- 179 SIMP samples, including 97 hair and 82 blood
 
-LWED
+-   429 samples plus 9 negatives (438 total)
+
+-   250 LWED samples (hair: n = 138; blood: n = 112)
+
+-   179 SIMP samples (hair: n = 97; blood: n = 82)
+
+### 2.1.1 LWED samples
+
 ```{r}
 # Total LWED
-sum(md_tamRun3$species == "LWED")
+sum(md_tamRun3_a$species == "LWED")
 
 # Hair samples
-sum(md_tamRun3$sampleType == "hair"  & md_tamRun3$species == "LWED")
-sum(md_tamRun3$sampleType == "hair"  &
-      md_tamRun3$species == "LWED" &
-      md_tamRun3$sex == "F")
-sum(md_tamRun3$sampleType == "hair"  &
-      md_tamRun3$species == "LWED" &
-      md_tamRun3$sex == "M")
+sum(md_tamRun3_a$sampleType == "hair"  & md_tamRun3_a$species == "LWED")
+sum(md_tamRun3_a$sampleType == "hair"  &
+      md_tamRun3_a$species == "LWED" &
+      md_tamRun3_a$sex == "F")
+sum(md_tamRun3_a$sampleType == "hair"  &
+      md_tamRun3_a$species == "LWED" &
+      md_tamRun3_a$sex == "M")
 
 # Blood samples
-sum(md_tamRun3$sampleType == "blood"  & md_tamRun3$species == "LWED")
-sum(md_tamRun3$sampleType == "blood"  &
-      md_tamRun3$species == "LWED"  &
-      md_tamRun3$sex == "F")
-sum(md_tamRun3$sampleType == "blood"  &
-      md_tamRun3$species == "LWED"  &
-      md_tamRun3$sex == "M")
+sum(md_tamRun3_a$sampleType == "blood"  & md_tamRun3_a$species == "LWED")
+sum(md_tamRun3_a$sampleType == "blood"  &
+      md_tamRun3_a$species == "LWED"  &
+      md_tamRun3_a$sex == "F")
+sum(md_tamRun3_a$sampleType == "blood"  &
+      md_tamRun3_a$species == "LWED"  &
+      md_tamRun3_a$sex == "M")
 ```
-SIMP 
+
+### 2.1.2 SIMP samples
+
 ```{r}
 # Total SIMP
-sum(md_tamRun3$species == "SIMP")
+sum(md_tamRun3_a$species == "SIMP")
 
 # Hair samples
-sum(md_tamRun3$sampleType == "hair"  & md_tamRun3$species == "SIMP")
-sum(md_tamRun3$sampleType == "hair"  &
-      md_tamRun3$species == "SIMP" &
-      md_tamRun3$sex == "F")
-sum(md_tamRun3$sampleType == "hair"  &
-      md_tamRun3$species == "SIMP" &
-      md_tamRun3$sex == "M")
+sum(md_tamRun3_a$sampleType == "hair"  & md_tamRun3_a$species == "SIMP")
+sum(md_tamRun3_a$sampleType == "hair"  &
+      md_tamRun3_a$species == "SIMP" &
+      md_tamRun3_a$sex == "F")
+sum(md_tamRun3_a$sampleType == "hair"  &
+      md_tamRun3_a$species == "SIMP" &
+      md_tamRun3_a$sex == "M")
 
 # Blood samples
-sum(md_tamRun3$sampleType == "blood"  & md_tamRun3$species == "SIMP")
-sum(md_tamRun3$sampleType == "blood"  &
-      md_tamRun3$species == "SIMP"  &
-      md_tamRun3$sex == "F")
-sum(md_tamRun3$sampleType == "blood"  &
-      md_tamRun3$species == "SIMP"  &
-      md_tamRun3$sex == "M")
+sum(md_tamRun3_a$sampleType == "blood"  & md_tamRun3_a$species == "SIMP")
+sum(md_tamRun3_a$sampleType == "blood"  &
+      md_tamRun3_a$species == "SIMP"  &
+      md_tamRun3_a$sex == "F")
+sum(md_tamRun3_a$sampleType == "blood"  &
+      md_tamRun3_a$species == "SIMP"  &
+      md_tamRun3_a$sex == "M")
 ```
-
-
-
-
 
 ```{r}
 length(sampleSum$Sample)
 length(negatives$sampleID)
 ```
-
 
 ## x.1 Blood samples
 
@@ -184,10 +261,10 @@ ggplot() +
 Does genotype rate for blood sample differ by year collected?
 
 ```{r}
-ggplot(samples_blood, aes(x = captureYear, y = GenotypeRate)) +
+ggplot(sampleSum_blood, aes(x = captureYear, y = GenotypeRate)) +
   geom_boxplot(outlier.shape = NA) +
   geom_jitter(aes(color=captureYear)) +
-  geom_text(data=samples_blood %>% 
+  geom_text(data=sampleSum_blood %>% 
               group_by(captureYear) %>% 
               summarise(q3 = quantile(GenotypeRate, 0.75),
                         q1 = quantile(GenotypeRate, 0.25),
@@ -232,135 +309,10 @@ ggplot(sampleSum_hair, aes(x = captureYear, y = GenotypeRate)) +
   theme_bw()
 ```
 
-# 3 Previous run comparison
-
-How do genotypes called in run3 compare to those in run1 and run2?
-
-```{r}
-# tamRun1
-tamRun1 <- read.csv("./../../00_tamRun1_optimization/metadata_run1.csv") %>%
-  mutate(sampleID = gsub("_", "\\.", sampleID)) %>%
-  select(c(sampleID, animalID, sampleType)) %>%
-  distinct() %>%
-  na.omit() %>%
-  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
-  unite("sample", sampleID:sample, sep = "--", remove = F)
-
-genos_tamRun1t <- genos_tamRun1 %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "run1") %>%
-  mutate(run1 = sub('_[^.]+', '', run1)) %>%
-  merge(., tamRun1, by.x = "run1", by.y = "sampleID") %>%
-  relocate(sample, .after = run1) %>%
-  rename_all(~sub("\\..*", "", .x)) %>%
-  dplyr::rename('SEXID_LWED_195' = 'SEXID_195') %>%
-  dplyr::rename('SEXID_SIMP_197' = 'SEXID_197') %>%
-  dplyr::rename('SEXID_SIMP_198' = 'SEXID_198') %>%
-  dplyr::rename('SEXID_SIMP_203' = 'SEXID_203') %>%
-  dplyr::rename('SEXID_LWED_208' = 'SEXID_208') %>%
-  dplyr::rename('SEXID_LWED_211' = 'SEXID_211') %>%
-  dplyr::rename('SEXID_SIMP_218' = 'SEXID_218') %>%
-  select(!c(run1, animalID, sampleType))
-
-# tamRun2
-tamRun2 <- read.csv("./../../01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv") %>%
-  mutate(sampleID = gsub("_", "\\.", sampleID)) %>%
-  filter(included_inRun == "yes") %>%
-  select(c(sampleID, animalID, sampleType)) %>%
-  distinct() %>%
-  na.omit() %>%
-  mutate(sampleType = gsub("hair \\(chelex\\)", "hair", sampleType)) %>%
-  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
-  unite("sample", sampleID:sample, sep = "--", remove = F)
-
-genos_tamRun2t <- genos_tamRun2 %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "run2") %>%
-  mutate(run2 = sub('_[^.]+', '', run2)) %>%
-  merge(., tamRun2, by.x = "run2", by.y = "sampleID") %>%
-  relocate(sample, .after = run2) %>%
-  rename_all(~sub("\\..*", "", .x)) %>%
-  select(!c(run2, animalID, sampleType))
-
-# tamRun3
-tamRun3 <- read.csv("./../03_run3GTscore/tamRun3_metadata_12Jan2022.csv") %>%
-  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
-  select(c(sampleID, animalID, sampleType)) %>%
-  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
-  unite("sample", sampleID:sample, sep = "--", remove = F)
-
-genos_tamRun3t <- genos_tamRun3 %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "run3") %>%
-  mutate(run3 = sub('_[^.]+', '', run3)) %>%
-  merge(., tamRun3, by.x = "run3", by.y = "sampleID") %>%
-  relocate(sample, .after = run3) %>%
-  rename_all(~sub("[_][^_]+$", "", .x)) %>%
-  select(!c(run3, animalID, sampleType))
-```
-
-```{r}
-genos_tamRun1l <- genos_tamRun1t %>%
-  pivot_longer(!sample,
-               names_to = "locus",
-               values_to = "genotype") %>%
-  dplyr::rename("run1Geno" = "genotype") %>%
-  separate(sample, into = c("run1", "sample"), sep = "--") %>%
-  select(!run1) %>%
-  group_by(sample, locus) %>%
-  mutate(run1GenoID = paste0("run1Geno", row_number())) %>%
-  spread(run1GenoID, run1Geno)
-
-genos_tamRun2l <- genos_tamRun2t %>%
-  pivot_longer(!sample,
-               names_to = "locus",
-               values_to = "genotype") %>%
-  dplyr::rename("run2Geno" = "genotype") %>%
-  separate(sample, into = c("run2", "sample"), sep = "--") %>%
-  select(!run2) %>%
-  group_by(sample, locus) %>%
-  mutate(run2GenoID = paste0("run2Geno", row_number())) %>%
-  spread(run2GenoID, run2Geno)
-
-genos_tamRun3l <- genos_tamRun3t %>%
-  pivot_longer(!sample,
-               names_to = "locus",
-               values_to = "genotype") %>%
-  dplyr::rename("run3Geno" = "genotype") %>%
-  separate(sample, into = c("run3", "sample"), sep = "--") %>%
-  select(!run3) %>%
-  group_by(sample, locus) %>%
-  mutate(run3GenoID = paste0("run3Geno", row_number())) %>%
-  spread(run3GenoID, run3Geno)
-
-genos_allRuns <- merge(genos_tamRun1l, genos_tamRun2l, by = c("sample", "locus"), all = T) %>%
-  merge(., genos_tamRun3l, by = c("sample", "locus"), all = T) %>%
-  mutate(genosCalled = rowSums(select(., -sample, -locus) != 0, na.rm = T)) %>%
-  mutate(zerosCalled = rowSums(select(., -sample, -locus) == 0, na.rm = T)) %>%
-  rowwise() %>%
-  mutate(uniqueGenos = ifelse(zerosCalled > 0,
-                              (n_distinct(c_across(run1Geno1:run3Geno8), na.rm = T)) - 1,
-                              (n_distinct(c_across(run1Geno1:run3Geno8), na.rm = T))
-                              ))
-```
-
-Which samples have more than one unique genotype called? -- 67 samples have more than one genotype called. 
-
-```{r}
-multipleGenos <- genos_allRuns %>%
-  filter(uniqueGenos > 1) %>%
-  separate(sample, into = c("animalID", "sampleType"), sep = "_", remove = F)
-
-length(unique(multipleGenos$sample))
-```
-
-
 # 3 Species assignments
 
-For all samples, including chimeric blood samples, we should expect 100% congruence with metadata.
+For all samples, including chimeric blood samples, we should expect 100%
+congruence with metadata.
 
 Things to keep in mind:
 
@@ -371,16 +323,15 @@ Things to keep in mind:
 Species key:
 
 ```{r}
-speciesKey <- read.csv("speciesSNP_key_14Dec2022.csv")
+speciesKey <- read.csv("./03_tamRun3/04_genoAnalyses/speciesSNP_key_14Dec2022.csv")
 ```
 
 Species assignments:
 
 ```{r}
-genos_species <- genos_fullSet %>%
+genos_species <- genos_tamRun3 %>%
   rownames_to_column("Locus") %>%
   filter(str_detect(Locus, "SPECIES")) %>%
-  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
   mutate(across(everything(), as.character)) %>%
   pivot_longer(!Locus,
                names_to = "sampleID",
@@ -398,30 +349,56 @@ genos_species <- genos_fullSet %>%
   mutate(propLWED = (rowSums(. == "LWED")/totalGenos_sp)) %>%
   mutate(propSIMP = (rowSums(. == "SIMP")/totalGenos_sp)) %>%
   mutate(propMismatch_species = (1 - abs(propLWED - propSIMP))) %>%
-  mutate(speciesAssigned = ifelse(propLWED == 1, "LWED", ifelse(propSIMP == 1, "SIMP", NA))) %>%
+  mutate(speciesAssigned = ifelse(propLWED == 1, "LWED", 
+                              ifelse(propSIMP == 1, "SIMP", 
+                                     ifelse(propLWED < 1 & propSIMP > 0, "MIX", NA)))) %>%
   rownames_to_column("sampleID") %>%
   relocate(c(speciesAssigned, totalGenos_sp, propMismatch_species, propLWED, propSIMP, propGenos_sp), .after = sampleID)
 ```
 
 ## 3.2 Metadata comparison
 
-316 out of 438 samples were assigned a species. After comparing with metadata, we see that we have 17 mismatches total.
+### 3.2.1 Total assignments
 
 ```{r}
-# How many assignments were made?
-length(na.omit(genos_species$speciesAssigned))
-
-# Check (mis)matches
+# Connect metadata
 genos_species_md <- md_tamRun3 %>%
-  select(c(sampleID, animalID, species, sampleType, tamRun1, tamRun2)) %>%
+  select(c(sampleID, seqRun, animalID, species, sampleType, xtnDate_p12, tamRun1, tamRun2)) %>%
   merge(., genos_species, by = "sampleID") %>%
   mutate(mdMatch_sp3 = ifelse(species == speciesAssigned,"TRUE", "FALSE")) %>%
   relocate(animalID, .after = sampleID) %>%
-  relocate(mdMatch_sp3, .after = animalID)
+  relocate(mdMatch_sp3, .after = animalID) %>%
+  relocate(sampleType, .after = animalID) %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F)
 
+# How many assignments were made?
+speciesCount_df <- genos_species_md %>%
+  group_by(seqRun) %>%
+  summarise(totalAssigned = sum(!is.na(speciesAssigned)))
+```
+
+### 3.2.2 Check (mis)matches
+
+```{r}
 # Extract samples with mismatches
 genos_species_mismatch <- genos_species_md %>%
-  filter(mdMatch_sp3 == "FALSE")
+  filter(!mdMatch_sp3 == "TRUE")
+
+# How many mismatches?
+speciesMismatchCount_df <- genos_species_mismatch %>%
+  group_by(seqRun) %>%
+  summarise(totalMismatches = sum(!is.na(speciesAssigned)))
+
+write.csv(genos_species_mismatch, "./03_tamRun3/04_genoAnalyses/mismatchSpecies_tamRun3.csv", row.names = F)
+```
+
+## 3.3 Summary table
+
+```{r}
+merge(speciesCount_df, speciesMismatchCount_df, by = "seqRun") %>%
+  mutate(propMismatches = totalMismatches/totalAssigned) %>%
+  kbl(caption = "Species assignments") %>%
+  kable_classic(full_width = F)
 ```
 
 # 4 Sex assignments
@@ -449,7 +426,7 @@ and 2 LWED-specific
 Sex key:
 
 ```{r}
-sexKey <- read.csv("sexSNP_key_8Dec2022.csv") %>%
+sexKey <- read.csv("./03_tamRun3/04_genoAnalyses/sexSNP_key_8Dec2022.csv") %>%
   na.omit() %>%
   unique()
 ```
@@ -457,10 +434,12 @@ sexKey <- read.csv("sexSNP_key_8Dec2022.csv") %>%
 Sex assignments:
 
 ```{r}
-genos_sex <- genos_fullSet %>%
+loci_sex_pp2 <- c('SEXID_SIMP_197', 'SEXID_SIMP_198', 'SEXID_200', 'SEXID_SIMP_203', 'SEXID_SIMP_218', 'SEXID_219', 'SEXID_222')
+loci_sex_pp3 <- c('SEXID_LWED_195', 'SEXID_205', 'SEXID_LWED_208', 'SEXID_209', 'SEXID_215')
+
+genos_sex <- genos_tamRun3 %>%
   rownames_to_column("Locus") %>%
   filter(str_detect(Locus, "SEXID")) %>%
-  mutate(Locus = sub('[_][^_]+$', '', Locus)) %>%
   mutate(across(everything(), as.character)) %>%
   pivot_longer(!Locus,
                names_to = "sampleID",
@@ -474,11 +453,22 @@ genos_sex <- genos_fullSet %>%
   t() %>%
   as.data.frame() %>%
   mutate(totalGenos_sex = (rowSums(. == "F") + rowSums(. == "M"))) %>%
+  #mutate(totalGenos_sex_pp2 = (rowSums(across(matches(loci_sex_pp2)) == "F")) + 
+ #          (rowSums(across(matches(loci_sex_pp2)) == "M"))) %>%
+ # mutate(totalGenos_sex_pp3 = (rowSums(across(matches(loci_sex_pp3)) == "F")) +
+  #         (rowSums(across(matches(loci_sex_pp3)) == "M"))) %>%
   mutate(propGenos_sex = (totalGenos_sex/12)) %>%
   mutate(propF = (rowSums(. == "F")/totalGenos_sex)) %>%
   mutate(propM = (rowSums(. == "M")/totalGenos_sex)) %>%
   mutate(propMismatch_sex = (1 - abs(propF - propM))) %>%
-  mutate(sexAssigned = ifelse(propF == 1, "F", ifelse(propM == 1, "M", NA))) %>%
+  mutate(sexAssigned = ifelse(propF == 1, "F", 
+                              ifelse(propM == 1, "M", 
+                                     ifelse(propF < 1 & propF > 0, "MIX", NA)))) %>%
+  mutate(sumF_pp2 = rowSums(across(matches(loci_sex_pp2)) == "F")) %>%
+  mutate(sumM_pp2 = rowSums(across(matches(loci_sex_pp2)) == "M")) %>%
+  mutate(sumF_pp3 = rowSums(across(matches(loci_sex_pp3)) == "F")) %>%
+  mutate(sumM_pp3 = rowSums(across(matches(loci_sex_pp3)) == "M")) %>%
+#  mutate(sumF_pp2 = rowSums(.[grep(c('SEXID_SIMP_197', 'SEXID_SIMP_198', 'SEXID_200', 'SEXID_SIMP_203', 'SEXID_SIMP_218', 'SEXID_219'), names(.))] == "F")) %>%
   rownames_to_column("sampleID") %>%
   relocate(c(sexAssigned, totalGenos_sex, propMismatch_sex, propF, propM, propGenos_sex), .after = sampleID) %>%
   relocate(c(SEXID_SIMP_197, SEXID_SIMP_198, SEXID_200, SEXID_SIMP_203, SEXID_SIMP_218, SEXID_219, SEXID_222), .after = propGenos_sex)
@@ -486,58 +476,120 @@ genos_sex <- genos_fullSet %>%
 
 ## 4.2 Metadata comparisons
 
-237 out of 438 samples were assigned a sex. For mismatches, we're pulling sex assignment mismatches among hair samples only, since chimerism in blood is likely to result in mismatches if the individual is part of a F/M twin pair.
+Out of the 438 samples, 236 were assigned a sex with 100% of loci in
+agreement, 62 had mixed sex assignments, and 140 did not have any
+genotypes for the sex loci.
 
-Among hair samples, we have 9 mismatches total. Some things to note:
+For mismatches, we're pulling sex assignment mismatches among hair
+samples only, since chimerism in blood is likely to result in mismatches
+if the individual is part of a F/M twin pair.
+
+Among hair samples, we have 36 mismatches total, 9 of which have 100%
+loci mismatch and 27 have a mix of F/M calls. Some things to note:
 
 -   5 of these only have one genotype called out of 12
--   for those with more than 1 SEXID genotype called, all sex
-    assignments were in 100% agreement
+
+### 4.2.1 Total assignments
 
 ```{r}
-# How many assignments were made?
-length(na.omit(genos_sex$sexAssigned))
-
-# Check (mis)matches
+# Connect metadata
 genos_sex_md <- md_tamRun3 %>%
-  select(c(sampleID, animalID, species, sex, sampleType, tamRun1, tamRun2)) %>%
+  select(c(sampleID, seqRun, animalID, species, sex, sampleType, xtnDate_p12, tamRun1, tamRun2)) %>%
   merge(., genos_sex, by = "sampleID") %>%
   mutate(mdMatch_sex = ifelse(sex == sexAssigned,"TRUE", "FALSE")) %>%
-  relocate(mdMatch_sex, .after = sampleID)
+  relocate(mdMatch_sex, .after = sampleID) %>%
+  relocate(sampleType, .after = animalID) %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F)
 
+# How many assignments were made?
+sexCount_df <- genos_sex_md %>%
+  filter(!is.na(sexAssigned)) %>%
+  group_by(seqRun, sexAssigned) %>%
+  summarise(totalAssigned = sum(!is.na(sexAssigned))) %>%
+  pivot_wider(names_from = seqRun, values_from = totalAssigned) %>%
+  column_to_rownames("sexAssigned") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("seqRun") %>%
+  mutate(totalAssigned = F + M + MIX)
+
+sexCount_hair_df <- genos_sex_md %>%
+  filter(sampleType == "hair") %>%
+  filter(!is.na(sexAssigned)) %>%
+  group_by(seqRun, sexAssigned) %>%
+  summarise(totalAssigned = sum(!is.na(sexAssigned))) %>%
+  pivot_wider(names_from = seqRun, values_from = totalAssigned) %>%
+  column_to_rownames("sexAssigned") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("seqRun") %>%
+  mutate(totalAssigned = F + M + MIX)
+```
+
+### 4.2.2 Check (mis)matches
+
+```{r}
 # Extract samples with mismatches
 genos_sex_mismatch <- genos_sex_md %>%
   filter(mdMatch_sex == "FALSE")
 
-# Extract samples with mismatches - hair samples only for now
+# Count samples with mismatches
+sexMismatchCount_df <- genos_sex_mismatch %>%
+  group_by(seqRun) %>%
+  summarise(totalMismatches = sum(!is.na(sexAssigned)))
+
+# Extract HAIR samples with mismatches
 genos_sex_mismatch_hair <- genos_sex_mismatch %>%
   filter(sampleType == "hair")
+
+# Count hair samples with mismatches
+sexMismatchCount_hair_df <- genos_sex_mismatch_hair %>%
+  group_by(seqRun) %>%
+  summarise(totalMismatches = sum(!is.na(sexAssigned)))
+```
+
+## 4.3 Summary table
+
+```{r}
+# All samples
+merge(sexCount_df, sexMismatchCount_df, by = "seqRun") %>%
+  mutate(propMismatches = totalMismatches/totalAssigned) %>%
+  kbl(caption = "Sex assignments") %>%
+  kable_classic(full_width = F)
+
+# Hair samples
+merge(sexCount_hair_df, sexMismatchCount_hair_df, by = "seqRun") %>%
+  mutate(propMismatches = totalMismatches/totalAssigned) %>%
+  kbl(caption = "Sex assignments (hair only)") %>%
+  kable_classic(full_width = F)
 ```
 
 # 5 Investigating mismatches
 
 ## 5.1 Species mismatches
 
-Of the 17 mismatches, we have 8 hair samples, 1 PCR1 (-), and 8 blood samples. Note that the negative controls shouldn't have any genotypes at all; these are part of a separate troubleshooting analysis.
+Of the 17 mismatches, we have 8 hair samples, 1 PCR1 (-), and 8 blood
+samples. Note that the negative controls shouldn't have any genotypes at
+all; these are part of a separate troubleshooting analysis.
 
 ```{r}
-genos_species_mismatch
-
-# Hair sample mismatches
-sum(str_count(genos_species_mismatch$sampleType, "hair"))
-
-# Blood sample mismatches
-sum(str_count(genos_species_mismatch$sampleType, "blood"))
+genos_species_mismatch %>%
+  filter(seqRun == "combo") %>%
+  group_by(sampleType) %>%
+  summarise(count = n())
+  
 ```
 
-Are any animalIDs mismatched in both hair and blood samples? -- yes, we have one pair
+Are any animalIDs mismatched in both hair and blood samples? -- yes, we
+have one pair
 
 ```{r}
 genos_species_mismatch %>%
   get_dupes(animalID)
 ```
 
-We also have five samples that were also sequenced in previous runs -- we can pull in their genotypes to compare:
+We also have five samples that were also sequenced in previous runs --
+we can pull in their genotypes to compare:
 
 ```{r}
 genos_tamRun1 <- read.table("./../../00_tamRun1_optimization/polyGenResults_singleSNP.txt", header = T)
@@ -648,14 +700,15 @@ In primer pool 3, we have:
 -   26 LWED-specific loci
 -   all SIMP-specific loci
 
-For hair samples with mismatches, let's take a closer look at the genotypes from loci in primer pool 2 vs. primer pool 3
+For hair samples with mismatches, let's take a closer look at the
+genotypes from loci in primer pool 2 vs. primer pool 3
 
 ```{r}
-pp2 <- read.table("p2_combined_primerProbeFile.txt", header = T) %>%
+pp2 <- read.table("./01_run2_fecalHairBlood/03_run2GTscore/p2_combined_primerProbeFile.txt", header = T) %>%
   mutate(Locus = sub('[.][^.]+$', '', Locus)) %>%
   mutate(primerPool = "pool2") %>%
   select(c(Locus, primerPool))
-pp3 <- read.table("p3_combined_primerProbeFile.txt", header = T) %>%
+pp3 <- read.table("./01_run2_fecalHairBlood/03_run2GTscore/p3_combined_primerProbeFile.txt", header = T) %>%
   mutate(Locus = sub('[.][^.]+$', '', Locus)) %>%
   mutate(primerPool = "pool3") %>%
   select(c(Locus, primerPool))
@@ -665,7 +718,7 @@ splitPools <- rbind(pp2, pp3) %>%
   mutate(Locus = str_replace(Locus, 'SEXID_198', 'SEXID_SIMP_198')) %>%
   mutate(Locus = str_replace(Locus, 'SEXID_203', 'SEXID_SIMP_203')) %>%
   mutate(Locus = str_replace(Locus, 'SEXID_208', 'SEXID_LWED_208')) %>%
-  mutate(Locus = str_replace(Locus, 'SEXID_211', 'SEXID_LWED_211')) %>%
+#  mutate(Locus = str_replace(Locus, 'SEXID_211', 'SEXID_LWED_211')) %>%
   mutate(Locus = str_replace(Locus, 'SEXID_218', 'SEXID_SIMP_218'))
 
 genos_mismatches_hair <- genos_fullSet %>%
@@ -700,11 +753,14 @@ genos_blood <- genos_md %>%
   filter(sampleType == "blood")
 ```
 
-We have 154 individuals with both hair and blood samples available; 103 of those samples have at least one common locus genotyped
+We have 154 individuals with both hair and blood samples available; 103
+of those samples have at least one common locus genotyped
 
-What proportion of loci are genotyped in both samples? Here we can use the results from GTscore's duptest.
+What proportion of loci are genotyped in both samples? Here we can use
+the results from GTscore's duptest.
 
-[[NOTE - may want to redo this after coding species-specific loci with zeros]]
+[[NOTE - may want to redo this after coding species-specific loci with
+zeros]]
 
 ```{r}
 sampleSummary <- read.csv("./../03_run3GTscore/summaryFiles/master_sampleSummary.csv") %>%
@@ -736,8 +792,7 @@ sum(hairBlood_pairs$proportionCommon == 0)
 
 Visualize hair-blood pair common genotypes
 
-median: 51 common genotypes (23% of all loci)
-range: 0 to 0.78
+median: 51 common genotypes (23% of all loci) range: 0 to 0.78
 
 ```{r}
 median(hairBlood_pairs$commonGenotypes)
@@ -754,3 +809,405 @@ ggplot() +
   theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
 ```
 
+# TROUBLESHOOTING
+
+There are several samples from tamRun3 that do not match the species/sex
+in the metadata. This section is meant to figure out what's going on and
+what to do moving forward.
+
+## General metrics tamRun1,2,3
+
+```{r}
+# tamRun1
+metrics_tamRun1 <- c(length(md_tamRun1$sampleID),
+                     length(which(is.na(md_tamRun1$sampleType))),
+                     length(md_tamRun1$animalID[md_tamRun1$sampleType %in% "hair"]),
+                     length(unique(md_tamRun1$animalID[md_tamRun1$sampleType %in% "hair"])),
+                     length(md_tamRun1$animalID[md_tamRun1$sampleType %in% "blood"]),
+                     length(unique(md_tamRun1$animalID[md_tamRun1$sampleType %in% "blood"])))
+
+metrics_tamRun2 <- c(length(md_tamRun2$sampleID),
+                     length(which(is.na(md_tamRun2$sampleType))),
+                     length(md_tamRun2$animalID[md_tamRun2$sampleType %in% "hair"]),
+                     length(unique(md_tamRun2$animalID[md_tamRun2$sampleType %in% "hair"])),
+                     length(md_tamRun2$animalID[md_tamRun2$sampleType %in% "blood"]),
+                     length(unique(md_tamRun2$animalID[md_tamRun2$sampleType %in% "blood"])))
+
+metrics_tamRun3 <- c(length(md_tamRun3$sampleID),
+                     length(unique(md_tamRun3$index_combo[md_tamRun3$sampleType %in% c("PCR1 (-)", "XTN (-)")])),
+                     length(md_tamRun3$animalID[md_tamRun3$sampleType %in% "hair"]),
+                     length(unique(md_tamRun3$animalID[md_tamRun3$sampleType %in% "hair"])),
+                     length(md_tamRun3$animalID[md_tamRun3$sampleType %in% "blood"]),
+                     length(unique(md_tamRun3$animalID[md_tamRun3$sampleType %in% "blood"])))
+
+matrix(rbind(metrics_tamRun1, metrics_tamRun2, metrics_tamRun3),
+       nrow = 3,
+       ncol = 6) %>%
+  `rownames<-`(., c("tamRun1", "tamRun2", "tamRun3")) %>%
+  `colnames<-`(., c("totalSamples", "totalNeg", "totalHair", "uniqueHair", "totalBlood", "uniqueBlood")) %>%
+  t() %>%
+  kbl() %>%
+  kable_classic(full_width = F)
+```
+
+
+note on rownames--
+# When you write this
+rownames(df) <- c(1:5)
+
+# What R is actually doing is running this function:
+`rownames<-`(df, c(1:5))
+
+https://stackoverflow.com/questions/56014722/how-can-i-assign-rownames-with-while-using-a-pipe
+
+## Genotype comparison
+
+Here I'm comparing the genotypes called in tamRun3 to those called for
+the same samples in runs 1 and 2. Note that I'm not filtering out any
+loci that are species-specific, but I am removing negative controls.
+
+### tamRun3 a, b, cat
+
+First I want to see if genotypes called for tamRun3 were different between the two runs separately or when combined.
+
+Create long dataframes
+
+```{r}
+genos_tamRun3al <- genos_tamRun3 %>%
+  select(., !contains(c("tamRun3b", "cat_"))) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "genotype")
+genos_tamRun3bl <- genos_tamRun3 %>%
+  select(., contains("tamRun3b")) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "genotype")
+genos_tamRun3catl <- genos_tamRun3 %>%
+  select(., contains("cat_")) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "genotype")
+```
+
+Compare
+
+```{r}
+tamRun3a_vs_b <- merge(genos_tamRun3al, genos_tamRun3bl, by = "locus")
+head(tamRun3a_vs_b)
+```
+
+
+### tamRun3 vs. tamRun1/2
+
+```{r}
+# tamRun1
+nameType_tamRun1 <- md_tamRun1 %>%
+  mutate(sampleID = gsub("_", "\\.", sampleID)) %>%
+  select(c(sampleID, animalID, sampleType)) %>%
+  distinct() %>%
+  na.omit() %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
+  unite("sample", sampleID:sample, sep = "--", remove = F)
+
+genos_tamRun1t <- genos_tamRun1 %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "run1") %>%
+  mutate(run1 = sub('_[^.]+', '', run1)) %>%
+  merge(., nameType_tamRun1, by.x = "run1", by.y = "sampleID") %>%
+  relocate(sample, .after = run1) %>%
+  rename_all(~sub("\\..*", "", .x)) %>%
+  dplyr::rename('SEXID_LWED_195' = 'SEXID_195') %>%
+  dplyr::rename('SEXID_SIMP_197' = 'SEXID_197') %>%
+  dplyr::rename('SEXID_SIMP_198' = 'SEXID_198') %>%
+  dplyr::rename('SEXID_SIMP_203' = 'SEXID_203') %>%
+  dplyr::rename('SEXID_LWED_208' = 'SEXID_208') %>%
+  dplyr::rename('SEXID_LWED_211' = 'SEXID_211') %>%
+  dplyr::rename('SEXID_SIMP_218' = 'SEXID_218') %>%
+  select(!c(run1, animalID, sampleType))
+
+# tamRun2
+nameType_tamRun2 <- md_tamRun2 %>%
+  mutate(sampleID = gsub("_", "\\.", sampleID)) %>%
+  filter(included_inRun == "yes") %>%
+  select(c(sampleID, animalID, sampleType)) %>%
+  distinct() %>%
+  na.omit() %>%
+  mutate(sampleType = gsub("hair \\(chelex\\)", "hair", sampleType)) %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
+  unite("sample", sampleID:sample, sep = "--", remove = F)
+
+genos_tamRun2t <- genos_tamRun2 %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "run2") %>%
+  mutate(run2 = sub('_[^.]+', '', run2)) %>%
+  merge(., nameType_tamRun2, by.x = "run2", by.y = "sampleID") %>%
+  relocate(sample, .after = run2) %>%
+  rename_all(~sub("\\..*", "", .x)) %>%
+  select(!c(run2, animalID, sampleType))
+
+# tamRun3
+nameType_tamRun3 <- md_tamRun3 %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  select(c(sampleID, animalID, sampleType)) %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
+  unite("sample", sampleID:sample, sep = "--", remove = F)
+
+genos_tamRun3t <- genos_tamRun3 %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "run3") %>%
+  mutate(run3 = sub('_[^.]+', '', run3)) %>%
+  merge(., nameType_tamRun3, by.x = "run3", by.y = "sampleID") %>%
+  relocate(sample, .after = run3) %>%
+  #rename_all(~sub("[_][^_]+$", "", .x)) %>%
+  select(!c(run3, animalID, sampleType))
+```
+
+Create long dataframes
+
+```{r}
+genos_tamRun1l <- genos_tamRun1t %>%
+  pivot_longer(!sample,
+               names_to = "locus",
+               values_to = "genotype") %>%
+  dplyr::rename("run1Geno" = "genotype") %>%
+  separate(sample, into = c("run1", "sample"), sep = "--") %>%
+  select(!run1) %>%
+  group_by(sample, locus) %>%
+  mutate(run1GenoID = paste0("run1Geno", row_number())) %>%
+  spread(run1GenoID, run1Geno)
+
+genos_tamRun2l <- genos_tamRun2t %>%
+  pivot_longer(!sample,
+               names_to = "locus",
+               values_to = "genotype") %>%
+  dplyr::rename("run2Geno" = "genotype") %>%
+  separate(sample, into = c("run2", "sample"), sep = "--") %>%
+  select(!run2) %>%
+  group_by(sample, locus) %>%
+  mutate(run2GenoID = paste0("run2Geno", row_number())) %>%
+  spread(run2GenoID, run2Geno)
+
+genos_tamRun3l <- genos_tamRun3t %>%
+  pivot_longer(!sample,
+               names_to = "locus",
+               values_to = "genotype") %>%
+  dplyr::rename("run3Geno" = "genotype") %>%
+  separate(sample, into = c("run3", "sample"), sep = "--") %>%
+  select(!run3) %>%
+  group_by(sample, locus) %>%
+  mutate(run3GenoID = paste0("run3Geno", row_number())) %>%
+  spread(run3GenoID, run3Geno)
+
+genos_allRuns <- merge(genos_tamRun1l, genos_tamRun2l, by = c("sample", "locus"), all = T) %>%
+  merge(., genos_tamRun3l, by = c("sample", "locus"), all = T) %>%
+  mutate(genosCalled = rowSums(select(., -sample, -locus) != 0, na.rm = T)) %>%
+  mutate(zerosCalled = rowSums(select(., -sample, -locus) == 0, na.rm = T)) %>%
+  rowwise() %>%
+  mutate(uniqueGenos = ifelse(zerosCalled > 0,
+                              (n_distinct(c_across(run1Geno1:run3Geno8), na.rm = T)) - 1,
+                              (n_distinct(c_across(run1Geno1:run3Geno8), na.rm = T))
+                              ))
+```
+
+Subset to only samples/loci with genotypes called in multiple runs
+
+```{r}
+genos_allRuns_multiCalls <- genos_allRuns %>%
+  filter(genosCalled > 0) %>%
+  .[, colSums(is.na(.)) < nrow(.)]
+```
+
+Which samples have more than one unique genotype called? -- 67 samples
+have more than one genotype called.
+
+```{r}
+multipleGenos <- genos_allRuns %>%
+  filter(uniqueGenos > 1) #%>%
+#  separate(sample, into = c("animalID", "sampleType"), sep = "_", remove = F)
+
+length(unique(multipleGenos$sample))
+```
+
+### % difference b/t runs
+
+What differences should we expect between duplicates? Excluding tamRun3
+samples -- upper mean unique genos per sample = 1.24, but most are 100%
+match
+
+```{r}
+dupCheck <- genos_allRuns %>%
+  filter(genosCalled > 1) %>%
+  select(!starts_with("run3")) %>%
+  mutate(genosCalled = rowSums(across(starts_with("run")) != 0, na.rm = T)) %>%
+  mutate(zerosCalled = rowSums(across(starts_with("run")) == 0, na.rm = T)) %>%
+  rowwise() %>%
+  mutate(uniqueGenos = ifelse(zerosCalled > 0,
+                              (n_distinct(c_across(run1Geno1:run2Geno8), na.rm = T)) - 1,
+                              (n_distinct(c_across(run1Geno1:run2Geno8), na.rm = T))
+                              ))
+
+dupCheck_summary <- dupCheck %>%
+  group_by(sample) %>%
+  summarize(meanUniqueGenos = mean(uniqueGenos), n = n())
+```
+
+### Hair samples only - compare primer pools
+
+```{r}
+genos_allRuns_hair <- genos_allRuns %>%
+  filter(str_detect(sample, "hair")) %>%
+  filter(genosCalled > 1) %>%
+  merge(., splitPools, by.x = "locus", by.y = "Locus", all.x = T) %>%
+  relocate(uniqueGenos, .after = locus) %>%
+  relocate(primerPool, .after = uniqueGenos)
+
+multipleCalls_hair <- genos_allRuns_hair %>%
+  filter(genosCalled > 1)
+
+multipleGenos_hair <- genos_allRuns_hair %>%
+  filter(uniqueGenos > 1)
+```
+
+For samples with multiple calls (not necessarily multiple genos), how
+does it play out?
+
+```{r}
+unique(multipleCalls_hair$sample)
+
+mismatchSP_2_hair <- multipleCalls_hair %>%
+  filter(sample == "2_hair")
+
+mismatchSP_15_hair <- multipleCalls_hair %>%
+  filter(sample == "15_hair")
+```
+
+```{r}
+ggplot(multipleGenos_hair, aes(x = primerPool)) +
+  geom_bar()
+```
+
+## Species mismatches
+
+Here I'm looking only at samples that had species mismatch in tamRun3
+AND had at least one SPECIES locus genotyped in another run, leaving us
+with 4 of the 17 tamRun3 samples with mismatched species.
+
+Comparisons show that species ID was correctly called in previous runs,
+but not in tamRun3.
+
+```{r}
+genos_allRuns_mismatchSpecies <- genos_allRuns %>%
+  filter(sample %in% genos_species_mismatch$sample) %>%
+  filter(str_detect(locus, "SPECIES")) %>%
+  filter(genosCalled > 1) %>%
+  .[, colSums(is.na(.)) < nrow(.)] %>%
+  merge(., speciesKey, by.x = c("locus", "run1Geno1"), by.y = c("Locus", "genotype"), all.x = T) %>%
+  dplyr::rename("speciesRun1" = "species") %>%
+  merge(., speciesKey, by.x = c("locus", "run2Geno1"), by.y = c("Locus", "genotype"), all.x = T) %>%
+  dplyr::rename("speciesRun2" = "species") %>%
+  merge(., speciesKey, by.x = c("locus", "run3Geno1"), by.y = c("Locus", "genotype"), all.x = T) %>%
+  dplyr::rename("speciesRun3" = "species")
+```
+
+## Sex mismatches
+
+Here I'm looking only at samples that had sex mismatch in tamRun3 AND
+had at least one SEX locus genotyped in another run, leaving us with 5
+of the 34 tamRun3 samples with mismatched sex.
+
+Comparisons here are a little trickier
+
+```{r}
+genos_allRuns_mismatchSex <- genos_allRuns %>%
+  filter(sample %in% genos_sex_mismatch$sample) %>%
+  filter(str_detect(locus, "SEX")) %>%
+  filter(genosCalled > 1) %>%
+  .[, colSums(is.na(.)) < nrow(.)]
+
+genos_allRuns_mismatchSex %>%
+  distinct(sample)
+```
+
+## Duptest
+
+```{r}
+duptest <- read.table("./03_tamRun3/03_run3GTscore/run3_polyGenResults_dupTest.txt", header = T) 
+
+duptest_md <- duptest %>%
+  merge(., md_tamRun3[, c("sampleID","animalID", "sampleType", "species")], by.x = "Sample1", by.y = "sampleID") %>%
+  dplyr::rename("animalID1" = "animalID",
+                "sampleType1" = "sampleType",
+                "species1" = "species") %>%
+  relocate(c("animalID1", "sampleType1"), .after = "Sample2")  %>%
+  merge(., md_tamRun3[, c("sampleID","animalID", "sampleType", "species")], by.x = "Sample2", by.y = "sampleID") %>%
+  dplyr::rename("animalID2" = "animalID",
+                "sampleType2" = "sampleType",
+                "species2" = "species") %>%
+  merge(., genos_species_md[, c("sampleID", "mdMatch_sp3")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("mdMatch_sp1" = "mdMatch_sp3") %>%
+  merge(., genos_species_md[, c("sampleID", "mdMatch_sp3")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("mdMatch_sp2" = "mdMatch_sp3") %>%
+  select(c(Sample1, Sample2, animalID1, animalID2, sampleType1, sampleType2, species1, species2, mdMatch_sp1, mdMatch_sp2, matchedGenotypes, commonGenotypes, proportionMatch, proportionCommon))
+
+duptest_animIDMatch <- duptest_md %>%
+  filter(animalID1 == animalID2)
+
+duptest_mismatch_sp1 <- duptest_md %>%
+  filter(mdMatch_sp1 == "FALSE")
+
+duptest_highMatch <- duptest_md %>%
+  filter(proportionCommon >= 0.5) %>%
+  filter(proportionMatch >= 0.5) %>%
+  mutate(dupMatch_sp = case_when(species1 == species2 ~"TRUE",
+                                  .default = "FALSE"))
+
+table(duptest_highMatch$mdMatch_sp1)
+
+tr3_069 <- duptest_md %>%
+  filter(Sample1 == "tamRun3.069")
+```
+
+## Sample by sample
+
+10_hair (tamRun3_177) \* should be: LWED-M \* tamRun3 says: SIMP-F (6
+F-pp2, 1 F-pp3)
+
+```{r}
+duptest_10_hair <- duptest_md %>%
+  filter(animalID1 == "10") %>%
+  filter(sampleType1 == "hair")
+
+genos_10_hair <- genos_tamRun3 %>%
+  select(c(tamRun3.177, tamRun3.185, tamRun3.417))
+```
+
+Likeliest match according to duptest is 15_blood (tamRun3_417) -- so
+what does 15_hair (tamRun3.185) look like? \* should be: SIMP-F \*
+tamRun3 says: LWED-[1F-pp2, 1M-pp3, 1F-pp3] \* 47 loci have calls in
+another run (run2Geno1); most of these are different from tamRun3
+
+```{r}
+duptest_15_hair <- duptest_md %>%
+  filter(animalID1 == "15") %>%
+  filter(sampleType1 == "hair")
+
+multipleCalls_15_hair <- multipleCalls_hair %>%
+  filter(sample == "15_hair") %>%
+  .[, colSums(is.na(.)) < nrow(.)]
+
+# Does tamRun3_10_hair match tamRun2_15_hair?
+genos_10vs15_hair <- genos_10_hair %>%
+  merge(., genos_tamRun2 %>% select(tamRun2.100_S84_L001_interleaved), by = 'row.names', all.x = T) %>%
+  column_to_rownames("Row.names") %>%
+  select(c(tamRun3.177, tamRun2.100_S84_L001_interleaved)) %>%
+  filter(!tamRun3.177 == 0) %>%
+  filter(!tamRun2.100_S84_L001_interleaved == 0) %>%
+  mutate(match = ifelse(tamRun3.177 == tamRun2.100_S84_L001_interleaved, "TRUE", "FALSE"))
+```
