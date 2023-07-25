@@ -499,8 +499,6 @@ genos_tamRun3catl <- genos_tamRun3 %>%
 
 **2) Comparison dataframe**
 
-**NOTE** that this excludes loci/sample combinations for which no genotype was called for any run
-
 ```{r}
 tamRun3_genos_abcat <- merge(genos_tamRun3al, genos_tamRun3bl, by = c("locus", "sampleID")) %>%
   merge(., genos_tamRun3catl, by = c("locus", "sampleID")) %>%
@@ -584,6 +582,26 @@ genoMatch_tamRun3abcat_summary %>%
   kable(caption = "Overview of geno differences between tamRun3 a, b, and cat datasets") %>%
   kable_material(full_width = F) %>%
   scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Note** when comparing genotype consistency between tamRun3a and tamRun3b vs. consistency between tamRun3a/b and tamRun3_cat, keep in mind the following:
+
+-   90 genotypes that occur in both tamRun3a and tamRun3b are NOT present when the two runs are combined
+-   2780 genotypes that occur in both tamRun3a and tamRun3cat are NOT present in tamRun3b
+-   1415 genotypes that occur in both tamRun3b and tamRun3cat are NOT present in tamRun3a
+
+```{r}
+tamRun3_genos_abcat %>%
+  filter(geno_3a !=0, geno_3b !=0, geno_3cat == 0) %>%
+  nrow()
+
+tamRun3_genos_abcat %>%
+  filter(geno_3a !=0, geno_3b == 0, geno_3cat != 0) %>%
+  nrow()
+
+tamRun3_genos_abcat %>%
+  filter(geno_3a == 0, geno_3b != 0, geno_3cat != 0) %>%
+  nrow()
 ```
 
 ### 5.1.3 Sample consistency
@@ -677,6 +695,8 @@ genoMatch_bySample_summary_tamRun3abcat %>%
 
 ### 5.1.4 Locus consistency
 
+#### All samples combined
+
 ```{r, echo=FALSE}
 # tamRun3a vs. b
 genoMatch_byLocus_tamRun3ab <- genoMatch_tamRun3ab %>%
@@ -712,7 +732,13 @@ genoMatch_byLocus_tamRun3bcat <- genoMatch_tamRun3bcat %>%
   arrange(desc(propDiff))
 ```
 
-#### Summary table
+```{r, eval=FALSE}
+write.csv(genoMatch_byLocus_tamRun3ab, "./03_tamRun3/04_genoAnalyses/genoMatch_byLocus_tamRun3ab.csv", row.names = F)
+write.csv(genoMatch_byLocus_tamRun3acat, "./03_tamRun3/04_genoAnalyses/genoMatch_byLocus_tamRun3acat.csv", row.names = F)
+write.csv(genoMatch_byLocus_tamRun3bcat, "./03_tamRun3/04_genoAnalyses/genoMatch_byLocus_tamRun3bcat.csv", row.names = F)
+```
+
+##### Summary table
 
 ```{r, echo=FALSE}
 genoMatch_byLocus_summary_tamRun3abcat <- matrix(c(
@@ -769,7 +795,7 @@ genoMatch_byLocus_summary_tamRun3abcat %>%
   scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
 ```
 
-#### Plots
+##### Plots
 
 **tamRun3a vs. b**
 
@@ -1000,6 +1026,45 @@ genoMatch_byLocus_tamRun3bcat_totalvdiff %>%
        fill = "Key") +
   scale_fill_discrete(labels = c("genosMatch", "genosMismatch")) +
   theme_bw()
+```
+
+#### By sample type
+
+```{r, echo=FALSE}
+# sample lists
+sampleList_blood <- sampleSum_blood_a %>%
+  select(sampleID)
+sampleList_hair <- sampleSum_hair_a %>%
+  select(sampleID)
+
+# tamRun3a vs. b - blood
+genoMatch_byLocus_tamRun3ab_blood <- genoMatch_tamRun3ab %>%
+  filter(sampleID %in% sampleList_blood$sampleID) %>%
+  group_by(locus) %>%
+  summarise(totalGenos = length(sampleID),
+            sumMatch = length(sampleID[match_3ab == "TRUE"]),
+            sumDiff = length(sampleID[match_3ab == "FALSE"])) %>%
+  as.data.frame() %>%
+  mutate(propDiff = sumDiff/totalGenos) %>%
+  merge(., locusSum[,c("Locus", "set")], by.x = "locus", by.y = "Locus", all.x = T) %>%
+  arrange(desc(propDiff))
+
+# tamRun3a vs. b - hair
+genoMatch_byLocus_tamRun3ab_hair <- genoMatch_tamRun3ab %>%
+  filter(sampleID %in% sampleList_hair$sampleID) %>%
+  group_by(locus) %>%
+  summarise(totalGenos = length(sampleID),
+            sumMatch = length(sampleID[match_3ab == "TRUE"]),
+            sumDiff = length(sampleID[match_3ab == "FALSE"])) %>%
+  as.data.frame() %>%
+  mutate(propDiff = sumDiff/totalGenos) %>%
+  merge(., locusSum[,c("Locus", "set")], by.x = "locus", by.y = "Locus", all.x = T) %>%
+  arrange(desc(propDiff))
+```
+
+```{r, eval=FALSE}
+write.csv(genoMatch_byLocus_tamRun3ab_blood, "./03_tamRun3/04_genoAnalyses/genoMatch_byLocus_tamRun3ab_blood.csv", row.names = F)
+write.csv(genoMatch_byLocus_tamRun3ab_hair, "./03_tamRun3/04_genoAnalyses/genoMatch_byLocus_tamRun3ab_hair.csv", row.names = F)
 ```
 
 ## 5.2 tamRun1 vs. 2
@@ -3010,7 +3075,7 @@ genos_species_tamRun1 <- genos_tamRun1 %>%
 genos_species_md_tamRun1 <- md_tamRun1 %>%
   select(c(sampleID, animalID, species, sampleType)) %>%
   merge(., genos_species_tamRun1, by = "sampleID") %>%
-  mutate(mdMatch_sp = ifelse(species == speciesAssigned,"TRUE", "FALSE")) %>%
+  mutate(mdMatch_sp = ifelse(species == speciesAssigned, "TRUE", "FALSE")) %>%
   relocate(animalID, .after = sampleID) %>%
   relocate(mdMatch_sp, .after = animalID) %>%
   relocate(sampleType, .after = animalID) %>%
