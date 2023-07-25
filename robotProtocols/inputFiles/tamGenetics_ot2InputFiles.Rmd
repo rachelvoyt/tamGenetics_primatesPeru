@@ -1,0 +1,703 @@
+---
+title: "tamGenetics_ot2InputFiles"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+This document is for the creation of input files for the tamGenetics OT2 protocols, incuding:
+
+1. PCR1 setup
+2. 1:20 dilutions
+3. PCR2 setup
+4. Bead cleanups
+
+# 2 Packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+# 3 Static input values
+
+## 3.1 Labware, pipettes, & tipracks
+
+```{r}
+# Labware
+pcrPlate <- "biorad_96_wellplate_200ul_pcr"
+tubeRack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
+magblock <- "magnetic_module_gen2"
+
+# Pipettes
+s20 <- "p20_single_gen2"
+m20 <- "p20_multi_gen2"
+s300 <- "p300_single_gen2"
+m300 <- "p300_multi_gen2"
+
+# Tipracks
+tiprack_p20 <- "opentrons_96_tiprack_300ul"
+tiprack_p20f <- "opentrons_96_filtertiprack_20ul"
+tiprack_p300 <- "opentrons_96_tiprack_300ul"
+tiprack_p300f <- "opentrons_96_filtertiprack_200ul"
+```
+
+## 3.2 Well values
+
+```{r}
+# Row values
+rowValues <- rep(LETTERS[1:8], times = 12)
+
+# Column values
+colValues <- rep(1:12, times = 8) %>%
+  sort() %>%
+  as.character()
+
+# Well values
+wellValues <- str_c(rowValues, colValues)
+```
+
+# 4 Sample inputs
+
+## 4.1 Primer plates
+
+## 4.2 DNA xtns
+
+### 4.2.1 Maps & xtns
+
+#### Blood samples
+
+```{r}
+# All xtns
+xtnMaster_blood <- read.csv("./extractions/tamGenetics_extractionsBlood_master_21July2023.csv")
+
+# Original plate/tube set-up
+xtnMap_blood_p1e1 <- xtnMaster_blood %>%
+  filter(lysisPlate == 1) %>%
+  arrange(lysisCol, lysisRow) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("p", lysisPlate)) %>%
+  mutate(well = str_c(lysisRow, lysisCol)) %>%
+  mutate(eltn = "e1") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+  
+xtnMap_blood_p1e2 <- xtnMaster_blood %>%
+  filter(lysisPlate == 1) %>%
+  arrange(lysisCol, lysisRow) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("p", lysisPlate)) %>%
+  mutate(well = str_c(lysisRow, lysisCol)) %>%
+  mutate(eltn = "e2") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_blood_p2e1 <- xtnMaster_blood %>%
+  filter(lysisPlate == 2) %>%
+  arrange(lysisCol, lysisRow) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("p", lysisPlate)) %>%
+  mutate(well = str_c(lysisRow, lysisCol)) %>%
+  mutate(eltn = "e1") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+  
+xtnMap_blood_p2e2 <- xtnMaster_blood %>%
+  filter(lysisPlate == 2) %>%
+  arrange(lysisCol, lysisRow) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("p", lysisPlate)) %>%
+  mutate(well = str_c(lysisRow, lysisCol)) %>%
+  mutate(eltn = "e2") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_blood_tubesE1 <- xtnMaster_blood %>%
+  filter(str_detect(lysisPlate, "tube")) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("t", sampleTube)) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = "e1") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_blood_tubesE2 <- xtnMaster_blood %>%
+  filter(str_detect(lysisPlate, "tube")) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("t", sampleTube)) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = "e2") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+# Completed PLATE xtns
+xtnPlates_blood_e1 <- xtnMaster_blood %>%
+  filter(xtnPlate %in% c(1, 2)) %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(eltn = "e1") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnPlates_blood_e2 <- xtnMaster_blood %>%
+  filter(xtnPlate %in% c(1, 2)) %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(eltn = "e2") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+# Completed TUBE xtns
+xtnTubes_blood_e1 <- xtnMaster_blood %>%
+  filter(!is.na(xtnTube)) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("t", xtnTube)) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = "e1") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  mutate(mapID = case_when(
+    str_detect(lysisPlate, "tube") ~ reagent,
+    .default = str_c("blood_p", lysisPlate, "e1_", lysisRow, lysisCol))) %>%
+  select(c("animalID", "sampleType", "mapID", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnTubes_blood_e2 <- xtnMaster_blood %>%
+  filter(!is.na(xtnTube)) %>%
+  mutate(sampleType = "blood") %>%
+  mutate(xtnLoc = str_c("t", xtnTube)) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = "e2") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  mutate(mapID = case_when(
+    str_detect(lysisPlate, "tube") ~ reagent,
+    .default = str_c("blood_p", lysisPlate, "e2_", lysisRow, lysisCol))) %>%
+  select(c("animalID", "sampleType", "mapID", "xtnLoc", "eltn", "well", "reagent"))
+```
+
+#### Fecal samples
+
+```{r}
+xtnMaster_fecal <- read.csv("./extractions/tamGenetics_extractionsFecal_master_21July2023.csv")
+
+xtnMap_fecal_tubesE1 <- xtnMaster_fecal %>%
+  filter(elution == "E1") %>%
+  mutate(sampleType = "fecal") %>%
+  mutate(xtnLoc = str_c("t", sampleTube)) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = tolower(elution)) %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_fecal_tubesE2 <- xtnMaster_fecal %>%
+  filter(elution == "E2") %>%
+  mutate(sampleType = "fecal") %>%
+  mutate(xtnLoc = str_c("t", sampleTube)) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = tolower(elution)) %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnTubes_fecal_e1 <- xtnMap_fecal_tubesE1 %>%
+  mutate(mapID = reagent) %>%
+  select(c("animalID", "sampleType", "mapID", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnTubes_fecal_e2 <- xtnMap_fecal_tubesE2 %>%
+  mutate(mapID = reagent) %>%
+  select(c("animalID", "sampleType", "mapID", "xtnLoc", "eltn", "well", "reagent"))
+```
+
+#### Hair samples
+
+```{r}
+xtnMaster_hair <- read.csv("./extractions/tamGenetics_extractionsHair_master_21July2023.csv") %>%
+  mutate(xtnTube = gsub("\\s+", "", xtnTube))
+
+# Original plate/tube set-up
+xtnMap_hair_p3e1 <- xtnMaster_hair %>%
+  filter(xtnPlate == 3) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e1") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_hair_p3e2 <- xtnMaster_hair %>%
+  filter(xtnPlate == 3) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e2") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_hair_p4e1 <- xtnMaster_hair %>%
+  filter(xtnPlate == 4) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e1") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_hair_p4e2 <- xtnMaster_hair %>%
+  filter(xtnPlate == 4) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e2") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_hair_tubesE1 <- xtnMaster_hair %>%
+  filter(is.na(xtnPlate)) %>%
+  filter(elution != "E2") %>%
+  filter(!grepl("-", xtnStatus)) %>%
+  filter(!is.na(xtnTube)) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = 
+           case_when(
+             str_detect(xtnTube, "A,B") ~ str_c("tx", gsub("A,B", "A", xtnTube)),
+             .default = str_c("t", xtnTube))) %>%
+  mutate(eltn = "e1") %>%
+  mutate(well = NA) %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnMap_hair_tubesE2 <- xtnMaster_hair %>%
+  filter(is.na(xtnPlate)) %>%
+  filter(elution != "E2") %>%
+  filter(!grepl("-", xtnStatus)) %>%
+  filter(!is.na(xtnTube)) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = 
+           case_when(
+             str_detect(xtnTube, "A,B") ~ str_c("tx", gsub("A,B", "B", xtnTube)),
+             .default = str_c("t", xtnTube))) %>%
+  mutate(eltn = "e2") %>%
+  mutate(well = NA) %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+# Completed PLATE xtns
+xtnPlates_hair_p3e1 <- xtnMaster_hair %>%
+  filter(xtnPlate == 3) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e1") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnPlates_hair_p3e2 <- xtnMaster_hair %>%
+  filter(xtnPlate == 3) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e2") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnPlates_hair_p4e1 <- xtnMaster_hair %>%
+  filter(xtnPlate == 4) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e1") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnPlates_hair_p4e2 <- xtnMaster_hair %>%
+  filter(xtnPlate == 4) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = str_c("p", xtnPlate)) %>%
+  mutate(eltn = "e2") %>%
+  arrange(xtnCol, xtnRow) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c("hair_", xtnLoc, eltn)) %>%
+  select(c("animalID", "sampleType", "xtnLoc", "eltn", "well", "reagent"))
+
+# Completed TUBE xtns
+xtnTubes_hair_e1 <- xtnMaster_hair %>%
+  filter(!is.na(xtnTube)) %>%
+  filter(elution != "E2") %>%
+  filter(!is.na(xtnTube)) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = 
+           case_when(
+             str_detect(xtnTube, "A,B") ~ str_c("tx", gsub("A,B", "A", xtnTube)),
+             .default = str_c("t", xtnTube))) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = "e1") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  mutate(mapID =
+           case_when(
+             grepl("-", xtnStatus) ~ gsub("replacement for plate xtn ", "", xtnStatus),
+             str_detect(xtnTube, "A,B") ~ str_c("hair_tx", gsub("A,B", "A", xtnTube, "_e1")),
+             .default = str_c("hair_t", xtnTube, eltn))) %>%
+  mutate(mapID = 
+           case_when(
+             grepl("-", mapID) ~ str_c("hair_p", gsub("(.*)-(.*)", "\\1", mapID), "e1_", gsub("(.*)-(.*)", "\\2", mapID)),
+             .default = mapID)) %>%
+  select(c("animalID", "sampleType", "mapID", "xtnLoc", "eltn", "well", "reagent"))
+
+xtnTubes_hair_e2 <- xtnMaster_hair %>%
+  filter(!is.na(xtnTube)) %>%
+  filter(elution != "E2") %>%
+  filter(!is.na(xtnTube)) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = 
+           case_when(
+             str_detect(xtnTube, "A,B") ~ str_c("tx", gsub("A,B", "B", xtnTube)),
+             .default = str_c("t", xtnTube))) %>%
+  mutate(well = NA) %>%
+  mutate(eltn = "e2") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  mutate(mapID =
+           case_when(
+             grepl("-", xtnStatus) ~ gsub("replacement for plate xtn ", "", xtnStatus),
+             str_detect(xtnTube, "A,B") ~ str_c("hair_tx", gsub("A,B", "B", xtnTube, "_e2")),
+             .default = str_c("hair_t", xtnTube, "_e2"))) %>%
+  mutate(mapID = 
+           case_when(
+             grepl("-", mapID) ~ str_c("hair_p", gsub("(.*)-(.*)", "\\1", mapID), "e2_", gsub("(.*)-(.*)", "\\2", mapID)),
+             .default = mapID)) %>%
+  select(c("animalID", "sampleType", "mapID", "xtnLoc", "eltn", "well", "reagent"))
+  
+
+xtnList_hair <- rbind(xtnList_hair_e1, xtnList_hair_e2)
+```
+
+### 4.2.2 Xtns to SKIP
+
+Extractions known to be OUT or non-functional
+
+#### Xtn records
+
+(blood & fecal master xtn files don't have xtn status)
+
+```{r}
+tx9B <- data.frame(sampleType = "hair",
+                   xtnLoc = "tx9B",
+                   eltn = "e2",
+                   well = NA,
+                   reagent = "hair_tx9B")
+
+xtnsOut_hairMaster <- xtnMaster_hair %>%
+  filter(str_detect(xtnStatus, c("OUT|nonfxnl"))) %>%
+  mutate(sampleType = "hair") %>%
+  mutate(xtnLoc = 
+           case_when(
+             is.na(xtnPlate) ~ str_c("tx", gsub("A,B", "A", xtnTube)),
+             .default = str_c("p", xtnPlate))) %>%
+  mutate(eltn = tolower(elution)) %>%
+  mutate(well = str_c(xtnRow, xtnCol)) %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  select(c("sampleType", "xtnLoc", "eltn", "well", "reagent")) %>%
+  rbind(., tx9B)
+```
+
+#### tamRun3 records
+
+```{r}
+# tamRun3 metadata
+md_tamRun3 <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_5June2023.csv")
+
+t16e2 <- data.frame(sampleType = "hair",
+                   xtnLoc = "t16e2",
+                   eltn = "e2",
+                   well = NA,
+                   reagent = "hair_t16e2")
+
+xtnsOut_tamun3 <- md_tamRun3 %>%
+  filter(str_detect(pcr1Notes_p12, "OUT")) %>%
+  select(c("pcr1Notes_p12", "xtnUsed_p12", "sampleType")) %>%
+  mutate(xtnsOut_plate =
+           case_when(
+             grepl("-", xtnUsed_p12) ~ str_c(sampleType, "_p", str_sub(xtnUsed_p12, 1, 1)),
+             .default = str_c(sampleType, "_t", xtnUsed_p12))) %>%
+  mutate(xtnsOut_loc = 
+           case_when(
+             str_detect(pcr1Notes_p12, fixed("e1 is out", ignore_case = T)) ~ str_c(xtnsOut_plate, "_e1"),
+             .default = str_c(xtnsOut_plate, "_e2"))) %>%
+  mutate(well = 
+           case_when(
+             grepl("-", xtnUsed_p12) ~ str_sub(xtnUsed_p12, 3, length(xtnUsed_p12)))) %>%
+  select(c("xtnsOut_loc", "well")) %>%
+  separate(., xtnsOut_loc, into = c("sampleType", "xtnLoc", "eltn")) %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn)) %>%
+  rbind(., t16e2)
+```
+
+#### On-site xtn checks
+
+```{r}
+xtnsOut_onsiteChecks <- matrix(c("sampleType_p#_eltn_well",
+                                 "sampleType_t#_eltn_NA"),
+                               ncol = 1) %>%
+  `colnames<-`(., "xtnsOut") %>%
+  as.data.frame() %>%
+  separate(., xtnsOut, into = c("sampleType", "xtnLoc", "eltn", "well"), sep = "_") %>%
+  mutate(reagent = str_c(sampleType, "_", xtnLoc, eltn))
+```
+
+#### Full list
+
+```{r}
+xtnsOut <- rbind(xtnsOut_hairMaster, xtnsOut_tamun3, xtnsOut_onsiteChecks)
+
+xtnsOut_platesE1 <- xtnsOut %>%
+  filter(grepl("p", xtnLoc)) %>%
+  filter(eltn == "e1")
+
+xtnsOut_platesE2 <- xtnsOut %>%
+  filter(grepl("p", xtnLoc)) %>%
+  filter(eltn == "e2")
+
+xtnsOut_tubesE1 <- xtnsOut %>%
+  filter(grepl("t", xtnLoc)) %>%
+  filter(!grepl("tamTiger", xtnLoc)) %>%
+  filter(eltn == "e1")
+
+xtnsOut_tubesE2 <- xtnsOut %>%
+  filter(grepl("t", xtnLoc)) %>%
+  filter(!grepl("tamTiger", xtnLoc)) %>%
+  filter(eltn == "e2")
+```
+
+# 5 Primer rehydration
+
+```{r}
+plateSpecs_p56 <- read_excel("./primers/02_rehydrationPooling/plateSpecs_tamGenetics_primerPlates5,6.xlsx") %>%
+  as.data.frame()
+
+ot2csv_p56Rehydrate <- plateSpecs_p56 %>%
+  rename_with(make.names) %>%
+  mutate(source_labware = "nest_12_reservoir_15ml",
+         source_slot = 2,
+         source_well = c(rep("A2", 70), rep("A3", 70)),
+         asp_height = 1,
+         dest_labware = "vwr_96_wellplate_1000ul",
+         dest_slot = case_when(
+           Plate.Name == "tamGenetics_primersPlate5" ~ 3,
+           Plate.Name == "tamGenetics_primersPlate6" ~ 6),
+         transfer_volume = round(5*nmoles, 1)) %>%
+  mutate(dest_well = gsub("0", "", Well.Position)) %>%
+  mutate(destRow = str_sub(dest_well, 1, 1),
+         destCol = str_sub(dest_well, 2, length(dest_well))) %>%
+  arrange(dest_slot, destCol, destRow) %>%
+  select(c("source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "transfer_volume"))
+
+write.csv(ot2csv_p56Rehydrate, "./robotProtocols/inputFiles/tamGenetics_primerRehydration200uM_primerPlates5,6.csv", row.names = F)
+```
+
+# 6 PCR1
+
+create protocol for plate e1 samples
+if no plate e1, use plate e2
+if no plate e2, use tube e1
+if no tube e1, use tube e2
+if no tube e2, remove from protocol
+
+## CSV template
+
+```{r}
+pcr1Headers <- c("ot2set",
+                 "reagent",
+                 "source_labware",
+                 "source_slot",
+                 "source_well",
+                 "asp_height_mm",
+                 "dest_labware",
+                 "dest_slot",
+                 "dest_well",
+                 "transfer_volume")
+```
+
+### Plates 1 & 2 + Strip 1 (blood samples)
+
+Input:
+-   extraction plates
+-   mastermix w/primer pool 1
+
+Output:
+-   2 PCR1 plates
+-   1 PCR1 strip
+
+#### Xtns
+
+```{r}
+pcr1_xtns_p1e1 <- xtnPlate_map_p1e1 %>%
+  select(c("reagent", "well")) %>%
+  dplyr::rename("source_well" = "well") %>%
+  mutate(source_slot = 1) %>%
+  mutate(dest_slot = 3) %>%
+  mutate(dest_well = source_well) %>%
+  select(c("reagent", "source_slot", "source_well", "dest_slot", "dest_well")) %>%
+  filter(!reagent %in% xtnsOut_platesE1$reagent)
+
+pcr1_xtns_p1e2 <- xtnPlate_map_p1e2 %>%
+  select(c("reagent", "well")) %>%
+  dplyr::rename("source_well" = "well") %>%
+  mutate(source_slot = 1) %>%
+  mutate(dest_slot = 3) %>%
+  mutate(dest_well = source_well) %>%
+  select(c("reagent", "source_slot", "source_well", "dest_slot", "dest_well")) %>%
+  # Remove if e1 is present
+  filter(!source_well %in% pcr1_xtns_p1e1$source_well) %>%
+  # Remove if e2 xtn is out
+  filter(!reagent %in% xtnsOut_platesE2$reagent)
+
+pcr1_xtns_te1 <- 
+```
+
+
+```{r}
+mm_slot2_toPCR96_slot3 <- matrix(c(
+  # source slot
+  rep(2, 12),
+  # source well
+  rep("A1", 12),
+  # dest slot
+  rep(3, 12),
+  # dest well
+  grep("A", wellValues, value = T)),
+  ncol = 4)
+
+xtns_magSlot1_toPCR_slot3 <- matrix(c(
+  # source slot
+  rep(1, 96),
+  # source well
+  wellValues,
+  # dest slot
+  rep(3, 96),
+  # dest well
+  wellValues),
+  ncol = 4)
+
+
+  
+pcr1_p12s1_mm <- 
+  
+pcr1_p12s1_csv <-
+```
+
+## Plate 3a & 3b (hair samples)
+
+```{r}
+
+```
+
+## Plate 4a & 4b (hair samples)
+
+```{r}
+
+```
+
+## Plate 5ab (hair samples)
+
+```{r}
+
+```
+
+# 1:20 dilutions
+
+# PCR2
+
+# SCRAPS
+
+```{r}
+xtnList_blood_e1 <- xtnMaster_blood %>%
+  mutate(sampleType =
+           "blood") %>%
+  mutate(animalID =
+           case_when(animalID == "BLANK" ~ str_c("neg_", xtnPlate, xtnRow, xtnCol, "_e1"),
+                              .default = animalID)) %>%
+  mutate(origLocID =
+           case_when(
+             !str_detect(lysisPlate, "tube") ~ str_c("p", lysisPlate, "_", lysisRow, lysisCol),
+             str_detect(lysisPlate, "tube") ~ str_c("t", xtnTube, "_blood_e1"))) %>%
+  mutate(origLoc =
+           case_when(
+             grepl("t", origLocID) ~ "tube",
+             .default = "plate")) %>%
+  mutate(xtn =
+           case_when(
+             is.na(xtnTube) ~ str_c("p", xtnPlate, "_", xtnRow, xtnCol, "_e1"),
+             .default = str_c("t", xtnTube, "_blood_e1"))) %>%
+  mutate(xtnType =
+           case_when(grepl("t", xtn) ~ "tube",
+                     .default = "plate")) %>%
+  select(c("animalID", "sampleType", "origLoc", "origLocID", "xtnType", "xtn"))
+
+xtnList_blood_e2 <- xtnList_blood_e1 %>%
+  mutate(origLocID = gsub("e1", "e2", origLocID)) %>%
+  mutate(xtn = gsub("e1", "e2", xtn))
+
+xtnList_blood <- rbind(xtnList_blood_e1, xtnList_blood_e2)
+
+# Fecal xtns
+
+
+# Hair xtns
+xtnMaster_hair <- read.csv("./extractions/tamGenetics_extractionsHair_master_21July2023.csv")
+
+xtnList_hair_e1 <- xtnMaster_hair %>%
+  filter(!if_all(c(xtnTube, xtnPlate), is.na)) %>%
+  mutate(animalID =
+           case_when(
+             animalID == "BLANK" ~ str_c("neg_", xtnPlate, xtnRow, xtnCol, "_e1"),
+             .default = animalID)) %>%
+  mutate(sampleType =
+           "hair") %>%
+  mutate(origLocID =
+           case_when(
+             grepl("-", xtnStatus) ~ gsub("replacement for plate xtn ", "", xtnStatus),
+             is.na(xtnPlate) ~ str_c("t", xtnTube, "_hair_", tolower(elution)),
+             .default = str_c("p", xtnPlate, "_", xtnRow, xtnCol, "_", tolower(elution)))) %>%
+  mutate(origLocID = 
+           case_when(
+             grepl("-", origLocID) ~ str_c("p", gsub("-", "_", origLocID), "_", tolower(elution)),
+             .default = origLocID)) %>%
+  mutate(origLoc = 
+           case_when(
+             grepl("tamTiger", origLocID) ~ "plate",
+             grepl("t", origLocID) ~ "tube",
+             .default = "plate")) %>%
+  mutate(xtn =
+           case_when(
+             is.na(xtnTube) ~ str_c("p", xtnPlate, "_", xtnRow, xtnCol, "_", tolower(elution)),
+             .default = str_c("t", xtnTube, "_hair_", tolower(elution)))) %>%
+  mutate(xtnType =
+           case_when(
+             grepl("tamTiger", xtn) ~ "plate",
+             grepl("t", xtn) ~ "tube",
+             .default = "plate")) %>%
+  select(c("animalID", "sampleType", "origLoc", "origLocID", "xtnType", "xtn"))
+
+xtnList_hair_e2 <- xtnList_hair_e1 %>%
+  mutate(origLocID = gsub("e1", "e2", origLocID)) %>%
+  mutate(xtn = gsub("e1", "e2", xtn))
+
+xtnList_hair <- rbind(xtnList_hair_e1, xtnList_hair_e2)
+
+# Full xtn list
+xtnList_all <- rbind(xtnList_blood, xtnList_fecal, xtnList_hair)
+```
+
