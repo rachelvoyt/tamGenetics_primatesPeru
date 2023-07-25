@@ -36,8 +36,10 @@ text/scripts were taken directly from the GTscore pipeline.
 ### R packages
 
 ```{r, eval = FALSE}
-library(tidyverse)
+library(gsubfn)
 library(phylotools)
+library(TidyMultiqc)
+library(tidyverse)
 if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install("Biostrings")
@@ -104,9 +106,13 @@ cpan App::cpanminus
 
 # Install necessary perl modules
 sudo cpanm Algorithm::Combinatorics
+sudo cpanm Excel::Writer::XLSX
 ## OR
 sudo cpan Algorithm::Combinatorics
+sudo cpan Excel::Writer::XLSX
 ```
+
+I also recently had issues with installing perl modules with "cpanm" -- installing with "cpan" instead solved things. Generally speaking, perl continues to be a massive pain in new fun ways every time I open this up to re-run something.
 
 ## 1.2 Prepare sequencing results
 
@@ -231,13 +237,6 @@ for i in ../ORIGINAL_SEQS/*.fastq; do f=${i%%_892ac4c1_03630e12*}; g=${f##*_}; c
 
 # Can view what it does by running the following:
 for i in ../ORIGINAL_SEQS/*.fastq; do f=${i%%_892ac4c1_03630e12*}; g=${f##*_}; echo cutadapt -a TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG...GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG -o ${g}_trimmed.fastq $i; done > cutadapt_command.txt
-```
-
-Finally, copy the trimmed files to the GTscore folder (they need to be
-here for the GTscore scripts to run properly)
-
-```{bash, eval = FALSE}
-cp bar* ../GTSCORE_DIRECTORY/
 ```
 
 ## 1.3 Create GTscore input files
@@ -609,15 +608,15 @@ To run from R, use:
 ```{r count reads for amplicons, eval=FALSE}
 # All samples, all loci
 system2("perl",
-        args="AmpliconReadCounter.pl -p primerProbeFile_fullSet.txt --files sampleFiles_fullSet.txt --prefix fullSet_")
+        args="AmpliconReadCounter.pl -p primerProbeFile_fullSet.txt --files sampleFiles_fullSet.txt --inDir YOUR/SEQUENCE/DIRECTORY --outDir DESIRED/OUTPUT/DIRECTORY --prefix fullSet_")
 
 # LWED
 system2("perl",
-        args="AmpliconReadCounter.pl -p primerProbeFile_LWED.txt --files sampleFiles_LWED.txt --prefix LWED_")
+        args="AmpliconReadCounter.pl -p primerProbeFile_LWED.txt --files sampleFiles_LWED.txt --inDir YOUR/SEQUENCE/DIRECTORY --outDir DESIRED/OUTPUT/DIRECTORY --prefix LWED_")
 
 # SIMP
 system2("perl",
-        args="AmpliconReadCounter.pl -p primerProbeFile_SIMP.txt --files sampleFiles_SIMP.txt --prefix SIMP_")
+        args="AmpliconReadCounter.pl -p primerProbeFile_SIMP.txt --files sampleFiles_SIMP.txt --inDir YOUR/SEQUENCE/DIRECTORY --outDir DESIRED/OUTPUT/DIRECTORY --prefix SIMP_")
 ```
 
 AmpliconReadCounter.pl outputs a LocusTable file and an AlleleReads file
