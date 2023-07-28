@@ -31,6 +31,7 @@ library(readxl)
 
 ```{r}
 # Labware
+xtnPlate <- "biorad_96_wellplate_200ul_pcr"
 pcrPlate <- "biorad_96_wellplate_200ul_pcr"
 tubeRack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
 magblock <- "magnetic_module_gen2"
@@ -52,15 +53,20 @@ tiprack_p300f <- "opentrons_96_filtertiprack_200ul"
 
 ```{r}
 # Row values
-rowValues <- rep(LETTERS[1:8], times = 12)
+rowValues_plate <- rep(LETTERS[1:8], times = 12)
+rowValues_tuberack <- rep(LETTERS[1:4], times = 6)
 
 # Column values
-colValues <- rep(1:12, times = 8) %>%
+colValues_plate <- rep(1:12, times = 8) %>%
+  sort() %>%
+  as.character()
+colValues_tuberack <- rep(1:6, times = 4) %>%
   sort() %>%
   as.character()
 
 # Well values
-wellValues <- str_c(rowValues, colValues)
+wellValues_plate <- str_c(rowValues_plate, colValues_plate)
+wellValues_tuberack <- str_c(rowValues_tuberack, colValues_tuberack)
 ```
 
 # 4 OT2 input for PRIMER protocols
@@ -448,7 +454,7 @@ uM_finalAdjust_ot2 <- data.frame(
   mutate(transfer_volume = round(transfer_volume, 1))
 ```
 
-### 4.2.6 Full OT2 protocol
+### 4.2.6 Full OT2 input
 
 Combine dilutions, split primer pools, primer pool 1 creation, SDZ/laLab subsets, and uM adjustments:
 
@@ -504,6 +510,508 @@ write.csv(ot2_final_plusPlates, "./robotProtocols/inputFiles/primerDilutionsPool
 ```
 
 # 5 OT2 input for SAMPLES 
+
+## 5.1 Extraction data
+
+### Xtn master lists (27 July 2023)
+
+```{r}
+xtnsBlood <- read.csv("./extractions/tamGenetics_xtnsBlood_master_updated27July2023.csv")
+xtnsFecal <- read.csv("./extractions/tamGenetics_xtnsFecal_master_updated27July2023.csv")
+xtnsHair <- read.csv("./extractions/tamGenetics_xtnsHair_master_updated27July2023.csv")
+
+xtnsAll <- rbind(xtnsBlood, xtnsFecal, xtnsHair)
+```
+
+### Xtns to SKIP
+
+#### Xtn records
+```{r}
+xtns_toSkip_xtnRecords <- xtnsAll %>%
+  filter(xtnRemaining != "yes") %>%
+  select(c("animalID", "xtnID", "xtnRemaining"))
+```
+
+#### tamRun3 records
+
+```{r}
+xtns_toSkip_tamRun3Records <- md_tamRun3 %>%
+  filter(str_detect(pcr1Notes_p12, "OUT")) %>%
+  mutate(
+    xtnID = case_when(
+      str_detect(xtnUsed_p12, "-") ~ str_c(sampleType, "_p", str_sub(xtnUsed_p12, 1, 1), ".", str_sub(xtnUsed_p12, 3, length(xtnUsed_p12)), "_", tolower(str_sub(pcr1Notes_p12, 1, 2))),
+      .default = str_c(sampleType, "_t", xtnUsed_p12, "_", tolower(str_sub(pcr1Notes_p12, 1, 2)))
+      ),
+    xtnRemaining = "no"
+    ) %>%
+  select(c("animalID", "xtnID", "xtnRemaining"))
+```
+
+#### On-site xtn & bead checks
+
+```{r}
+# xtn checks
+xtns_toSkip_onsiteChecks <- data.frame(
+  xtnID = c("sampleType_p#.w#_e#",
+            "sampleType_t#_e#",
+            "sampleType_tx#_e#"
+            )) %>%
+  merge(., xtnsAll[, c("animalID", "xtnID")], by = "xtnID", all.x = T) %>%
+  mutate(xtnRemaining = "no") %>%
+  select(c("animalID", "xtnID", "xtnRemaining"))
+
+# bead checks
+xtnPlate_beadChecks <- data.frame(
+  xtnLoc = rep(c("p1", "p2", "p3", "p4"), 2),
+  eltn = c(rep("e1", 4), rep("e2", 4))
+  ) %>%
+  mutate(
+    xtnPlate_beadsPresent = case_when(
+      xtnLoc == "p1" & eltn == "e1" ~ "tbd",
+      xtnLoc == "p1" & eltn == "e2" ~ "tbd",
+      xtnLoc == "p2" & eltn == "e1" ~ "tbd",
+      xtnLoc == "p2" & eltn == "e2" ~ "tbd",
+      xtnLoc == "p3" & eltn == "e1" ~ "tbd",
+      xtnLoc == "p3" & eltn == "e2" ~ "tbd",
+      xtnLoc == "p4" & eltn == "e1" ~ "tbd",
+      xtnLoc == "p4" & eltn == "e2" ~ "tbd")
+) %>%
+  arrange(xtnLoc)
+```
+
+#### All xtns to skip
+
+```{r}
+xtns_toSkip <- rbind(xtns_toSkip_xtnRecords, xtns_toSkip_tamRun3Records, xtns_toSkip_onsiteChecks) %>%
+  arrange(xtnID) %>%
+  unique()
+```
+
+#### Update xtn records
+
+Update 'xtnRemaining' and add 'xtnPlate_beadsPresent'
+
+```{r}
+xtnsBlood_updated <- xtnsBlood %>%
+  mutate(
+    xtnRemaining = case_when(
+      xtnID %in% xtns_toSkip$xtnID ~ "no",
+      .default = xtnRemaining
+      )) %>%
+  merge(., xtnPlate_beadChecks[, c("xtnLoc", "eltn", "xtnPlate_beadsPresent")], by = c("xtnLoc", "eltn"), all.x = T) %>%
+  relocate(xtnPlate_beadsPresent, .before = xtnNotes) %>%
+  relocate(c("xtnLoc", "eltn"), .after = xtnID)
+
+xtnsFecal_updated <- xtnsFecal %>%
+  mutate(xtnRemaining = case_when(
+    xtnID %in% xtns_toSkip$xtnID ~ "no",
+    .default = xtnRemaining
+  )) %>%
+  merge(., xtnPlate_beadChecks[, c("xtnLoc", "eltn", "xtnPlate_beadsPresent")], by = c("xtnLoc", "eltn"), all.x = T) %>%
+  relocate(xtnPlate_beadsPresent, .before = xtnNotes) %>%
+  relocate(c("xtnLoc", "eltn"), .after = xtnID)
+
+xtnsHair_updated <- xtnsHair %>%
+  mutate(xtnRemaining = case_when(
+    xtnID %in% xtns_toSkip$xtnID ~ "no",
+    .default = xtnRemaining
+  )) %>%
+  merge(., xtnPlate_beadChecks[, c("xtnLoc", "eltn", "xtnPlate_beadsPresent")], by = c("xtnLoc", "eltn"), all.x = T) %>%
+  relocate(xtnPlate_beadsPresent, .before = xtnNotes) %>%
+  relocate(c("xtnLoc", "eltn"), .after = xtnID)
+
+xtnsAll_updated <- rbind(xtnsBlood_updated, xtnsFecal_updated, xtnsHair_updated)
+```
+
+### Xtns REMAINING by animalID
+
+```{r}
+xtnsRemaining_byAnimalID <- xtnsAll_updated %>%
+  filter(xtnRemaining == "yes") %>%
+  mutate(sampleType_animalID = str_c(sampleType, "_", animalID)) %>%
+  group_by(sampleType_animalID) %>%
+  summarise_all(~ toString(unique(.))) %>%
+  select(c("sampleType_animalID", "xtnID")) %>%
+  separate(xtnID, c("xtnID.1", "xtnID.2", "xtnID.3", "xtnID.4"), ",")
+```
+
+### Xtns to ADJUST
+
+```{r}
+xtns_toAdjust <- xtnsAll_updated %>%
+  filter(str_detect(xtnNotes, "dilute")) %>%
+  select(c("animalID", "xtnID", "xtnNotes"))
+```
+
+## 5.2 PCR1
+
+### 5.2.1 csv headers
+
+```{r}
+pcr1Headers <- c("ot2set",
+                 "reagent",
+                 "source_labware",
+                 "source_slot",
+                 "source_well",
+                 "asp_height",
+                 "dest_labware",
+                 "dest_slot",
+                 "dest_well",
+                 "transfer_volume")
+```
+
+### 5.2.2 30x3
+
+#### Xtn transfer info
+
+**All samples + dest_wells**
+
+```{r}
+# Original 30x3 sample list
+bfh_samples <- read.csv("./01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv") %>%
+  filter(str_detect(pcr1Description, "again|blood")) %>%
+  filter(!is.na(sampleType)) %>%
+  mutate(xtnTube = gsub("\\s+", "", xtnTube))
+
+# Select negatives
+bfh_negsBlood <- xtnsAll_updated %>%
+  filter(animalID %in% c("xtnNeg_p1.C4","xtnNeg_p2.C4")) %>%
+  filter(eltn == "e1") %>%
+  mutate(sampleType = str_c("blood_", sampleType)) %>%
+  select(c("sampleType", "animalID", "xtnID"))
+bfh_negsFecal <- data.frame(
+  sampleType = c("fecal_pcr1Neg1", "fecal_pcr1Neg2"),
+  animalID = c("pcr1Neg1", "pcr1Neg2"),
+  xtnID = rep(NA, 2))
+bfh_negsHair <- xtnsAll_updated %>%
+  filter(animalID %in% c("xtnNeg_p3.C4","xtnNeg_p4.C4")) %>%
+  filter(eltn == "e1") %>%
+  mutate(sampleType = str_c("hair_", sampleType)) %>%
+  select(c("sampleType", "animalID", "xtnID"))
+
+bfh_negsAll <- rbind(bfh_negsBlood, bfh_negsFecal, bfh_negsHair) %>%
+  rename("xtnTube" = "xtnID") %>%
+  mutate(
+    sampleType_animalID = case_when(
+      str_detect(sampleType, "pcr1Neg") ~ sampleType,
+      .default = str_c(sampleType, "_", str_sub(animalID, start = 8, end = -1))
+      )
+    ) %>%
+  select(c("sampleType", "animalID", "xtnTube", "sampleType_animalID"))
+
+# add negs to 30x3 xtn list & reformat
+bfh_xtns <- bfh_samples %>%
+  select(c("sampleType", "animalID", "xtnTube")) %>%
+  mutate(
+    sampleType_animalID = str_c(sampleType, "_", animalID),
+    xtnTube = case_when(
+      sampleType == "fecal" ~ gsub("F", "", xtnTube),
+      .default = xtnTube
+      )
+  ) %>%
+  filter(duplicated(sampleType_animalID) == F) %>%
+  rbind(., bfh_negsAll) %>%
+  mutate(
+    xtnID = case_when(
+      sampleType == "fecal_pcr1Neg1" ~ "tH2O.1",
+      sampleType == "fecal_pcr1Neg2" ~ "tH2O.2",
+      str_detect(xtnTube, "Neg") ~ str_c(gsub("_.*", "", sampleType), "_", xtnTube),
+      str_detect(xtnTube, "-") ~ str_c(sampleType, "_p", str_sub(xtnTube, 1, 1), ".", str_sub(xtnTube, 3, length(xtnTube)), "_e1"),
+      str_detect(xtnTube, "A") ~ str_c(sampleType, "_tx", xtnTube, "_e1"),
+      .default = str_c(sampleType, "_t", xtnTube, "_e1")
+      ),
+    xtnRemaining = case_when(
+      xtnID %in% xtns_toSkip$xtnID ~ "no",
+      .default = "yes"
+      )
+    ) %>%
+  select(c("sampleType_animalID", "sampleType", "xtnID", "xtnRemaining")) %>%
+  # replace "SKIP" xtns
+  merge(., xtnsRemaining_byAnimalID, by = "sampleType_animalID", all.x = T) %>%
+  # remove columns with all NA
+  select(where(function(x) !all(is.na(x)))) %>%
+  mutate(
+    xtnID = case_when(
+      xtnRemaining == "no" ~ xtnID.1,
+      .default = xtnID
+    )
+  ) %>%
+  select(c("sampleType_animalID", "sampleType", "xtnID")) %>%
+  mutate(
+    xtnLoc = case_when(
+      str_detect(xtnID, "p") ~ gsub(".*[_]([^.]+)[.].*", "\\1", xtnID),
+      str_detect(xtnID, "t") ~ gsub(".*[_]([^_]+)[_].*", "\\1", xtnID)
+    ),
+    xtnRow = case_when(
+      str_detect(xtnID, "p") ~ str_sub(gsub(".*[.]([^_]+)[_].*", "\\1", xtnID), 1, 1),
+      str_detect(xtnID, "t") ~ NA
+    ),
+    xtnCol = case_when(
+      str_detect(xtnID, "p") ~ str_sub(gsub(".*[.]([^_]+)[_].*", "\\1", xtnID), 2, length(gsub(".*[.]([^_]+)[_].*", "\\1", xtnID))),
+      str_detect(xtnID, "t") ~ NA
+    ),
+    eltn = case_when(
+      str_detect(xtnID, "H2O") ~ NA,
+      .default = str_sub(xtnID, -2, length(xtnID))
+      )
+    ) %>%
+  # add whether plates have beads
+  merge(., xtnPlate_beadChecks[, c("xtnLoc", "eltn", "xtnPlate_beadsPresent")], by = c("xtnLoc", "eltn"), all.x = T) %>%
+  relocate(c("xtnLoc", "eltn"), .after = "xtnID") %>%
+  arrange(gsub("_.*", "", sampleType_animalID), str_sub(xtnLoc, 1, 1), as.numeric(str_sub(xtnLoc, 2, length(xtnLoc))), as.numeric(xtnCol), xtnRow) %>%
+  # place negatives evenly across plate
+  mutate(ID = as.character(row_number())) %>%
+  mutate(ID = case_when(
+    ID == "5" ~ "11.1",
+    ID == "21" ~ "30.1",
+    ID == "63" ~ "42.1",
+    ID == "64" ~ "52.1",
+    ID == "66" ~ "67.1",
+    ID == "78" ~ "86.1",
+    .default = ID
+  )) %>%
+  arrange(as.numeric(ID))
+```
+
+**Blood samples**
+
+```{r}
+bfh_sourceWells_bloodTubes <- bfh_xtns %>%
+  filter(!str_detect(xtnID, "tamTiger")) %>%
+  filter(str_detect(xtnID, "blood_t")) %>%
+  mutate(
+    source_well.t = wellValues_tuberack[1:length(xtnID)],
+    fecalSet = NA
+  ) %>%
+  select(c("xtnID", "source_well.t", "fecalSet"))
+
+bfh_sourceWells_fecalTubes1to24 <- bfh_xtns %>%
+  filter(str_detect(sampleType, "fecal")) %>%
+  .[1:24,] %>%
+  mutate(
+    source_well.t = wellValues_tuberack[1:length(xtnID)],
+    fecalSet = "set4_fecalTubes_1to24"
+    ) %>%
+  select(c("xtnID", "source_well.t", "fecalSet"))
+bfh_sourceWells_fecalTubes25to32 <- bfh_xtns %>%
+  filter(str_detect(sampleType, "fecal")) %>%
+  .[25:32,] %>%
+  mutate(
+    source_well.t = wellValues_tuberack[1:length(xtnID)],
+    fecalSet = "set5_fecalTubes_25to32"
+    ) %>%
+  select(c("xtnID", "source_well.t", "fecalSet"))
+
+bfh_sourceWells_hairTubes <- bfh_xtns %>%
+  filter(str_detect(xtnID, "hair_t")) %>%
+  mutate(
+    source_well.t = wellValues_tuberack[1:length(xtnID)],
+    fecalSet = NA
+  ) %>%
+  select(c("xtnID", "source_well.t", "fecalSet"))
+
+bfh_sourceWells_allTubes <- rbind(bfh_sourceWells_bloodTubes,
+                                  bfh_sourceWells_fecalTubes1to24,
+                                  bfh_sourceWells_fecalTubes25to32,
+                                  bfh_sourceWells_hairTubes)
+
+bfh_transferInfo_pp2 <- bfh_xtns %>%
+  merge(., bfh_sourceWells_allTubes, all.x = T) %>%
+  arrange(as.numeric(ID)) %>%
+  mutate(
+    ot2set = case_when(
+      (str_detect(xtnID, "blood") & str_detect(xtnID, "p1")) ~ "set1_xtnPlate1",
+      (str_detect(xtnID, "blood") & str_detect(xtnID, "p2")) ~ "set2_xtnPlate2",
+      str_detect(xtnID, "blood_t") ~ "set3_bloodTubes",
+      str_detect(sampleType, "fecal") ~ fecalSet,
+      str_detect(xtnID, "hair") & str_detect(xtnID, "p3") ~ "set6_xtnPlate3",
+      str_detect(xtnID, "hair") & str_detect(xtnID, "p4") ~ "set7_xtnPlate4",
+      str_detect(xtnID, "hair_t") ~ "set8_hairTubes",
+    ),
+    reagent = xtnID,
+    source_labware = case_when(
+      xtnPlate_beadsPresent == "yes" ~ magblock,
+      str_detect(xtnID, "p") ~ pcrPlate,
+      str_detect(xtnID, "t") ~ tubeRack
+    ),
+    source_slot = case_when(
+      xtnPlate_beadsPresent == "yes" ~ 7,
+      (str_detect(xtnID, "p") & str_detect(xtnID, "e1")) ~ 1,
+      (str_detect(xtnID, "p") & str_detect(xtnID, "e2")) ~ 4,
+      str_detect(xtnID, "t") ~ 3
+    ),
+    source_well = case_when(
+      str_detect(xtnID, "p") ~ str_c(xtnRow, xtnCol),
+      .default = source_well.t),
+    asp_height = 1,
+    dest_labware = pcrPlate,
+    dest_slot = 2,
+    dest_well = wellValues_plate,
+    transfer_volume = case_when(
+      str_detect(sampleType, "blood") ~ 2,
+      .default = 4
+    )
+  ) %>%
+  select(pcr1Headers) %>%
+  arrange(ot2set) %>%
+  mutate(id = row_number())
+
+bfh_transferInfo_pp3 <- bfh_transferInfo_pp2 %>%
+  mutate(dest_slot = 5)
+
+bfh_pcr1_xtnTransfer <- rbind(bfh_transferInfo_pp2,
+                               bfh_transferInfo_pp3) %>%
+  arrange(id, dest_slot) %>%
+  select(-id)
+```
+
+#### Full OT2 input
+
+```{r}
+bfh_pcr1_waterTransfer <- data.frame(
+  ot2set = rep("set0.1_water", 64),
+  reagent = "mastermix",
+  source_labware = pcrPlate,
+  source_slot = 6,
+  source_well = "B1",
+  asp_height = 1,
+  dest_labware = pcrPlate,
+  dest_slot = c(rep(2, 32), rep(5, 32)),
+  dest_well = rep(wellValues_plate[1:32], 2),
+  transfer_volume = 2
+) %>%
+  select(pcr1Headers)
+
+bfh_pcr1_mmTransfer <- data.frame(
+  ot2set = rep("set0.2_mm", 24),
+  reagent = "mastermix",
+  source_labware = pcrPlate,
+  source_slot = 6,
+  source_well = "A1",
+  asp_height = 1,
+  dest_labware = pcrPlate,
+  dest_slot = c(rep(2, 12), rep(5, 12)),
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = 6
+) %>%
+  select(pcr1Headers)
+
+bfh_pcr1_ot2Input <- rbind(bfh_pcr1_waterTransfer,
+                           bfh_pcr1_mmTransfer,
+                           bfh_pcr1_xtnTransfer)
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+ot2_string <- format_delim(bfh_pcr1_ot2Input,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/30x3_pcr1_forOT2_string.txt")
+
+ot2_string
+
+sink()
+
+# csv file
+write.csv(bfh_pcr1_ot2Input, "./robotProtocols/inputFiles/30x3_pcr1_forOT2.csv", row.names = F)
+```
+
+### 5.2.3 tamGenetics
+
+#### Plates 1 & 2 + Strip 1 (blood samples)
+
+Input:
+-   extraction plates
+-   mastermix w/primer pool 1
+
+Output:
+-   2 PCR1 plates
+-   1 PCR1 strip
+
+##### Xtns
+
+```{r}
+pcr1_xtns_p1e1 <- xtnPlate_map_p1e1 %>%
+  select(c("reagent", "well")) %>%
+  dplyr::rename("source_well" = "well") %>%
+  mutate(source_slot = 1) %>%
+  mutate(dest_slot = 3) %>%
+  mutate(dest_well = source_well) %>%
+  select(c("reagent", "source_slot", "source_well", "dest_slot", "dest_well")) %>%
+  filter(!reagent %in% xtnsOut_platesE1$reagent)
+
+pcr1_xtns_p1e2 <- xtnPlate_map_p1e2 %>%
+  select(c("reagent", "well")) %>%
+  dplyr::rename("source_well" = "well") %>%
+  mutate(source_slot = 1) %>%
+  mutate(dest_slot = 3) %>%
+  mutate(dest_well = source_well) %>%
+  select(c("reagent", "source_slot", "source_well", "dest_slot", "dest_well")) %>%
+  # Remove if e1 is present
+  filter(!source_well %in% pcr1_xtns_p1e1$source_well) %>%
+  # Remove if e2 xtn is out
+  filter(!reagent %in% xtnsOut_platesE2$reagent)
+
+pcr1_xtns_te1 <- 
+```
+
+
+```{r}
+mm_slot2_toPCR96_slot3 <- matrix(c(
+  # source slot
+  rep(2, 12),
+  # source well
+  rep("A1", 12),
+  # dest slot
+  rep(3, 12),
+  # dest well
+  grep("A", wellValues, value = T)),
+  ncol = 4)
+
+xtns_magSlot1_toPCR_slot3 <- matrix(c(
+  # source slot
+  rep(1, 96),
+  # source well
+  wellValues,
+  # dest slot
+  rep(3, 96),
+  # dest well
+  wellValues),
+  ncol = 4)
+
+
+  
+pcr1_p12s1_mm <- 
+  
+pcr1_p12s1_csv <-
+```
+
+#### Plate 3a & 3b (hair samples)
+
+```{r}
+
+```
+
+#### Plate 4a & 4b (hair samples)
+
+```{r}
+
+```
+
+#### Plate 5ab (hair samples)
+
+```{r}
+
+```
+
+## 5.3 1:20 dilutions
+
+## 5.4 PCR2
+
+# SCRAPS
 
 ## 5.1 Data
 
@@ -915,121 +1423,6 @@ xtnsOut_tubesE2 <- xtnsOut %>%
   filter(!grepl("tamTiger", xtnLoc)) %>%
   filter(eltn == "e2")
 ```
-
-## 5.2 PCR1
-
-create protocol for plate e1 samples
-if no plate e1, use plate e2
-if no plate e2, use tube e1
-if no tube e1, use tube e2
-if no tube e2, remove from protocol
-
-### CSV template
-
-```{r}
-pcr1Headers <- c("ot2set",
-                 "reagent",
-                 "source_labware",
-                 "source_slot",
-                 "source_well",
-                 "asp_height_mm",
-                 "dest_labware",
-                 "dest_slot",
-                 "dest_well",
-                 "transfer_volume")
-```
-
-#### Plates 1 & 2 + Strip 1 (blood samples)
-
-Input:
--   extraction plates
--   mastermix w/primer pool 1
-
-Output:
--   2 PCR1 plates
--   1 PCR1 strip
-
-##### Xtns
-
-```{r}
-pcr1_xtns_p1e1 <- xtnPlate_map_p1e1 %>%
-  select(c("reagent", "well")) %>%
-  dplyr::rename("source_well" = "well") %>%
-  mutate(source_slot = 1) %>%
-  mutate(dest_slot = 3) %>%
-  mutate(dest_well = source_well) %>%
-  select(c("reagent", "source_slot", "source_well", "dest_slot", "dest_well")) %>%
-  filter(!reagent %in% xtnsOut_platesE1$reagent)
-
-pcr1_xtns_p1e2 <- xtnPlate_map_p1e2 %>%
-  select(c("reagent", "well")) %>%
-  dplyr::rename("source_well" = "well") %>%
-  mutate(source_slot = 1) %>%
-  mutate(dest_slot = 3) %>%
-  mutate(dest_well = source_well) %>%
-  select(c("reagent", "source_slot", "source_well", "dest_slot", "dest_well")) %>%
-  # Remove if e1 is present
-  filter(!source_well %in% pcr1_xtns_p1e1$source_well) %>%
-  # Remove if e2 xtn is out
-  filter(!reagent %in% xtnsOut_platesE2$reagent)
-
-pcr1_xtns_te1 <- 
-```
-
-
-```{r}
-mm_slot2_toPCR96_slot3 <- matrix(c(
-  # source slot
-  rep(2, 12),
-  # source well
-  rep("A1", 12),
-  # dest slot
-  rep(3, 12),
-  # dest well
-  grep("A", wellValues, value = T)),
-  ncol = 4)
-
-xtns_magSlot1_toPCR_slot3 <- matrix(c(
-  # source slot
-  rep(1, 96),
-  # source well
-  wellValues,
-  # dest slot
-  rep(3, 96),
-  # dest well
-  wellValues),
-  ncol = 4)
-
-
-  
-pcr1_p12s1_mm <- 
-  
-pcr1_p12s1_csv <-
-```
-
-### Plate 3a & 3b (hair samples)
-
-```{r}
-
-```
-
-### Plate 4a & 4b (hair samples)
-
-```{r}
-
-```
-
-### Plate 5ab (hair samples)
-
-```{r}
-
-```
-
-## 5.3 1:20 dilutions
-
-## 5.4 PCR2
-
-# SCRAPS
 
 ```{r}
 xtnList_blood_e1 <- xtnMaster_blood %>%
