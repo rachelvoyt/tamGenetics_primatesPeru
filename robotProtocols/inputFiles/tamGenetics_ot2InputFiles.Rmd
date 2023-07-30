@@ -33,7 +33,7 @@ library(readxl)
 # Labware
 xtnPlate <- "biorad_96_wellplate_200ul_pcr"
 pcrPlate <- "biorad_96_wellplate_200ul_pcr"
-tubeRack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
+tuberack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
 magblock <- "magnetic_module_gen2"
 
 # Pipettes
@@ -664,7 +664,7 @@ pcr1Headers <- c("ot2set",
 
 #### Xtn transfer info
 
-**All samples + dest_wells**
+Add negatives & reformat xtn list
 
 ```{r}
 # Original 30x3 sample list
@@ -699,7 +699,7 @@ bfh_negsAll <- rbind(bfh_negsBlood, bfh_negsFecal, bfh_negsHair) %>%
     ) %>%
   select(c("sampleType", "animalID", "xtnTube", "sampleType_animalID"))
 
-# add negs to 30x3 xtn list & reformat
+# Add negs to 30x3 xtn list & reformat
 bfh_xtns <- bfh_samples %>%
   select(c("sampleType", "animalID", "xtnTube")) %>%
   mutate(
@@ -773,7 +773,7 @@ bfh_xtns <- bfh_samples %>%
   arrange(as.numeric(ID))
 ```
 
-**Blood samples**
+Assign source wells
 
 ```{r}
 bfh_sourceWells_bloodTubes <- bfh_xtns %>%
@@ -790,7 +790,7 @@ bfh_sourceWells_fecalTubes1to24 <- bfh_xtns %>%
   .[1:24,] %>%
   mutate(
     source_well.t = wellValues_tuberack[1:length(xtnID)],
-    fecalSet = "set4_fecalTubes_1to24"
+    fecalSet = "set3_fecalTubes1to24"
     ) %>%
   select(c("xtnID", "source_well.t", "fecalSet"))
 bfh_sourceWells_fecalTubes25to32 <- bfh_xtns %>%
@@ -798,7 +798,7 @@ bfh_sourceWells_fecalTubes25to32 <- bfh_xtns %>%
   .[25:32,] %>%
   mutate(
     source_well.t = wellValues_tuberack[1:length(xtnID)],
-    fecalSet = "set5_fecalTubes_25to32"
+    fecalSet = "set4.1_fecalTubes25to32"
     ) %>%
   select(c("xtnID", "source_well.t", "fecalSet"))
 
@@ -814,25 +814,29 @@ bfh_sourceWells_allTubes <- rbind(bfh_sourceWells_bloodTubes,
                                   bfh_sourceWells_fecalTubes1to24,
                                   bfh_sourceWells_fecalTubes25to32,
                                   bfh_sourceWells_hairTubes)
+```
 
+Create xtn transfer info df
+
+```{r}
 bfh_transferInfo_pp2 <- bfh_xtns %>%
   merge(., bfh_sourceWells_allTubes, all.x = T) %>%
   arrange(as.numeric(ID)) %>%
   mutate(
     ot2set = case_when(
-      (str_detect(xtnID, "blood") & str_detect(xtnID, "p1")) ~ "set1_xtnPlate1",
-      (str_detect(xtnID, "blood") & str_detect(xtnID, "p2")) ~ "set2_xtnPlate2",
-      str_detect(xtnID, "blood_t") ~ "set3_bloodTubes",
+      (str_detect(xtnID, "blood") & str_detect(xtnID, "p1")) ~ "set1.2_xtnPlate1",
+      (str_detect(xtnID, "blood") & str_detect(xtnID, "p2")) ~ "set2.1_xtnPlate2",
+      str_detect(xtnID, "blood_t") ~ "set2.2_bloodTubes",
       str_detect(sampleType, "fecal") ~ fecalSet,
-      str_detect(xtnID, "hair") & str_detect(xtnID, "p3") ~ "set6_xtnPlate3",
-      str_detect(xtnID, "hair") & str_detect(xtnID, "p4") ~ "set7_xtnPlate4",
-      str_detect(xtnID, "hair_t") ~ "set8_hairTubes",
+      str_detect(xtnID, "hair") & str_detect(xtnID, "p3") ~ "set4.2_xtnPlate3",
+      str_detect(xtnID, "hair") & str_detect(xtnID, "p4") ~ "set5.1_xtnPlate4",
+      str_detect(xtnID, "hair_t") ~ "set5.2_hairTubes",
     ),
     reagent = xtnID,
     source_labware = case_when(
       xtnPlate_beadsPresent == "yes" ~ magblock,
       str_detect(xtnID, "p") ~ pcrPlate,
-      str_detect(xtnID, "t") ~ tubeRack
+      str_detect(xtnID, "t") ~ tuberack
     ),
     source_slot = case_when(
       xtnPlate_beadsPresent == "yes" ~ 7,
@@ -865,15 +869,17 @@ bfh_pcr1_xtnTransfer <- rbind(bfh_transferInfo_pp2,
   select(-id)
 ```
 
-#### Full OT2 input
+#### Water & mm transfer info
+
+Blood samples only require 2ul xtn volume, so need to add 2ul water to match the reaction volume.
 
 ```{r}
 bfh_pcr1_waterTransfer <- data.frame(
-  ot2set = rep("set0.1_water", 64),
-  reagent = "mastermix",
+  ot2set = rep("set1.1_water.mm", 64),
+  reagent = "nf-water",
   source_labware = pcrPlate,
   source_slot = 6,
-  source_well = "B1",
+  source_well = "A1",
   asp_height = 1,
   dest_labware = pcrPlate,
   dest_slot = c(rep(2, 32), rep(5, 32)),
@@ -883,11 +889,11 @@ bfh_pcr1_waterTransfer <- data.frame(
   select(pcr1Headers)
 
 bfh_pcr1_mmTransfer <- data.frame(
-  ot2set = rep("set0.2_mm", 24),
+  ot2set = rep("set1.1_water.mm", 24),
   reagent = "mastermix",
   source_labware = pcrPlate,
   source_slot = 6,
-  source_well = "A1",
+  source_well = c(rep("B1", 12), rep("C1", 12)),
   asp_height = 1,
   dest_labware = pcrPlate,
   dest_slot = c(rep(2, 12), rep(5, 12)),
@@ -895,8 +901,12 @@ bfh_pcr1_mmTransfer <- data.frame(
   transfer_volume = 6
 ) %>%
   select(pcr1Headers)
+```
 
-bfh_pcr1_ot2Input <- rbind(bfh_pcr1_waterTransfer,
+#### Full OT2 input
+
+```{r}
+bfh_pcr1_fullTransferInput <- rbind(bfh_pcr1_waterTransfer,
                            bfh_pcr1_mmTransfer,
                            bfh_pcr1_xtnTransfer)
 ```
@@ -905,18 +915,18 @@ Export
 
 ```{r}
 # comma-separated string with end-of-line delimiter
-ot2_string <- format_delim(bfh_pcr1_ot2Input,
+bfh_pcr1_fullTransferInput_string <- format_delim(bfh_pcr1_fullTransferInput,
                            delim = ",",
                            eol = "\\n")
 
-sink("./robotProtocols/inputFiles/30x3_pcr1_forOT2_string.txt")
+sink("./robotProtocols/inputFiles/30x3_pcr1setup_forOT2_string.txt")
 
-ot2_string
+bfh_pcr1_fullTransferInput_string
 
 sink()
 
 # csv file
-write.csv(bfh_pcr1_ot2Input, "./robotProtocols/inputFiles/30x3_pcr1_forOT2.csv", row.names = F)
+write.csv(bfh_pcr1_ot2Input, "./robotProtocols/inputFiles/30x3_pcr1setup_forOT2.csv", row.names = F)
 ```
 
 ### 5.2.3 tamGenetics
