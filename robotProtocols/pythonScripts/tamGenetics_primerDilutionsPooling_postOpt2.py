@@ -5,7 +5,7 @@ def get_values(*names):
 
 metadata = {
     'apiLevel': '2.3',
-    'protocolName': 'Custom CSV Transfer Protocol',
+    'protocolName': 'tamGenetics_primerDilutionsPooling_postOpt2',
     'author': 'Rachel Voyt',
     'description': '''This protocol is a modified version of the 'Custom CSV Transfer' protocol from OT2. The protocol includes steps to dilute overamplifying primers and create three primer pools (two split pools and one full pool) with two aliquots each at ~0.25 uM per primer. The protocol also allows for the use of two pipette types (p20_single and p300_single, both with filter tips), pauses to switch out primer plates, and adds a mixing step and air gap to each transfer.'''
 }

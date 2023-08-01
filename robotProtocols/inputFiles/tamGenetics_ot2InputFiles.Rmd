@@ -31,8 +31,8 @@ library(readxl)
 
 ```{r}
 # Labware
-xtnPlate <- "biorad_96_wellplate_200ul_pcr"
-pcrPlate <- "biorad_96_wellplate_200ul_pcr"
+xtnPlate <- "denvillewithaxygenbase_96_wellplate_200ul"
+pcrPlate <- "denvillewithaxygenbase_96_wellplate_200ul"
 tuberack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
 magblock <- "magnetic_module_gen2"
 
@@ -85,9 +85,13 @@ plateSpecs_p56 <- read_excel("./primers/02_rehydrationPooling/plateSpecs_tamGene
 
 ```{r}
 ot2csv_p56Rehydrate <- plateSpecs_p56 %>%
+  arrange(Plate.Name, Well.Position) %>%
   mutate(source_labware = "nest_12_reservoir_15ml",
-         source_slot = 2,
-         source_well = c(rep("A2", 70), rep("A3", 70)),
+         source_slot = case_when(
+           Plate.Name == "tamGenetics_primersPlate5" ~ 2,
+           Plate.Name == "tamGenetics_primersPlate6" ~ 5
+         ),
+         source_well = c(rep("A1", 70), rep("A2", 70)),
          asp_height = 1,
          dest_labware = "vwr_96_wellplate_1000ul",
          dest_slot = case_when(
@@ -128,9 +132,11 @@ dilutionPlate <- read.csv("./primers/03_lociChoices/dilutionPlate_postOpt2.csv")
 
 #### Add primers, then water
 
+SKIP adding water; do this manually instead.
+
 ```{r}
 # Add primers to dilution plate
-primers_forDilutions <- dilutionPlate %>%
+primers_toDilutionPlate <- dilutionPlate %>%
   select(-plate) %>%
   mutate(source_slot = case_when(originalPlate == 1 ~ 2,
                                  originalPlate == 2 ~ 5,
@@ -140,43 +146,44 @@ primers_forDilutions <- dilutionPlate %>%
                 "source_well" = "originalWell",
                 "dest_well" = "dilutionPlate_well",
                 "transfer_volume" = "ulPrimer_toAdd") %>%
-  mutate(dest_slot = 11) %>%
-  mutate(source_labware = "vwr_96_wellplate_1000ul") %>%
-  mutate(dest_labware = "biorad_96_wellplate_200ul_pcr") %>%
+  mutate(dest_slot = 11,
+         source_labware = "vwr_96_wellplate_1000ul",
+         dest_labware = "denvillewithaxygenbase_96_wellplate_200ul",
+         transfer_volume = 10) %>%
   select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index"))
 
 # Add water to dilution plate
-water_forDilutions <- dilutionPlate %>%
-  select(-plate) %>%
-  dplyr::rename("plate" = "originalPlate",
-                "transfer_volume" = "ulWater_toAdd",
-                "dest_well" = "dilutionPlate_well") %>%
-  mutate(source_slot = 11) %>%
-  mutate(source_well = "A12") %>%
-  mutate(dest_slot = 11) %>%
-  mutate(source_labware = "biorad_96_wellplate_200ul_pcr") %>%
-  mutate(dest_labware = "biorad_96_wellplate_200ul_pcr") %>%
-  select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index"))
+#water_forDilutions <- dilutionPlate %>%
+#  select(-plate) %>%
+#  dplyr::rename("plate" = "originalPlate",
+#                "transfer_volume" = "ulWater_toAdd",
+#                "dest_well" = "dilutionPlate_well") %>%
+#  mutate(source_slot = 11) %>%
+#  mutate(source_well = "A12") %>%
+#  mutate(dest_slot = 11) %>%
+#  mutate(source_labware = "denvillewithaxygenbase_96_wellplate_200ul") %>%
+#  mutate(dest_labware = "denvillewithaxygenbase_96_wellplate_200ul") %>%
+#  select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index"))
 ```
 
 #### Separate by plates
 
-Create separate primer/water adding instructions based on plates present on the OT2 deck - will need to do two rounds, one with plates 1, 2, 3 and one with plates 4, 5, 6.
+Create separate primer adding instructions based on plates present on the OT2 deck - will need to do two rounds, one with plates 1, 2, 3 and one with plates 4, 5, 6.
 
 ```{r}
 # Plates 1, 2, 3
-primersWater_dilutions_plates123 <- rbind(primers_forDilutions, water_forDilutions) %>%
-  filter(plate %in% c("1", "2", "3")) %>%
-  mutate(plate = ifelse(source_well == "A12", "dilution", plate)) %>%
-  dplyr::rename("source_well" = "source_well") %>%
-  mutate(plate = gsub("dilution", "dilution123", plate))
+primers_toDilutionPlate_plates123 <- primers_toDilutionPlate %>%
+  filter(plate %in% c("1", "2", "3")) #%>%
+#  mutate(plate = ifelse(source_well == "A12", "dilution", plate)) %>%
+#  dplyr::rename("source_well" = "source_well") %>%
+#  mutate(plate = gsub("dilution", "dilution123", plate))
 
 # Plates 4, 5, 6 (primers that go into primer pool 3)
-primersWater_dilutions_plates456 <- rbind(primers_forDilutions, water_forDilutions) %>%
-  filter(plate %in% c("4", "5", "6")) %>%
-  mutate(plate = ifelse(source_well == "A12", "dilution", plate)) %>%
-  dplyr::rename("source_well" = "source_well") %>%
-  mutate(plate = gsub("dilution", "dilution456", plate))
+primers_toDilutionPlate_plates456 <- primers_toDilutionPlate %>%
+  filter(plate %in% c("4", "5", "6")) #%>%
+#  mutate(plate = ifelse(source_well == "A12", "dilution", plate)) %>%
+#  dplyr::rename("source_well" = "source_well") %>%
+#  mutate(plate = gsub("dilution", "dilution456", plate))
 ```
 
 #### Add diluted primers to pools
@@ -184,39 +191,45 @@ primersWater_dilutions_plates456 <- rbind(primers_forDilutions, water_forDilutio
 ```{r}
 vol_primer_toPool <- 4
 
-dilutedPrimers_toPool_plates123 <- primersWater_dilutions_plates123 %>%
-  filter(plate == "dilution123") %>%
-  select(c("plate", "dest_slot", "dest_well", "bp3index")) %>%
-  dplyr::rename("source_slot" = "dest_slot",
-                "source_well" = "dest_well") %>%
-  mutate(dest_slot = 3) %>%
-  mutate(dest_well = case_when(bp3index %in% primerPool2$bp3Index ~ "B1",
-                                 bp3index %in% primerPool3$bp3Index ~ "C1")) %>%
-  mutate(transfer_volume = vol_primer_toPool) %>%
-  mutate(source_labware = "biorad_96_wellplate_200ul_pcr") %>%
-  mutate(dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap") %>%
+dilutedPrimers_toPool_plates123 <- primers_toDilutionPlate_plates123 %>%
+  mutate(
+    plate = "dilutionPlate",
+    source_labware = dest_labware,
+    source_slot = dest_slot,
+    source_well = dest_well,
+    dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap",
+    dest_slot = 3,
+    dest_well = case_when(
+      bp3index %in% primerPool2$bp3Index ~ "B1",
+      bp3index %in% primerPool3$bp3Index ~ "C1"
+      ),
+    transfer_volume = vol_primer_toPool
+    ) %>%
   select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index"))
 
-dilutedPrimers_toPool_plates456 <- primersWater_dilutions_plates456 %>%
-  filter(plate == "dilution456") %>%
-  select(c("plate", "dest_slot", "dest_well", "bp3index")) %>%
-  dplyr::rename("source_slot" = "dest_slot",
-                "source_well" = "dest_well") %>%
-  mutate(dest_slot = 3) %>%
-  mutate(dest_well = case_when(bp3index %in% primerPool2$bp3Index ~ "B1",
-                                 bp3index %in% primerPool3$bp3Index ~ "C1")) %>%
-  mutate(transfer_volume = vol_primer_toPool) %>%
-  mutate(source_labware = "biorad_96_wellplate_200ul_pcr") %>%
-  mutate(dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap") %>%
+dilutedPrimers_toPool_plates456 <- primers_toDilutionPlate_plates456 %>%
+  mutate(
+    plate = "dilutionPlate",
+    source_labware = dest_labware,
+    source_slot = dest_slot,
+    source_well = dest_well,
+    dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap",
+    dest_slot = 3,
+    dest_well = case_when(
+      bp3index %in% primerPool2$bp3Index ~ "B1",
+      bp3index %in% primerPool3$bp3Index ~ "C1"
+      ),
+    transfer_volume = vol_primer_toPool
+    ) %>%
   select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index"))
 ```
 
 #### Combine steps: Dilute primers & add to pools
 
 ```{r}
-dilutedPrimers_plates123_forOT2 <- rbind(primersWater_dilutions_plates123, dilutedPrimers_toPool_plates123)
+dilutedPrimers_plates123_forOT2 <- rbind(primers_toDilutionPlate_plates123, dilutedPrimers_toPool_plates123)
 
-dilutedPrimers_plates456_forOT2 <- rbind(primersWater_dilutions_plates456, dilutedPrimers_toPool_plates456)
+dilutedPrimers_plates456_forOT2 <- rbind(primers_toDilutionPlate_plates456, dilutedPrimers_toPool_plates456)
 ```
 
 ### 4.2.3 Split pools
@@ -231,22 +244,33 @@ ot2_plates123d <- primers_postOpt2 %>%
   filter(plate %in% c("1", "2", "3")) %>%
   select(c("plate", "Well.Position", "bp3index")) %>%
   dplyr::rename("source_well" = "Well.Position") %>%
-  mutate(col = substr(source_well, 1, 1)) %>%
-  mutate(row = substr(source_well, 2, nchar(source_well))) %>%
+  mutate(
+    col = substr(source_well, 1, 1),
+    row = substr(source_well, 2, nchar(source_well))
+    ) %>%
   arrange(plate, as.numeric(row), col) %>%
-  mutate("source_slot" = 
-           case_when(plate == "1" ~ 2,
-                     plate == "2" ~ 5,
-                     plate == "3" ~ 8)) %>%
-  mutate("dest_slot" = 3) %>%
-  mutate("dest_well" = case_when(bp3index %in% primerPool2$bp3Index ~ "B1",
-                                 bp3index %in% primerPool3$bp3Index ~ "C1")) %>%
-  mutate("transfer_volume" = vol_primer_toPool) %>%
-  mutate("source_labware" = "vwr_96_wellplate_1000ul") %>%
-  mutate("dest_labware" = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap") %>%
+  mutate(
+    source_labware = "vwr_96_wellplate_1000ul",
+    source_slot = case_when(
+      plate == "1" ~ 2,
+      plate == "2" ~ 5,
+      plate == "3" ~ 8
+      ),
+    dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap",
+    dest_slot = 3,
+    dest_well = case_when(
+      bp3index %in% primerPool2$bp3Index ~ "B1",
+      bp3index %in% primerPool3$bp3Index ~ "C1"
+      ),
+    transfer_volume = vol_primer_toPool
+    ) %>%
   select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index")) %>%
   # Dilute & add diluted primers
-  rbind(., dilutedPrimers_plates123_forOT2)
+  rbind(., dilutedPrimers_plates123_forOT2) %>%
+  mutate(
+    ot2set = "set1_plates123"
+  ) %>%
+  relocate(ot2set)
 
 # Plates 4, 5, 6
 ot2_plates456d <- primers_postOpt2 %>%
@@ -254,23 +278,34 @@ ot2_plates456d <- primers_postOpt2 %>%
   filter(is.na(action)) %>%
   filter(plate %in% c("4", "5", "6")) %>%
   select(c("plate", "Well.Position", "bp3index")) %>%
-   dplyr::rename("source_well" = "Well.Position") %>%
-  mutate(col = substr(source_well, 1, 1)) %>%
-  mutate(row = substr(source_well, 2, nchar(source_well))) %>%
+  dplyr::rename("source_well" = "Well.Position") %>%
+  mutate(
+    col = substr(source_well, 1, 1),
+    row = substr(source_well, 2, nchar(source_well))
+    ) %>%
   arrange(plate, as.numeric(row), col) %>%
-  mutate(source_slot = 
-           case_when(plate == "4" ~ 2,
-                     plate == "5" ~ 5,
-                     plate == "6" ~ 8)) %>%
-  mutate(dest_slot = 3) %>%
-  mutate(dest_well = case_when(bp3index %in% primerPool2$bp3Index ~ "B1",
-                                 bp3index %in% primerPool3$bp3Index ~ "C1")) %>%
-  mutate(transfer_volume = vol_primer_toPool) %>%
-  mutate(source_labware = "vwr_96_wellplate_1000ul") %>%
-  mutate(dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap") %>%
+  mutate(
+    source_labware = "vwr_96_wellplate_1000ul",
+    source_slot = case_when(
+      plate == "4" ~ 2,
+      plate == "5" ~ 5,
+      plate == "6" ~ 8
+      ),
+    dest_labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap",
+    dest_slot = 3,
+    dest_well = case_when(
+      bp3index %in% primerPool2$bp3Index ~ "B1",
+      bp3index %in% primerPool3$bp3Index ~ "C1"
+      ),
+    transfer_volume = vol_primer_toPool
+    ) %>%
   select(c("plate", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume", "bp3index")) %>%
   # Dilute & add diluted primers
-  rbind(., dilutedPrimers_plates456_forOT2)
+  rbind(., dilutedPrimers_plates456_forOT2) %>%
+  mutate(
+    ot2set = "set2_plates456"
+  ) %>%
+  relocate(ot2set)
 
 # All plates together
 splitPools_ot2 <- rbind(ot2_plates123d, ot2_plates456d)
@@ -454,7 +489,7 @@ uM_finalAdjust_ot2 <- data.frame(
   mutate(transfer_volume = round(transfer_volume, 1))
 ```
 
-### 4.2.6 Full OT2 input
+### 4.2.6 Full OT2 input (OLD)
 
 Combine dilutions, split primer pools, primer pool 1 creation, SDZ/laLab subsets, and uM adjustments:
 
@@ -506,7 +541,37 @@ ot2_string
 sink()
 
 # csv file
-write.csv(ot2_final_plusPlates, "./robotProtocols/inputFiles/primerDilutionsPooling_postOpt2_forOT2.csv", row.names = F)
+write.csv(ot2_final_plusPlates, "./robotProtocols/inputFiles/tamGenetics_primerDilutionsPooling_postOpt2_forOT2.csv", row.names = F)
+```
+
+### 4.2.7 Full OT2 input (NO P300)
+
+```{r}
+ot2_final_splitPoolsOnly <- splitPools_ot2 %>%
+  mutate(transfer_volume = round(as.numeric(transfer_volume), digits = 1)) %>%
+  select(-bp3index) %>%
+  mutate(
+    asp_height = 1
+    ) %>%
+  relocate("asp_height", .after = "source_well")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+ot2_string <- format_delim(ot2_final_splitPoolsOnly,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_primerPoolingOnly_postOpt2_string.txt")
+
+ot2_string
+
+sink()
+
+# csv file
+write.csv(ot2_final_splitPoolsOnly, "./robotProtocols/inputFiles/tamGenetics_primerPoolingOnly_postOpt2_forOT2.csv", row.names = F)
 ```
 
 # 5 OT2 input for SAMPLES 
@@ -915,13 +980,13 @@ Export
 
 ```{r}
 # comma-separated string with end-of-line delimiter
-bfh_pcr1_fullTransferInput_string <- format_delim(bfh_pcr1_fullTransferInput,
+bfh_pcr1_ot2Input_string <- format_delim(bfh_pcr1_fullTransferInput,
                            delim = ",",
                            eol = "\\n")
 
 sink("./robotProtocols/inputFiles/30x3_pcr1setup_forOT2_string.txt")
 
-bfh_pcr1_fullTransferInput_string
+bfh_pcr1_ot2Input_string
 
 sink()
 
@@ -944,6 +1009,58 @@ Output:
 ##### Xtns
 
 ```{r}
+# xtn list plate 1
+tamGenetics_xtnsBlood_p1 <- xtnsAll_updated %>%
+  filter(lysisLoc == "p1") %>%
+  filter(eltn == "e1") %>%
+  arrange(lysisLoc, lysisCol, lysisRow) %>%
+  mutate(transferID = row_number()) %>%
+  mutate(
+    sampleType_animalID = str_c(sampleType, "_", animalID)
+  ) %>%
+  select(c("transferID", "sampleType_animalID", "sampleType", "xtnID", "xtnRemaining")) %>%
+  # replace "SKIP" xtns
+  merge(., xtnsRemaining_byAnimalID, by = "sampleType_animalID", all.x = T) %>%
+  mutate(
+    xtnID = case_when(
+      xtnRemaining == "no" ~ xtnID.1,
+      .default = xtnID
+    )
+  ) %>%
+  select(c("transferID", "sampleType_animalID", "xtnID")) %>%
+  arrange(transferID)
+  
+# assign source wells
+tamGenetics_sourceWells_bloodTubes <- tamGenetics_xtnsBlood_p1 %>%
+  filter(str_detect(xtnID, "blood_t")) %>%
+  mutate(
+    source_well.t = wellValues_tuberack[1:length(xtnID)]
+  )
+
+tamGenetics_xtnTransfer_p1 <- tamGenetics_xtnsBlood_p1 %>%
+  merge(., tamGenetics_sourceWells_bloodTubes[, c("xtnID", "source_well.t")], by = "xtnID", all.x = T) %>%
+  arrange(as.numeric(transferID)) %>%
+  mutate(
+    ot2set = case_when(
+      str_detect(xtnID, "p") & str_detect(xtnID, "e1") ~ "set1.2_xtnPlate1",
+      str_detect(xtnID, "blood_t") ~ "set1.3_xtnPlate1.tubes"
+      ),
+    reagent = xtnID,
+    source_labware = case_when(
+      str_detect(xtnID, "p") ~ pcrPlate,
+      str_detect(xtnID, "blood_t") ~ tuberack
+    ),
+    source_slot = case_when(
+      
+    )
+    source_well = case_when(
+      !is.na(source_well.t) ~ source_well.t,
+      .default = wellValues_plate
+      )
+    )
+
+
+
 pcr1_xtns_p1e1 <- xtnPlate_map_p1e1 %>%
   select(c("reagent", "well")) %>%
   dplyr::rename("source_well" = "well") %>%

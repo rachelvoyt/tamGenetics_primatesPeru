@@ -115,6 +115,7 @@ def run(protocol):
                         source,
                         dest,
                         air_gap = 1,
+                        mix_after = (6, 10),
                         new_tip = 'never')
             if tip_reuse_s20 == 'always':
                 s20.drop_tip()
@@ -124,7 +125,7 @@ def run(protocol):
         s20.drop_tip()
 
     # PAUSE 1: switch to xtnPlate 2 e1/e2 + blood tubes
-    protocol.pause("PAUSE 1: Remove xtnPlate1 e1/e2. Seal and place on ice. Then place xtnPlate 2 e1/e2 + blood xtn tubes on OT2 deck following **Deck plan: Set 2** on quip. ")
+    protocol.pause("PAUSE 1: Remove xtnPlate1 e1/e2. Seal and place on ice. Then place xtnPlate 2 e1/e2 + blood xtn tubes on OT2 deck following **Deck plan: Set 2** on quip.")
 
     # transfers for SET 2: xtnPlate 2 e1/e2 + blood xtn tubes
     for line in transfer_info:
@@ -138,6 +139,7 @@ def run(protocol):
                         source,
                         dest,
                         air_gap = 1,
+                        mix_after = (6, 10),
                         new_tip = 'never')
             if tip_reuse_s20 == 'always':
                 s20.drop_tip()
@@ -145,7 +147,7 @@ def run(protocol):
         s20.drop_tip()
 
     # PAUSE 2: switch to fecal tubes 1 to 24
-    protocol.pause("PAUSE 2: Remove xtnPlate 2 e1/e2 & blood xtn tubes. Seal and place on ice. Then place fecal xtn tubes 1 to 24 on OT2 deck following **Deck plan: Set 3** on quip. ")
+    protocol.pause("PAUSE 2: Remove xtnPlate 2 e1/e2 & blood xtn tubes. Seal and place on ice. Then place fecal xtn tubes 1 to 24 on OT2 deck following **Deck plan: Set 3** on quip.")
 
     # transfers for SET 3: fecal xtn tubes 1 to 24
     for line in transfer_info:
@@ -159,6 +161,7 @@ def run(protocol):
                         source,
                         dest,
                         air_gap = 1,
+                        mix_after = (6, 10),
                         new_tip = 'never')
             if tip_reuse_s20 == 'always':
                 s20.drop_tip()
@@ -166,7 +169,7 @@ def run(protocol):
         s20.drop_tip()
 
     # PAUSE 3: switch to fecal tubes 25 to 32 + xtnPlate 3 e1/e2
-    protocol.pause("PAUSE 3: Remove fecal xtn tubes 1 to 24 and place on ice. Then place fecal xtn tubes 25 to 32 & xtnPlate 3 e1/e2 on OT2 deck following **Deck plan: Set 4** on quip. ")
+    protocol.pause("PAUSE 3: Remove fecal xtn tubes 1 to 24 and place on ice. Then place fecal xtn tubes 25 to 32 & xtnPlate 3 e1/e2 on OT2 deck following **Deck plan: Set 4** on quip.")
 
     # transfers for SET 4: fecal xtn tubes 25 to 32 + xtnPlate 3 e1/e2
     for line in transfer_info:
@@ -180,6 +183,7 @@ def run(protocol):
                         source,
                         dest,
                         air_gap = 1,
+                        mix_after = (6, 10),
                         new_tip = 'never')
             if tip_reuse_s20 == 'always':
                 s20.drop_tip()
@@ -187,7 +191,7 @@ def run(protocol):
         s20.drop_tip()
 
     # PAUSE 4: switch to xtnPlate 4 e1/e2
-    protocol.pause("PAUSE 1: Remove xtnPlate 2 e1/e2 & blood xtn tubes. Seal and place on ice. Then place xtnPlate 2 e1/e2 + blood xtn tubes on OT2 deck following **Deck plan: Set 5** on quip. ")
+    protocol.pause("PAUSE 1: Remove xtnPlate 2 e1/e2 & blood xtn tubes. Seal and place on ice. Then place xtnPlate 2 e1/e2 + blood xtn tubes on OT2 deck following **Deck plan: Set 5** on quip.")
 
     # transfers for SET 5: xtnPlate 4 e1/e2
     for line in transfer_info:
@@ -201,6 +205,7 @@ def run(protocol):
                         source,
                         dest,
                         air_gap = 1,
+                        mix_after = (6, 10),
                         new_tip = 'never')
             if tip_reuse_s20 == 'always':
                 s20.drop_tip()
