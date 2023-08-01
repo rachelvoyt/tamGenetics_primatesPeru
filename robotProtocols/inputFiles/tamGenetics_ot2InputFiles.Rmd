@@ -632,14 +632,14 @@ xtnPlate_beadChecks <- data.frame(
   ) %>%
   mutate(
     xtnPlate_beadsPresent = case_when(
-      xtnLoc == "p1" & eltn == "e1" ~ "tbd",
-      xtnLoc == "p1" & eltn == "e2" ~ "tbd",
-      xtnLoc == "p2" & eltn == "e1" ~ "tbd",
-      xtnLoc == "p2" & eltn == "e2" ~ "tbd",
-      xtnLoc == "p3" & eltn == "e1" ~ "tbd",
-      xtnLoc == "p3" & eltn == "e2" ~ "tbd",
-      xtnLoc == "p4" & eltn == "e1" ~ "tbd",
-      xtnLoc == "p4" & eltn == "e2" ~ "tbd")
+      xtnLoc == "p1" & eltn == "e1" ~ "yes",
+      xtnLoc == "p1" & eltn == "e2" ~ "yes",
+      xtnLoc == "p2" & eltn == "e1" ~ "yes",
+      xtnLoc == "p2" & eltn == "e2" ~ "yes",
+      xtnLoc == "p3" & eltn == "e1" ~ "yes",
+      xtnLoc == "p3" & eltn == "e2" ~ "yes",
+      xtnLoc == "p4" & eltn == "e1" ~ "no",
+      xtnLoc == "p4" & eltn == "e2" ~ "no")
 ) %>%
   arrange(xtnLoc)
 ```
