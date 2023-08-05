@@ -6,7 +6,7 @@ def get_values(*names):
 
 metadata = {
     'apiLevel': '2.8',
-    'protocolName': 'tamGenetics_pcr1setup_p3ab',
+    'protocolName': 'tamGenetics_pcr1setup_p4ab',
     'author': 'Rachel Voyt',
     'source': 'Custom Protocol Request',
     'description': '''This protocol is a modified version of the 'Custom CSV Transfer' protocol from OT2. The protocol includes steps to transfer mastermix & samples, with adjustments to add a blowout after each transfer as well as a mix step after the water/mastermix transfer. The protocol also allows for the use of two pipette types (p20_single and p20_multi, both with filter tips) and includes pauses to switch out xtn plates & tubes.'''
@@ -101,7 +101,7 @@ def run(protocol):
     if tip_reuse_m20 == 'never':
         pick_up_m20()
 
-    # transfers for SET 1: xtnPlate3_e1
+    # transfers for SET 1: xtnPlate4_e1
     magdeck.engage()
     for line in transfer_info:
         if line[0].startswith('set1'):
@@ -125,10 +125,10 @@ def run(protocol):
 
     magdeck.disengage()
 
-    # PAUSE 1: switch to xtnPlate3_e2 + hair xtn tubes
-    protocol.pause("PAUSE 1: i) Remove xtnPlate3_e1 and set aside. ii) Place xtnPlate4_e2 on magblock & hair xtn tubes on tuberack and resume run.")
+    # PAUSE 1: switch to xtnPlate4_e2 + hair xtn tubes for xtnPlate4
+    protocol.pause("PAUSE 1: i) Remove xtnPlate4_e1 and set aside. ii) Place xtnPlate4_e2 on magblock & hair xtn tubes on tuberack and resume run.")
 
-    # transfers for SET 2: xtnPlate3_e2 + hair xtn tubes
+    # transfers for SET 2: xtnPlate4_e2 + hair xtn tubes
     magdeck.engage()
     for line in transfer_info:
         if line[0].startswith('set2'):
@@ -153,9 +153,9 @@ def run(protocol):
     magdeck.disengage()
 
     # PAUSE 2: switch to mastermix
-    protocol.pause("PAUSE 2: i) Remove xtnPlate3_e2 & hair xtn tubes. ii) Check pcr plates to ensure that sufficient xtn volume was transfered AND that no beads were transferred. iii) For any wells with insufficient volume and/or beads, remove beads and/or manually transfer the sample. iv) Seal xtnPlate3_e1/e2 and place on ice. Place mastermix and resume run.")
+    protocol.pause("PAUSE 2: i) Remove xtnPlate4_e2 & hair xtn tubes. ii) Check pcr plates to ensure that sufficient xtn volume was transfered AND that no beads were transferred. iii) For any wells with insufficient volume and/or beads, remove beads and/or manually transfer the sample. iv) Seal xtnPlate4_e1/e2 and place on ice. Place mastermix and resume run.")
 
-    # Transfers for SET 3: mastermix for pcr1Plate3a/b
+    # Transfers for SET 3: mastermix for pcr1Plate4a/b
     for line in transfer_info:
         if line[0].startswith('set3'):
             _, _, _, s_slot, s_well, h, _, d_slot, d_well, vol = line[:10]
