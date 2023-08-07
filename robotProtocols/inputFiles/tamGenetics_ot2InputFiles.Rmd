@@ -31,6 +31,7 @@ library(readxl)
 
 ```{r}
 # Labware
+deepwellPlate <- "vwr_96_wellplate_1000ul"
 nestPlate <- "nest_96_wellplate_100ul_pcr_full_skirt"
 basePlate <- "denvillewithaxygenbase_96_wellplate_200ul"
 tuberack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
@@ -583,6 +584,11 @@ indexPrimers <- read_excel("./primers/01_primerOrders/indexingAdapters_illumina.
          "name" = "Name",
          "sequence" = "Sequence")
 
+indexPrimers_i5List <- indexPrimers %>%
+  filter(str_detect(name, "S"))
+indexPrimers_i7List <- indexPrimers %>%
+  filter(str_detect(name, "N"))
+
 indexPrimers_setA <- data.frame(
   transferID = 1:96,
   i5 = rep(c("S502",
@@ -593,18 +599,18 @@ indexPrimers_setA <- data.frame(
              "S508",
              "S510",
              "S511"), 12),
-  i7 = rep(c("N701",
-             "N702",
-             "N703",
-             "N704",
-             "N705",
-             "N706",
-             "N707",
-             "N710",
-             "N711",
-             "N712",
-             "N714",
-             "N715"), 8)
+  i7 = c(rep("N701", 8),
+         rep("N702", 8),
+         rep("N703", 8),
+         rep("N704", 8),
+         rep("N705", 8),
+         rep("N706", 8),
+         rep("N707", 8),
+         rep("N710", 8),
+         rep("N711", 8),
+         rep("N712", 8),
+         rep("N714", 8),
+         rep("N715", 8))
   ) %>%
   mutate(
     indexCombo = str_c(i5, "_", i7),
@@ -621,18 +627,18 @@ indexPrimers_setB <- data.frame(
              "S508",
              "S510",
              "S511"), 12),
-  i7 = rep(c("N716",
-             "N718",
-             "N719",
-             "N720",
-             "N721",
-             "N722",
-             "N723",
-             "N724",
-             "N726",
-             "N727",
-             "N728",
-             "N729"), 8)
+  i7 = c(rep("N716", 8),
+         rep("N718", 8),
+         rep("N719", 8),
+         rep("N720", 8),
+         rep("N721", 8),
+         rep("N722", 8),
+         rep("N723", 8),
+         rep("N724", 8),
+         rep("N726", 8),
+         rep("N727", 8),
+         rep("N728", 8),
+         rep("N729", 8))
   ) %>%
   mutate(
     indexCombo = str_c(i5, "_", i7),
@@ -649,18 +655,18 @@ indexPrimers_setC <- data.frame(
              "S520",
              "S521",
              "S522"), 12),
-  i7 = rep(c("N701",
-             "N702",
-             "N703",
-             "N704",
-             "N705",
-             "N706",
-             "N707",
-             "N710",
-             "N711",
-             "N712",
-             "N714",
-             "N715"), 8)
+  i7 = c(rep("N701", 8),
+         rep("N702", 8),
+         rep("N703", 8),
+         rep("N704", 8),
+         rep("N705", 8),
+         rep("N706", 8),
+         rep("N707", 8),
+         rep("N710", 8),
+         rep("N711", 8),
+         rep("N712", 8),
+         rep("N714", 8),
+         rep("N715", 8))
   ) %>%
   mutate(
     indexCombo = str_c(i5, "_", i7),
@@ -677,18 +683,18 @@ indexPrimers_setD <- data.frame(
              "S520",
              "S521",
              "S522"), 12),
-  i7 = rep(c("N716",
-             "N718",
-             "N719",
-             "N720",
-             "N721",
-             "N722",
-             "N723",
-             "N724",
-             "N726",
-             "N727",
-             "N728",
-             "N729"), 8)
+  i7 = c(rep("N716", 8),
+         rep("N718", 8),
+         rep("N719", 8),
+         rep("N720", 8),
+         rep("N721", 8),
+         rep("N722", 8),
+         rep("N723", 8),
+         rep("N724", 8),
+         rep("N726", 8),
+         rep("N727", 8),
+         rep("N728", 8),
+         rep("N729", 8))
   ) %>%
   mutate(
     indexCombo = str_c(i5, "_", i7),
@@ -699,19 +705,34 @@ indexPrimers_setD <- data.frame(
 ### Check combos
 
 ```{r}
-indexPrimers_allCombos <- rbind(indexPrimers_setA,
+indexPrimers_combosAll <- apply(expand.grid(indexPrimers_i5List[, "name"], indexPrimers_i7List[, "name"]), 1, paste, collapse = "_") %>%
+  as.data.frame() %>%
+  rename("indexCombo" = ".") %>%
+  mutate(
+    i5 = str_sub(indexCombo, 1, 4),
+    i7 = str_sub(indexCombo, 6, -1)
+  )
+length(unique(indexPrimers_combosAll$indexCombo)) # 468 unique combos
+
+indexPrimers_combosSetABCD <- rbind(indexPrimers_setA,
                                 indexPrimers_setB,
                                 indexPrimers_setC,
-                                indexPrimers_setD) %>%
-  distinct() # confirm 384 combos
+                                indexPrimers_setD)
+length(unique(indexPrimers_combosSetABCD$indexCombo)) # 384 unique set combos
+
+indexPrimers_combosCustom <- indexPrimers_combosAll %>%
+  filter(!indexCombo %in% indexPrimers_combosSetABCD$indexCombo)
+length(unique(indexPrimers_combosCustom$indexCombo)) # 84 unique custom combos
 ```
 
 ### Create index plates
 
+#### Individual plates
+
 ```{r}
 # set source wells
 indexPlates_sourceWells <- data.frame(
-  name = c(indexPrimers_allCombos[, c("i5")], indexPrimers_allCombos[, c("i7")])
+  name = c(indexPrimers_combosAll[, c("i5")], indexPrimers_combosAll[, c("i7")])
 ) %>%
   merge(., indexPrimers[, c("name", "well")], by = "name") %>%
   rename("source_well" = "well") %>%
@@ -729,8 +750,10 @@ indexPlate_setA <- rbind(indexPlate_setA_i5,
                          indexPlate_setA_i7) %>%
   merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
   mutate(
-    source_slot = 2
-  )
+    ot2set = "indexSetA",
+    dest_slot = 2
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
 
 # set B
 indexPlate_setB_i5 <- indexPrimers_setB %>%
@@ -744,8 +767,10 @@ indexPlate_setB <- rbind(indexPlate_setB_i5,
                          indexPlate_setB_i7) %>%
   merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
   mutate(
-    source_slot = 5
-  )
+    ot2set = "indexSetB",
+    dest_slot = 3
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
 
 # set C
 indexPlate_setC_i5 <- indexPrimers_setC %>%
@@ -759,8 +784,10 @@ indexPlate_setC <- rbind(indexPlate_setC_i5,
                          indexPlate_setC_i7) %>%
   merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
   mutate(
-    source_slot = 8
-  )
+    ot2set = "indexSetC",
+    dest_slot = 5
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
 
 # set D
 indexPlate_setD_i5 <- indexPrimers_setD %>%
@@ -774,14 +801,80 @@ indexPlate_setD <- rbind(indexPlate_setD_i5,
                          indexPlate_setD_i7) %>%
   merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
   mutate(
-    source_slot = 11
-  )
+    ot2set = "indexSetD",
+    dest_slot = 6
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
+
+# set E (custom)
+indexPrimers_setE <- indexPrimers_combosCustom %>%
+  mutate(
+    transferID = row_number(),
+    i5 = str_sub(indexCombo, 1, 4),
+    i7= str_sub(indexCombo, 6, -1),
+    dest_well = wellValues_plate[1:length(transferID)]
+  ) %>%
+  relocate(indexCombo, .after = i7)
+
+indexPlate_setE_i5 <- indexPrimers_setE %>%
+  select(c("i5", "dest_well")) %>%
+  rename("name" = "i5")
+indexPlate_setE_i7 <- indexPrimers_setE %>%
+  select(c("i7", "dest_well")) %>%
+  rename("name" = "i7")
+
+indexPlate_setE <- rbind(indexPlate_setE_i5,
+                         indexPlate_setE_i7) %>%
+  merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
+  mutate(
+    ot2set = "indexSetE",
+    dest_slot = 9
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
 ```
 
-need 10uM each primer; so need to dilute 100 uM as:
+#### Full transfer info
 
-50 ul total combo
-2.5 each primer + 27.5 water each primer >> do 100 ul total instead
+```{r}
+indexPlates_transferInfo <- rbind(
+  indexPlate_setA,
+  indexPlate_setB,
+  indexPlate_setC,
+  indexPlate_setD,
+  indexPlate_setE
+) %>%
+  mutate(
+    ot2set = ot2set,
+    reagent = name,
+    source_labware = deepwellPlate,
+    source_slot = 1,
+    source_well = source_well,
+    asp_height = 1,
+    dest_labware = nestPlate,
+    dest_slot = dest_slot,
+    dest_well = dest_well,
+    transfer_volume = 5
+  ) %>%
+  select(c("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "transfer_volume"))
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+indexPlates_transferInfo_string <- format_delim(indexPlates_transferInfo,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/illuminaIndexPlates_setsABCDE_string.txt")
+
+indexPlates_transferInfo_string
+
+sink()
+
+# csv file
+write.csv(indexPlates_transferInfo, "./robotProtocols/inputFiles/illuminaIndexPlates_setsABCDE.csv", row.names = F)
+```
 
 # 5 OT2 input for SAMPLES 
 
@@ -2032,7 +2125,7 @@ tamGenetics_xtnTransfer_p5ab <- rbind(tamGenetics_nonPlateHairXtns_pcr1Plate5ab,
     ot2set = case_when(
       as.numeric(transferID) <= 24 ~ "set1_tubes1to24",
       as.numeric(transferID) <= 48 ~ "set2_tubes25to48",
-      as.numeric(transferID) > 48 ~ "set3_tubes49to54"
+      as.numeric(transferID) > 48 ~ "set3_tubes49up"
     ),
     reagent = xtnID,
     source_labware = tuberack,
@@ -2060,7 +2153,7 @@ tamGenetics_mmTransfer_pcr1_p5ab <- data.frame(
   reagent = "mastermix",
   source_labware = nestPlate,
   source_slot = 6,
-  source_well = c(rep("A1", 7), rep("A2", 7)),
+  source_well = c(rep("A4", 7), rep("A5", 7)),
   asp_height = 1,
   dest_labware = nestPlate,
   dest_slot = c(rep(2, 7), rep(5, 7)),
@@ -2088,14 +2181,14 @@ tamGenetics_pcr1Plate5ab_string <- format_delim(tamGenetics_pcr1Plate5ab,
                            delim = ",",
                            eol = "\\n")
 
-sink("./robotProtocols/inputFiles/tamGenetics_pcr1Plate5ab_string.txt")
+sink("./robotProtocols/inputFiles/tamGenetics_pcr1_p5ab_string.txt")
 
 tamGenetics_pcr1Plate5ab_string
 
 sink()
 
 # csv file
-write.csv(tamGenetics_pcr1Plate5ab, "./robotProtocols/inputFiles/tamGenetics_pcr1Plate5ab.csv", row.names = F)
+write.csv(tamGenetics_pcr1Plate5ab, "./robotProtocols/inputFiles/tamGenetics_pcr1_p5ab.csv", row.names = F)
 ```
 
 ## 5.3 1:20 dilutions
