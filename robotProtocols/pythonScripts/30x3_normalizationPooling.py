@@ -1,0 +1,151 @@
+def get_values(*names):
+    import json
+    _all_values = json.loads("""{"transfer_csv":"ot2set,reagent,source_labware,source_slot,source_well,dest_labware,dest_slot,dest_well,transfer_volume\\nset1_water.normPlate,30x3_pcr2Plate1_01,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A1,0\\nset1_water.normPlate,30x3_pcr2Plate1_02,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B1,5.1\\nset1_water.normPlate,30x3_pcr2Plate1_03,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C1,0\\nset1_water.normPlate,30x3_pcr2Plate1_04,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D1,12.9\\nset1_water.normPlate,30x3_pcr2Plate1_05,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E1,16.2\\nset1_water.normPlate,30x3_pcr2Plate1_06,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F1,11.8\\nset1_water.normPlate,30x3_pcr2Plate1_07,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G1,14.2\\nset1_water.normPlate,30x3_pcr2Plate1_08,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H1,7.8\\nset1_water.normPlate,30x3_pcr2Plate1_09,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A2,11.7\\nset1_water.normPlate,30x3_pcr2Plate1_10,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B2,13.9\\nset1_water.normPlate,30x3_pcr2Plate1_11,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C2,4.3\\nset1_water.normPlate,30x3_pcr2Plate1_12,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D2,11.4\\nset1_water.normPlate,30x3_pcr2Plate1_13,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E2,12.1\\nset1_water.normPlate,30x3_pcr2Plate1_14,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F2,14.5\\nset1_water.normPlate,30x3_pcr2Plate1_15,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G2,13\\nset1_water.normPlate,30x3_pcr2Plate1_16,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H2,7.2\\nset1_water.normPlate,30x3_pcr2Plate1_17,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A3,12.8\\nset1_water.normPlate,30x3_pcr2Plate1_18,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B3,15\\nset1_water.normPlate,30x3_pcr2Plate1_19,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C3,14.8\\nset1_water.normPlate,30x3_pcr2Plate1_20,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D3,13.4\\nset1_water.normPlate,30x3_pcr2Plate1_21,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E3,14.2\\nset1_water.normPlate,30x3_pcr2Plate1_22,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F3,15\\nset1_water.normPlate,30x3_pcr2Plate1_23,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G3,14.9\\nset1_water.normPlate,30x3_pcr2Plate1_24,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H3,8.1\\nset1_water.normPlate,30x3_pcr2Plate1_25,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A4,13\\nset1_water.normPlate,30x3_pcr2Plate1_26,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B4,13.9\\nset1_water.normPlate,30x3_pcr2Plate1_27,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C4,13\\nset1_water.normPlate,30x3_pcr2Plate1_28,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D4,12.2\\nset1_water.normPlate,30x3_pcr2Plate1_29,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E4,14.7\\nset1_water.normPlate,30x3_pcr2Plate1_30,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F4,4.7\\nset1_water.normPlate,30x3_pcr2Plate1_31,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G4,15.6\\nset1_water.normPlate,30x3_pcr2Plate1_32,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H4,12.8\\nset1_water.normPlate,30x3_pcr2Plate1_33,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A5,13.8\\nset1_water.normPlate,30x3_pcr2Plate1_34,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B5,13.9\\nset1_water.normPlate,30x3_pcr2Plate1_35,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C5,11\\nset1_water.normPlate,30x3_pcr2Plate1_36,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D5,8.8\\nset1_water.normPlate,30x3_pcr2Plate1_37,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E5,8.8\\nset1_water.normPlate,30x3_pcr2Plate1_38,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F5,12.8\\nset1_water.normPlate,30x3_pcr2Plate1_39,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G5,13.5\\nset1_water.normPlate,30x3_pcr2Plate1_40,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H5,8.3\\nset1_water.normPlate,30x3_pcr2Plate1_41,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A6,13.5\\nset1_water.normPlate,30x3_pcr2Plate1_42,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B6,15.4\\nset1_water.normPlate,30x3_pcr2Plate1_43,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C6,5.1\\nset1_water.normPlate,30x3_pcr2Plate1_44,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D6,9.2\\nset1_water.normPlate,30x3_pcr2Plate1_45,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E6,12.2\\nset1_water.normPlate,30x3_pcr2Plate1_46,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F6,5.4\\nset1_water.normPlate,30x3_pcr2Plate1_47,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G6,10.1\\nset1_water.normPlate,30x3_pcr2Plate1_48,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H6,7.5\\nset1_water.normPlate,30x3_pcr2Plate1_49,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A7,4.7\\nset1_water.normPlate,30x3_pcr2Plate1_50,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B7,0\\nset1_water.normPlate,30x3_pcr2Plate1_51,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C7,6.6\\nset1_water.normPlate,30x3_pcr2Plate1_52,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D7,8.4\\nset1_water.normPlate,30x3_pcr2Plate1_53,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E7,9.4\\nset1_water.normPlate,30x3_pcr2Plate1_54,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F7,5.3\\nset1_water.normPlate,30x3_pcr2Plate1_55,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G7,9.8\\nset1_water.normPlate,30x3_pcr2Plate1_56,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H7,6\\nset1_water.normPlate,30x3_pcr2Plate1_57,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A8,6.3\\nset1_water.normPlate,30x3_pcr2Plate1_58,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B8,13.5\\nset1_water.normPlate,30x3_pcr2Plate1_59,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C8,0\\nset1_water.normPlate,30x3_pcr2Plate1_60,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D8,4.5\\nset1_water.normPlate,30x3_pcr2Plate1_61,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E8,6.4\\nset1_water.normPlate,30x3_pcr2Plate1_62,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F8,13.5\\nset1_water.normPlate,30x3_pcr2Plate1_63,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G8,5\\nset1_water.normPlate,30x3_pcr2Plate1_64,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H8,11\\nset1_water.normPlate,30x3_pcr2Plate1_65,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A9,0\\nset1_water.normPlate,30x3_pcr2Plate1_66,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B9,0\\nset1_water.normPlate,30x3_pcr2Plate1_67,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C9,0\\nset1_water.normPlate,30x3_pcr2Plate1_68,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D9,0\\nset1_water.normPlate,30x3_pcr2Plate1_69,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E9,0\\nset1_water.normPlate,30x3_pcr2Plate1_70,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F9,0\\nset1_water.normPlate,30x3_pcr2Plate1_71,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G9,0\\nset1_water.normPlate,30x3_pcr2Plate1_72,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H9,0\\nset1_water.normPlate,30x3_pcr2Plate1_73,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A10,0\\nset1_water.normPlate,30x3_pcr2Plate1_74,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B10,5.3\\nset1_water.normPlate,30x3_pcr2Plate1_75,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C10,4.9\\nset1_water.normPlate,30x3_pcr2Plate1_76,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D10,0\\nset1_water.normPlate,30x3_pcr2Plate1_77,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E10,8.1\\nset1_water.normPlate,30x3_pcr2Plate1_78,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F10,10\\nset1_water.normPlate,30x3_pcr2Plate1_79,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G10,4.4\\nset1_water.normPlate,30x3_pcr2Plate1_80,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H10,0\\nset1_water.normPlate,30x3_pcr2Plate1_81,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A11,4.1\\nset1_water.normPlate,30x3_pcr2Plate1_82,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B11,4.9\\nset1_water.normPlate,30x3_pcr2Plate1_83,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C11,5.9\\nset1_water.normPlate,30x3_pcr2Plate1_84,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D11,5.2\\nset1_water.normPlate,30x3_pcr2Plate1_85,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E11,4.6\\nset1_water.normPlate,30x3_pcr2Plate1_86,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F11,3.1\\nset1_water.normPlate,30x3_pcr2Plate1_87,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G11,3.6\\nset1_water.normPlate,30x3_pcr2Plate1_88,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H11,0\\nset1_water.normPlate,30x3_pcr2Plate1_89,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A12,3.7\\nset1_water.normPlate,30x3_pcr2Plate1_90,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,B12,5\\nset1_water.normPlate,30x3_pcr2Plate1_91,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,C12,4.4\\nset1_water.normPlate,30x3_pcr2Plate1_92,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,D12,0\\nset1_water.normPlate,30x3_pcr2Plate1_93,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,E12,0\\nset1_water.normPlate,30x3_pcr2Plate1_94,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,F12,5.5\\nset1_water.normPlate,30x3_pcr2Plate1_95,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,G12,4.9\\nset1_water.normPlate,30x3_pcr2Plate1_96,opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap,6,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,H12,5.4\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A1,nest_96_wellplate_100ul_pcr_full_skirt,2,A1,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A2,nest_96_wellplate_100ul_pcr_full_skirt,2,A2,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A3,nest_96_wellplate_100ul_pcr_full_skirt,2,A3,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A4,nest_96_wellplate_100ul_pcr_full_skirt,2,A4,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A5,nest_96_wellplate_100ul_pcr_full_skirt,2,A5,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A6,nest_96_wellplate_100ul_pcr_full_skirt,2,A6,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A7,nest_96_wellplate_100ul_pcr_full_skirt,2,A7,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A8,nest_96_wellplate_100ul_pcr_full_skirt,2,A8,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A9,nest_96_wellplate_100ul_pcr_full_skirt,2,A9,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A10,nest_96_wellplate_100ul_pcr_full_skirt,2,A10,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A11,nest_96_wellplate_100ul_pcr_full_skirt,2,A11,7\\nset2_sample.normPlate_p1,pcr2Plate1,nest_96_wellplate_100ul_pcr_full_skirt,1,A12,nest_96_wellplate_100ul_pcr_full_skirt,2,A12,7\\n","pipette_type_s20":"p20_single_gen2","pipette_mount_s20":"left","tip_type_s20":"opentrons_96_filtertiprack_20ul","tip_reuse_s20":"always", "pipette_type_m20":"p20_multi_gen2","pipette_mount_m20":"right","tip_type_m20":"opentrons_96_filtertiprack_20ul","tip_reuse_m20":"always"}""")
+    return [_all_values[n] for n in names]
+
+metadata = {
+    'apiLevel': '2.8',
+    'protocolName': '30x3_normalizationPooling',
+    'author': 'Rachel Voyt',
+    'source': 'Custom Protocol Request',
+    'description': '''This protocol is to normalize and pool the 30x3 tamGenetics plate.'''
+}
+
+def run(protocol):
+
+    [pipette_type_s20,
+     pipette_mount_s20,
+     tip_type_s20,
+     tip_reuse_s20,
+     pipette_type_m20,
+     pipette_mount_m20,
+     tip_type_m20,
+     tip_reuse_m20,
+     transfer_csv] = get_values(  # noqa: F821
+        "pipette_type_s20",
+        "pipette_mount_s20",
+        "tip_type_s20",
+        "tip_reuse_s20",
+        "pipette_type_m20",
+        "pipette_mount_m20",
+        "tip_type_m20",
+        "tip_reuse_m20",
+        "transfer_csv")
+
+    # strip headers
+    transfer_info = [[val.strip().lower() for val in line.split(',')]
+                     for line in transfer_csv.splitlines()
+                     if line.split(',')[0].strip()][1:]
+    
+    # load labware
+    magdeck = protocol.load_module('magnetic module gen2', 1)
+    pcr2Plate = magdeck.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", label = 'pcr2Plate')
+    normPlates = [protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", slot)
+                  for slot in ['2']]
+    poolPlate = protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", '3')
+
+    for line in transfer_info:
+        s_lw, s_slot, d_lw, d_slot = line[2:4] + line[5:7]
+        for slot, lw in zip([s_slot, d_slot], [s_lw, d_lw]):
+            if not int(slot) in protocol.loaded_labwares:
+                protocol.load_labware(lw.lower(), slot)
+
+    # load tipracks
+    tipracks_s20 = [protocol.load_labware(tip_type_s20, slot)
+            for slot in ['5']]
+    tipracks_m20 = [protocol.load_labware(tip_type_m20, slot)
+            for slot in ['4']]
+
+    # load pipettes
+    s20 = protocol.load_instrument(pipette_type_s20, pipette_mount_s20, tip_racks=tipracks_s20)
+    m20 = protocol.load_instrument(pipette_type_m20, pipette_mount_m20, tip_racks=tipracks_m20)
+            
+    tip_count_s20 = 0
+    tip_max_s20 = len(tipracks_s20*96)
+
+    tip_count_m20 = 0
+    tip_max_m20 = len(tipracks_m20*96)
+
+    def pick_up_s20():
+        nonlocal tip_count_s20
+        if tip_count_s20 == tip_max_s20:
+            protocol.pause('Please refill 20 ul tipracks for m20 before resuming.')
+            s20.reset_tipracks()
+            tip_count_s20 = 0
+        s20.pick_up_tip()
+        tip_count_s20 += 1
+
+    def pick_up_m20():
+        nonlocal tip_count_m20
+        if tip_count_m20 == tip_max_m20:
+            protocol.pause('Please refill 20 ul tipracks for m20 before resuming.')
+            m20.reset_tipracks()
+            tip_count_m20 = 0
+        m20.pick_up_tip()
+        tip_count_m20 += 8
+
+    def parse_well(well):
+        letter = well[0]
+        number = well[1:]
+        return letter.upper() + str(int(number))
+
+    if tip_reuse_m20 == 'never':
+        pick_up_m20()
+
+    # STEP 1: water transfer
+    if tip_reuse_s20 == 'always':
+        pick_up_s20()
+    
+    for line in transfer_info:
+        if line[0].startswith('set1'):
+            _, _, _, s_slot, s_well, _, d_slot, d_well, vol = line[:9]
+            source = protocol.loaded_labwares[
+                int(s_slot)].wells_by_name()[parse_well(s_well)].bottom(3)
+            dest = protocol.loaded_labwares[
+                int(d_slot)].wells_by_name()[parse_well(d_well)].bottom(1)
+            if float(vol) < 5:
+                s20.flow_rate.aspirate = 1
+                s20.flow_rate.dispense = 1
+            else:
+                s20.flow_rate.aspirate = 7.6
+                s20.flow_rate.dispense = 7.6
+            s20.transfer(float(vol),
+                        source,
+                        dest,
+                        touch_tip = True,
+                        new_tip = 'never')
+    if tip_reuse_s20 == 'always':
+        s20.drop_tip()
+
+    # PAUSE 1: Place plate 1 on magblock
+    protocol.pause("PAUSE 1: Place plate 1 on magblock & resume run.")
+
+    # STEP 2: sample transfer plate 1
+    magdeck.engage()
+    for line in transfer_info:
+        if line[0].startswith('set2'):
+            _, _, _, s_slot, s_well, _, d_slot, d_well, vol = line[:9]
+            pcr2Plate1 = protocol.loaded_labwares[
+                int(s_slot)].wells_by_name()[parse_well(s_well)].bottom(1)
+            normPlate = protocol.loaded_labwares[
+                int(d_slot)].wells_by_name()[parse_well(d_well)]
+            if tip_reuse_m20 == 'always':
+                pick_up_m20()
+            m20.flow_rate.aspirate = 2
+            m20.flow_rate.dispense = 2
+            m20.transfer(float(vol),
+                        pcr2Plate1,
+                        normPlate,
+                        new_tip = 'never')
+            m20.flow_rate.aspirate = 7.6
+            m20.flow_rate.dispense = 7.6
+            m20.transfer(5,
+                        normPlate,
+                        poolPlate.columns()[0],
+                        mix_before = (10, 4),
+                        new_tip = 'never')
+            if tip_reuse_m20 == 'always':
+                m20.drop_tip()
+    if m20.hw_pipette['has_tip']:
+        m20.drop_tip()
+    magdeck.disengage()
