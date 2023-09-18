@@ -26,6 +26,32 @@ The GTscore pipeline was originally created by Garrett McKinney (see the associa
 
 The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **438 samples**, including 235 hair samples (138 LWED, 97 SIMP), 194 blood samples (112 LWED, 82 SIMP), and 9 negative controls.
 
+### 1.2.1 Metadata
+
+Metadata below includes separate files for a, b, and cat sequencing results.
+
+To make the metadata files usable in analyses, we need to: 1) make a few formatting adjustments and 2) create a metadata file that includes sampleIDs that allow for analysis of genotypes called for each of the tamRun3 runs separately (tamRun3\_ and tamRun3b\_ sampleIDs) as well as the genotypes called when the sequencing results from the two runs are combined (cat_tamRun3\_ sampleIDs).
+
+```{r}
+# Original tamRun3 md
+md_a <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_5June2023.csv") %>%
+  mutate(sampleID = gsub("_","-", sampleID)) %>%
+  mutate(sampleFile = paste0(sampleID, ".fastq"))
+
+# Create tamRun3b version of md
+md_b <- md_a %>%
+  mutate(sampleID = gsub("tamRun3", "tamRun3b", sampleID)) %>%
+  mutate(sampleFile = gsub("tamRun3", "tamRun3b", sampleFile))
+
+# Create tamRun3cat version of md
+md_cat <- md_a %>%
+  mutate(sampleID = gsub("tamRun3", "cat_tamRun3", sampleID)) %>%
+  mutate(sampleFile = gsub("tamRun3", "cat_tamRun3", sampleFile))
+
+# Combine all versions of md into one
+md <- rbind(md_a, md_b, md_cat)
+```
+
 # 2 Packages
 
 ```{r load packages, include=FALSE}
@@ -52,6 +78,7 @@ cpan App::cpanminus
 
 # Install necessary perl modules
 sudo cpanm Algorithm::Combinatorics
+sudo cpanm Excel::Writer::XLSX
 ```
 
 I also recently had issues with installing perl modules with "cpanm" -- installing with "cpan" instead solved things. Generally speaking, perl continues to be a massive pain in new fun ways every time I open this up to re-run something.
@@ -260,32 +287,9 @@ write.table(sf_fullSet_b, file = "./03_tamRun3/03_run3GTscore/sampleFiles_fullSe
 write.table(sf_fullSet_cat, file = "./03_tamRun3/03_run3GTscore/sampleFiles_fullSet_cat.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 ```
 
-
 ### 5.1.2 Species subsets
 
-First we need to 1) load in the metadata for all of the samples, 2) make a few formatting adjustments, and 3) create a metadata file that includes sampleIDs that allow for analysis of genotypes called for each of the tamRun3 runs separately (tamRun3\_ and tamRun3b\_ sampleIDs) as well as the genotypes called when the sequencing results from the two runs are combined (cat_tamRun3\_ sampleIDs).
-
-```{r}
-# Original tamRun3 md
-md_a <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_12Jan2023.csv") %>%
-  mutate(sampleID = gsub("_","-", sampleID)) %>%
-  mutate(sampleFile = paste0(sampleID, ".fastq"))
-
-# Create tamRun3b version of md
-md_b <- md_a %>%
-  mutate(sampleID = gsub("tamRun3", "tamRun3b", sampleID)) %>%
-  mutate(sampleFile = gsub("tamRun3", "tamRun3b", sampleFile))
-
-# Create tamRun3cat version of md
-md_cat <- md_a %>%
-  mutate(sampleID = gsub("tamRun3", "cat_tamRun3", sampleID)) %>%
-  mutate(sampleFile = gsub("tamRun3", "cat_tamRun3", sampleFile))
-
-# Combine all versions of md into one
-md <- rbind(md_a, md_b, md_cat)
-```
-
-Then we can create our sample file species subsets. Note that we're including the negative controls in both species subsets 
+Use md file with a, b, and cat samples to create sample file species subsets. Note that we're including the negative controls in both species subsets 
 
 ```{r}
 # Create subsets
@@ -325,7 +329,7 @@ Each primer-probe file contains the following:
 3.  SNPpos - position of SNP in the amplicon, assuming that the first base = 0
 4.  Allele1 - one of the options for the SNP
 5.  Allele2 - the other option for the SNP
-6.  Probe1 - an 8 nt sequence overlapping the SNP; contains Allele1
+6.  Probe1 - a sequence containing bases 8 upstream and 8 downstream from SNP (including SNP); contains Allele1
 7.  Probe2 - same as Probe1, but contains Allele2
 8.  Primer - the forward primer sequence for each locus
 
@@ -372,7 +376,7 @@ Optional flags:
 
 To run from the command line, use: perl AmpliconReadCounter.pl -p primerProbeFile.txt --files sampleList.txt. To run from R, use the scripts below.
 
-### 5.2.1 tamRun3
+### 5.2.1 tamRun3 a
 
 ```{r count reads for amplicons, eval=FALSE}
 # All samples, all loci
@@ -388,7 +392,7 @@ system2("perl",
         args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_SIMP.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_a.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix SIMP_a_")
 ```
 
-### 5.2.2 tamRun3b
+### 5.2.2 tamRun3 b
 
 ```{r count reads for amplicons, eval=FALSE}
 # All samples, all loci
@@ -404,7 +408,7 @@ system2("perl",
         args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_SIMP.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_SIMP_b.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix SIMP_b_")
 ```
 
-### 5.2.3 cat_tamRun3
+### 5.2.3 tamRun3 cat
 
 ```{r count reads for amplicons, eval=FALSE}
 # All samples, all loci
@@ -413,7 +417,7 @@ system2("perl",
 
 # LWED
 system2("perl",
-        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_LWED.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_LWED+_cat.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix LWED_cat_")
+        args="./03_tamRun3/03_run3GTscore/AmpliconReadCounter.pl -p ./03_tamRun3/03_run3GTscore/primerProbeFile_LWED.txt --files ./03_tamRun3/03_run3GTscore/sampleFiles_LWED_cat.txt --inDir ./03_tamRun3/02_run3Interleaved/ --outDir ./03_tamRun3/03_run3GTscore/ --prefix LWED_cat_")
 
 # SIMP
 system2("perl",
@@ -504,7 +508,11 @@ Optional arguments for polyGen are:
 
 Note also that I'm making three genotype files, one for all loci vs. all samples and two species-specific sets - this allows our genotyping metrics to be more accurate.
 
-## 6.2 Genotyping: Full set
+## 6.2 Full set
+
+### abcat - 10x
+
+Genotype file includes separate genotypes for a, b, and cat sequencing results.
 
 ```{r}
 #load locus table and 10x allele reads file
@@ -514,58 +522,120 @@ fullSet_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/fullSet_a
 #generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
 fullSet_polyGenResults_singleSNP<-polyGen(fullSet_singleSNP_locusTable,fullSet_singleSNP_alleleReads)
 
-#write results
-write.table(fullSet_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_abcat_10x.txt",quote=FALSE,sep="\t")
-
-# rubias format
-#sampleMetaData <- data.frame(sample_type="NA",repunit=NA,collection="NA",indiv=colnames(fullSet_polyGenResults_singleSNP))
-#exportRubias(fullSet_polyGenResults_singleSNP,fullSet_singleSNP_locusTable,sampleMetaData,filename="fullSet_polyGenResults_singleSNP_rubias.txt")
+# write results
+write.table(fullSet_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/fullSet_abcat_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
 ```
+
+### abcat - no 10x
 
 Genotype without ditching loci under 10x
 
 ```{r}
-#load locus table and allele reads file
+# Create abcat allele reads file
+readCounts_no10x <- cbind(readCounts_a, readCounts_b, readCounts_cat)
+write.table(readCounts_no10x,"./03_tamRun3/03_run3GTscore/fullSet_abcat_AlleleReads_singleSNPs_no10x.txt",quote=FALSE,sep="\t")
+
+#load locus table and original allele reads file
 fullSet_singleSNP_locusTable_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_LocusTable_singleSNPs.txt", header=TRUE, stringsAsFactors = FALSE)
 
-fullSet_singleSNP_alleleReads_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads_no10x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_abcat_AlleleReads_singleSNPs_no10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
 fullSet_polyGenResults_singleSNP_no10x <- polyGen(fullSet_singleSNP_locusTable_no10x, fullSet_singleSNP_alleleReads_no10x)
 
 #write results
-write.table(fullSet_polyGenResults_singleSNP_no10x,"./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_abcat_no10x.txt",quote=FALSE,sep="\t")
+write.table(fullSet_polyGenResults_singleSNP_no10x,"./03_tamRun3/03_run3GTscore/fullSet_abcat_polyGenResults_singleSNP_no10x.txt",quote=FALSE,sep="\t")
 ```
 
-## 6.2 Genotyping: LWED
+### cat only
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_cat_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+fullSet_cat_singleSNP_alleleReads<-fullSet_singleSNP_alleleReads %>%
+  select(starts_with("cat"))
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_cat_polyGenResults_singleSNP<-polyGen(fullSet_cat_singleSNP_locusTable,fullSet_cat_singleSNP_alleleReads)
+
+# write results
+write.table(fullSet_cat_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/fullSet_cat_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
+```
+
+
+## 6.3 Species subsets
+
+### 6.3.1 LWED
+
+#### abcat
 
 ```{r Genotyping}
 #load locus table and 10x allele reads file
-LWED_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/LWED_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-LWED_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/LWED_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+LWED_abcat_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/LWED_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+LWED_abcat_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/LWED_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm
-LWED_polyGenResults_singleSNP<-polyGen(LWED_singleSNP_locusTable,LWED_singleSNP_alleleReads)
+LWED_abcat_polyGenResults_singleSNP<-polyGen(LWED_abcat_singleSNP_locusTable,LWED_abcat_singleSNP_alleleReads)
 
 #write results
-write.table(LWED_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/LWED_abcat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(LWED_abcat_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/LWED_abcat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
-## 6.3 Genotyping: SIMP
+#### cat only
 
-```{r Genotyping}
+```{r}
+# lwed sample names
+samplesLWED <- sf_lwed_cat %>%
+  mutate(V1 = gsub(".fastq", "", V1)) %>%
+  mutate(V1 = gsub("-", "\\.", V1))
+
 #load locus table and 10x allele reads file
-SIMP_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-SIMP_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+LWED_cat_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/LWED_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+LWED_cat_singleSNP_alleleReads<-LWED_abcat_singleSNP_alleleReads %>%
+  select(any_of(samplesLWED$V1))
 
 #generate singleSNP genotypes using the polyGen algorithm
-SIMP_polyGenResults_singleSNP<-polyGen(SIMP_singleSNP_locusTable,SIMP_singleSNP_alleleReads)
+LWED_cat_polyGenResults_singleSNP<-polyGen(LWED_cat_singleSNP_locusTable,LWED_cat_singleSNP_alleleReads)
 
 #write results
-write.table(SIMP_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/SIMP_abcat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+write.table(LWED_cat_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/LWED_cat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
 ```
 
-[STOPPED UPDATING HERE 24 MAY 2023]
+### 6.3.2 SIMP
+
+#### abcat
+
+```{r}
+#load locus table and 10x allele reads file
+SIMP_abcat_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_abcat_singleSNP_alleleReads<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_abcat_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_abcat_polyGenResults_singleSNP<-polyGen(SIMP_abcat_singleSNP_locusTable,SIMP_abcat_singleSNP_alleleReads)
+
+#write results
+write.table(SIMP_abcat_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/SIMP_abcat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+#### cat only
+
+```{r}
+# simp sample names
+samplesSIMP <- sf_simp_cat %>%
+  mutate(V1 = gsub(".fastq", "", V1)) %>%
+  mutate(V1 = gsub("-", "\\.", V1))
+
+#load locus table and 10x allele reads file
+SIMP_cat_singleSNP_locusTable<-read.delim("./03_tamRun3/03_run3GTscore/SIMP_a_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_cat_singleSNP_alleleReads<-SIMP_abcat_singleSNP_alleleReads %>%
+  select(any_of(samplesSIMP$V1))
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_cat_polyGenResults_singleSNP<-polyGen(SIMP_cat_singleSNP_locusTable,SIMP_cat_singleSNP_alleleReads)
+
+#write results
+write.table(SIMP_cat_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/SIMP_cat_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
 
 # 7 Data summaries
 
@@ -575,18 +645,20 @@ write.table(SIMP_polyGenResults_singleSNP,"./03_tamRun3/03_run3GTscore/SIMP_abca
 
 The summarizeGTscore command generates summary data for each locus in table form. The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele. Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
 
+NOTE that locus summaries are based on "cat_" samples
+
 ```{r}
 #summarize single SNP results
-fullSet_singleSNP_summary <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP)
+fullSet_cat_singleSNP_summary <- summarizeGTscore(fullSet_cat_singleSNP_alleleReads, fullSet_cat_singleSNP_locusTable, fullSet_cat_polyGenResults_singleSNP)
 
-LWED_singleSNP_summary<-summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP)
+LWED_cat_singleSNP_summary <- summarizeGTscore(LWED_cat_singleSNP_alleleReads, LWED_cat_singleSNP_locusTable, LWED_cat_polyGenResults_singleSNP)
 
-SIMP_singleSNP_summary<-summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP)
+SIMP_cat_singleSNP_summary <- summarizeGTscore(SIMP_cat_singleSNP_alleleReads, SIMP_cat_singleSNP_locusTable, SIMP_cat_polyGenResults_singleSNP)
 
 #write results
-write.table(fullSet_singleSNP_summary,"./03_tamRun3/03_run3GTscore/fullSet_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
-write.table(LWED_singleSNP_summary,"./03_tamRun3/03_run3GTscore/LWED_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
-write.table(SIMP_singleSNP_summary,"./03_tamRun3/03_run3GTscore/SIMP_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(fullSet_cat_singleSNP_summary,"./03_tamRun3/03_run3GTscore/fullSet_cat_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(LWED_cat_singleSNP_summary,"./03_tamRun3/03_run3GTscore/LWED_cat_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(SIMP_cat_singleSNP_summary,"./03_tamRun3/03_run3GTscore/SIMP_cat_singleSNP_summary.txt",quote=FALSE,sep="\t",row.names=FALSE)
 ```
 
 ### 7.1.2 Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
@@ -601,9 +673,9 @@ In doing so, this means that...
 
 ```{r}
 # Load locus summaries
-ls <- read.table("./03_tamRun3/03_run3GTscore/fullSet_GTscore_locusSummary.txt", header = T, sep = "\t")
-lwed_ls <- read.table("./03_tamRun3/03_run3GTscore/LWED_GTscore_locusSummary.txt", header = T, sep = "\t")
-simp_ls <- read.table("./03_tamRun3/03_run3GTscore/SIMP_GTscore_locusSummary.txt", header = T, sep = "\t")
+ls <- read.table("./03_tamRun3/03_run3GTscore/fullSet_cat_GTscore_locusSummary.txt", header = T, sep = "\t")
+lwed_ls <- read.table("./03_tamRun3/03_run3GTscore/LWED_cat_GTscore_locusSummary.txt", header = T, sep = "\t")
+simp_ls <- read.table("./03_tamRun3/03_run3GTscore/SIMP_cat_GTscore_locusSummary.txt", header = T, sep = "\t")
 
 # Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
 ## Locus summaries
@@ -615,11 +687,11 @@ simp1_ls <- simp_ls %>%
   filter(str_detect(Locus, "SIMP"))
 
 ## SingleSNP summaries
-ss <- fullSet_singleSNP_summary %>%
+ss <- fullSet_cat_singleSNP_summary %>%
   filter(!str_detect(Locus_ID, "LWED|SIMP"))
-lwed_ss <- LWED_singleSNP_summary %>%
+lwed_ss <- LWED_cat_singleSNP_summary %>%
   filter(str_detect(Locus_ID, "LWED"))
-simp_ss <- SIMP_singleSNP_summary %>%
+simp_ss <- SIMP_cat_singleSNP_summary %>%
   filter(str_detect(Locus_ID, "SIMP"))
 
 # Recombine locus summaries & single snp summary files, then merge the two
@@ -631,7 +703,7 @@ ss_recombine$Locus_ID <- sub("_[^_]+$", "\\1", ss_recombine$Locus_ID)
 ls_ss <- merge(ls_recombine, ss_recombine, by.x = "Locus", by.y = "Locus_ID") 
 
 # Export
-write.csv(ls_ss, "./03_tamRun3/03_run3GTscore/summaryFiles/master_locusSummary.csv", row.names = F)
+write.csv(ls_ss, "./03_tamRun3/03_run3GTscore/summaryFiles/master_cat_locusSummary.csv", row.names = F)
 ```
 
 ### 7.1.3 Generate plots for single SNP results
@@ -678,14 +750,25 @@ ggplot()+geom_histogram(data=ls_ss,aes(x=majAF),binwidth=0.01)+
 
 ## 7.2 Sample summaries
 
+Creating sample summaries based on a, b, and cat samples
+
 load sample summaries from AmpliconReadCounter
 
 ```{r}
-fullSet_GTscore_individualSummary <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE)
+# Full set (a, b, cat)
+fullSet_abcat_GTscore_individualSummary <- rbind(read.delim("./03_tamRun3/03_run3GTscore/fullSet_a_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE),
+                                           read.delim("./03_tamRun3/03_run3GTscore/fullSet_b_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE),
+                                           read.delim("./03_tamRun3/03_run3GTscore/fullSet_cat_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE))
 
-LWED_GTscore_individualSummary <- read.delim("LWED_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE)
+# LWED (a, b, cat)
+LWED_abcat_GTscore_individualSummary <- rbind(read.delim("./03_tamRun3/03_run3GTscore/LWED_a_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE),
+                          read.delim("./03_tamRun3/03_run3GTscore/LWED_b_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE),
+                          read.delim("./03_tamRun3/03_run3GTscore/LWED_cat_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE))
 
-SIMP_GTscore_individualSummary <- read.delim("SIMP_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE)
+# SIMP (a, b, cat)
+SIMP_abcat_GTscore_individualSummary <- rbind(read.delim("./03_tamRun3/03_run3GTscore/SIMP_b_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE),
+                   read.delim("./03_tamRun3/03_run3GTscore/SIMP_a_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE),
+                   read.delim("./03_tamRun3/03_run3GTscore/SIMP_cat_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE))    
 ```
 
 #### 7.2.1 Summarize single SNP summaries for samples
@@ -695,15 +778,15 @@ The summarizeSamples function changes the "-" to a "." -- be sure to change this
 **added a few lines to do a separate file fullSet_singleSNP_sampleSummary for comparisons to gt-seq pipeline (the master summary I made doesn't count species-specific loci for uninformative species)
 
 ```{r}
-fullSet_singleSNP_sampleSummary <- summarizeSamples(fullSet_polyGenResults_singleSNP, fullSet_singleSNP_alleleReads) %>%
+fullSet_abcat_singleSNP_sampleSummary <- summarizeSamples(fullSet_polyGenResults_singleSNP, fullSet_singleSNP_alleleReads) %>%
   mutate(sample = gsub("\\.", "-", sample))
 
-write.csv(fullSet_singleSNP_sampleSummary, "./03_tamRun3/03_run3GTscore/fullSet_singleSNP_sampleSummary.csv", row.names = F)
+write.csv(fullSet_abcat_singleSNP_sampleSummary, "./03_tamRun3/03_run3GTscore/fullSet_abcat_singleSNP_sampleSummary.csv", row.names = F)
 
-LWED_singleSNP_sampleSummary<-summarizeSamples(LWED_polyGenResults_singleSNP,LWED_singleSNP_alleleReads) %>%
+LWED_abcat_singleSNP_sampleSummary <- summarizeSamples(LWED_abcat_polyGenResults_singleSNP, LWED_abcat_singleSNP_alleleReads) %>%
   mutate(sample = gsub("\\.", "-", sample))
 
-SIMP_singleSNP_sampleSummary<-summarizeSamples(SIMP_polyGenResults_singleSNP,SIMP_singleSNP_alleleReads) %>%
+SIMP_abcat_singleSNP_sampleSummary <- summarizeSamples(SIMP_abcat_polyGenResults_singleSNP, SIMP_abcat_singleSNP_alleleReads) %>%
   mutate(sample = gsub("\\.", "-", sample))
 ```
 
@@ -711,15 +794,16 @@ SIMP_singleSNP_sampleSummary<-summarizeSamples(SIMP_polyGenResults_singleSNP,SIM
 
 ```{r}
 # make new copies & add column to note which loci-set the values are based on
-LWED_gtIndivSummary <- LWED_GTscore_individualSummary %>%
+LWED_abcat_gtIndivSummary <- LWED_abcat_GTscore_individualSummary %>%
   mutate(lociSet = "LWED") %>%
-  merge(., LWED_singleSNP_sampleSummary, by.x="Sample",by.y="sample")
-SIMP_gtIndivSummary <- SIMP_GTscore_individualSummary %>%
+  merge(., LWED_abcat_singleSNP_sampleSummary, by.x = "Sample", by.y = "sample")
+
+SIMP_abcat_gtIndivSummary <- SIMP_abcat_GTscore_individualSummary %>%
   mutate(lociSet = "SIMP") %>%
-  merge(., SIMP_singleSNP_sampleSummary, by.x="Sample",by.y="sample")
+  merge(., SIMP_abcat_singleSNP_sampleSummary, by.x = "Sample", by.y = "sample")
 
 # Combine LWED & SIMP to form one, adjust sample name
-lwedSIMP_gtIndivSummary <- rbind(LWED_gtIndivSummary, SIMP_gtIndivSummary) %>%
+lwedSIMP_abcat_gtIndivSummary <- rbind(LWED_abcat_gtIndivSummary, SIMP_abcat_gtIndivSummary) %>%
   mutate(sampleFile = paste0(Sample, ".fastq"))
 ```
 
@@ -727,10 +811,13 @@ lwedSIMP_gtIndivSummary <- rbind(LWED_gtIndivSummary, SIMP_gtIndivSummary) %>%
 
 ```{r}
 # Merge metadata & fullSet sample summaries
-master_sampleSummary <- merge(lwedSIMP_gtIndivSummary, md, by = "sampleFile")
+master_abcat_sampleSummary <- merge(lwedSIMP_abcat_gtIndivSummary, md, by = "sampleFile")
+master_cat_sampleSummary <- master_abcat_sampleSummary %>%
+  filter(str_detect(sampleFile, "cat"))
 
 # Export
-write.csv(master_sampleSummary, "./summaryFiles/master_sampleSummary.csv", row.names = F)
+write.csv(master_abcat_sampleSummary, "./03_tamRun3/03_run3GTscore/summaryFiles/master_abcat_sampleSummary.csv", row.names = F)
+write.csv(master_cat_sampleSummary, "./03_tamRun3/03_run3GTscore/summaryFiles/master_cat_sampleSummary.csv", row.names = F)
 ```
 
 #### 7.2.6 Plots
@@ -785,7 +872,7 @@ The IDduplicateSamples function does all pairwise comparisons of samples and out
 
 ```{r identify duplicate samples,eval=FALSE}
 #convert missing genotypes "0" to NA
-polyGenResults_singleSNP_NA<-fullSet_polyGenResults_singleSNP
+polyGenResults_singleSNP_NA<-fullSet_cat_polyGenResults_singleSNP
 polyGenResults_singleSNP_NA[polyGenResults_singleSNP_NA=="0"]<-NA
 
 #compare all samples, for each comparison get proportion of loci that have genotypes
@@ -794,7 +881,7 @@ polyGenResults_singleSNP_NA[polyGenResults_singleSNP_NA=="0"]<-NA
 #Samples with a high proportionCommon and high proportionMatch are likely duplicates
 polyGenResults_dupTest<-IDduplicateSamples(polyGenResults_singleSNP_NA)
 
-write.table(polyGenResults_dupTest,"run3_polyGenResults_dupTest.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(polyGenResults_dupTest,"run3_cat_polyGenResults_dupTest.txt",quote=FALSE,sep="\t",row.names=FALSE)
 
 ```
 
