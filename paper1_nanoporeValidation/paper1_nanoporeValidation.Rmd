@@ -1,0 +1,1413 @@
+---
+title: "paper1_nanoporeValidation"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+This set of scripts is for tamGenetics_paper1, which focuses on validating the tamGenetics SNP panel on the Nanopore sequencing platform.
+
+# 2 Packages
+
+```{r, echo=FALSE}
+library(readxl)
+library(tidyverse)
+```
+
+# 3 Data
+
+## 3.1 Metadata
+
+```{r, echo=FALSE}
+# Metadata w/both Illumina and Nanopore sampleIDs/sampleFiles
+md_illONT_samplesAll <- read.csv("./04_tamRun4/illONT_tamRun4_metadata.csv")
+
+# Metadata subsets by species
+md_illONT_samplesLWED <- md_illONT_samplesAll %>%
+  filter(species == "LWED")
+
+md_illONT_samplesSIMP <- md_illONT_samplesAll %>%
+  filter(species == "SIMP")
+
+md_illONT_samplesNegs <- md_illONT_samplesAll %>%
+  filter(str_detect(sampleType, "Neg"))
+
+# Metadata subsets by sample type
+md_illONT_samplesBlood <- md_illONT_samplesAll %>%
+  filter(sampleType == "blood")
+
+md_illONT_samplesFecal <- md_illONT_samplesAll %>%
+  filter(sampleType == "fecal")
+
+md_illONT_samplesHair <- md_illONT_samplesAll %>%
+  filter(sampleType == "hair")
+```
+
+## 3.2 Primer list
+
+We have 140 general loci (excluding those that are species specific) - these are the ones we'll look at to get sample/loci combos with 100% genotype success.
+
+```{r, echo=FALSE}
+primerList.v3 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+primerList.v3_lociDual <- primerList.v3 %>%
+  select(locus) %>%
+  filter(!str_detect(locus, "LWED|SIMP"))
+
+nrow(primerList.v3_lociDual)
+```
+
+## 3.3 Genotypes (dual loci only)
+
+Import genotypes and subset to dual loci only 
+
+### gtscore.10x
+
+```{r, echo=FALSE}
+# All samples
+genos_ill_gtscore_samplesAll_lociDual <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  filter(locus %in% primerList.v3_lociDual$locus) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+genos_ont_gtscore_samplesAll_lociDual <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  filter(locus %in% primerList.v3_lociDual$locus) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+# Blood samples
+genos_ill_gtscore_samplesBlood_lociDual <- genos_ill_gtscore_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesBlood$sampleID_ill))
+
+genos_ont_gtscore_samplesBlood_lociDual <- genos_ont_gtscore_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesBlood$sampleID_ont))
+
+# Fecal samples
+genos_ill_gtscore_samplesFecal_lociDual <- genos_ill_gtscore_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesFecal$sampleID_ill))
+
+genos_ont_gtscore_samplesFecal_lociDual <- genos_ont_gtscore_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesFecal$sampleID_ont))
+```
+
+### gtseq
+
+```{r}
+# All samples
+genos_ill_gtseq_samplesAll_lociDual <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  column_to_rownames("Sample") %>%
+  select(c(primerList.v3_lociDual$locus)) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+genos_ont_gtseq_samplesAll_lociDual <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/01_nanopore/04_run4GTseq_ont/genos/ont_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = str_sub(Sample, 1, 9)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  column_to_rownames("Sample") %>%
+  select(c(primerList.v3_lociDual$locus)) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+# Blood samples
+genos_ill_gtseq_samplesBlood_lociDual <- genos_ill_gtseq_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesBlood$sampleID_ill))
+
+genos_ont_gtseq_samplesBlood_lociDual <- genos_ont_gtseq_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesBlood$sampleID_ont))
+
+# Fecal samples
+genos_ill_gtseq_samplesFecal_lociDual <- genos_ill_gtseq_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesFecal$sampleID_ill))
+
+genos_ont_gtseq_samplesFecal_lociDual <- genos_ont_gtseq_samplesAll_lociDual %>%
+  select(c(md_illONT_samplesFecal$sampleID_ont))
+```
+
+# 4 Geno success
+
+**NEEDS UPDATING**
+
+## Blood samples
+
+### gtscore.10x
+
+```{r}
+# Illumina
+genoSuccess_bySample_ill_gtscore_samplesBlood_lociDual <- genos_ill_gtscore_samplesBlood_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  )
+
+# Nanopore
+genoSuccess_bySample_ont_gtscore_samplesBlood_lociDual <- genos_ont_gtscore_samplesBlood_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  )
+```
+
+Plots
+
+```{r}
+# Illumina
+ggplot(genoSuccess_bySample_ill_gtscore_samplesBlood_lociDual, aes(y = totalGenos)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 140, 5)) + 
+  ggtitle(label = "[ILLUMINA] 10x gtscore: Number of blood samples per total genotypes assigned") +
+  theme_bw()
+
+# Nanopore
+ggplot(genoSuccess_bySample_ont_gtscore_samplesBlood_lociDual, aes(y = totalGenos)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 140, 5)) + 
+  ggtitle(label = "[NANOPORE] 10x gtscore: Number of blood samples per total genotypes assigned") +
+  theme_bw()
+```
+
+### gtseq
+
+```{r}
+# Illumina
+genoSuccess_bySample_ill_gtseq_samplesBlood_lociDual <- genos_ill_gtseq_samplesBlood_lociDual %>%
+  mutate(across(everything(), ~ as.character(.))) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  )
+
+# Nanopore
+genoSuccess_bySample_ont_gtseq_samplesBlood_lociDual <- genos_ont_gtseq_samplesBlood_lociDual %>%
+  mutate(across(everything(), ~ as.character(.))) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  )
+```
+
+Plots
+
+```{r}
+# Illumina
+ggplot(genoSuccess_bySample_ill_gtseq_samplesBlood_lociDual, aes(y = totalGenos)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 140, 5)) + 
+  ggtitle(label = "[ILLUMINA] 10x gtseq: Number of blood samples per total genotypes assigned") +
+  theme_bw()
+
+# Nanopore
+ggplot(genoSuccess_bySample_ont_gtseq_samplesBlood_lociDual, aes(y = totalGenos)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 140, 5)) + 
+  ggtitle(label = "[NANOPORE] 10x gtseq: Number of blood samples per total genotypes assigned") +
+  theme_bw()
+```
+
+### Summary
+
+```{r}
+table_countSamples_v_countGenoSuccess <- data.frame(
+  lociGenotyped = as.numeric(seq_len(140))
+) %>%
+  arrange(desc(lociGenotyped)) %>%
+  mutate(
+    propLoci = round(lociGenotyped/140, 2)
+         ) %>%
+  rowwise() %>%
+  mutate(
+    # gtscore
+    samples_ill.gtscore10x = sum(genoSuccess_bySample_ill_gtscore_samplesBlood_lociDual$totalGenos >= lociGenotyped),
+    samples_ont.gtscore10x = sum(genoSuccess_bySample_ont_gtscore_samplesBlood_lociDual$totalGenos >= lociGenotyped),
+    # gtseq
+    samples_ill.gtseq = sum(genoSuccess_bySample_ill_gtseq_samplesBlood_lociDual$lociGenotyped >= lociGenotyped),
+    samples_ont.gtseq = sum(genoSuccess_bySample_ont_gtscore_samplesBlood_lociDual$lociGenotyped >= lociGenotyped)
+    )
+
+table_countSamples_v_countGenoSuccess %>%
+  kable(caption = "Number of loci vs. number of samples 100% genotyped") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(height = "500px", fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+Export
+
+```{r}
+write.csv(table_countSamples_v_countGenoSuccess, "./paper1_nanoporeValidation/countSamples_vs_genLociGenos.csv", row.names = F)
+```
+
+## By locus
+
+### gtscore.10x
+
+```{r}
+# Illumina
+genoSuccess_byLocus_ill_gtscore_samplesBlood_lociDual <- genos_ill_gtscore_samplesBlood_lociDual %>%
+  mutate(
+    samplesGenotyped = rowSums(!is.na(.))
+  )
+
+# Nanopore
+genoSuccess_byLocus_ont_gtscore_samplesBlood_lociDual <- genos_ont_gtscore_samplesBlood_lociDual %>%
+  mutate(
+    samplesGenotyped = rowSums(!is.na(.))
+  )
+```
+
+Plots
+
+```{r}
+# Illumina
+ggplot(genoSuccess_byLocus_ill_gtscore_samplesBlood_lociDual, aes(y = samplesGenotyped)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 30, 5)) + 
+  ggtitle(label = "[ILLUMINA] 10x gtscore: Number of blood samples genotyped per locus") +
+  labs(y = "Samples genotyped", x = "# of loci") +
+  theme_bw()
+
+# Nanopore
+ggplot(genoSuccess_byLocus_ont_gtscore_samplesBlood_lociDual, aes(y = samplesGenotyped)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 30, 5)) + 
+  ggtitle(label = "[NANOPORE] 10x gtscore: Number of blood samples genotyped per locus") +
+   labs(y = "Samples genotyped", x = "# of loci") +
+  theme_bw()
+```
+
+### gtseq
+
+```{r}
+# Illumina
+genoSuccess_byLocus_ill_gtseq_samplesBlood_lociDual <- genos_ill_gtseq_samplesBlood_lociDual %>%
+  mutate(
+    samplesGenotyped = rowSums(!is.na(.))
+  )
+
+# Nanopore
+genoSuccess_byLocus_ont_gtseq_samplesBlood_lociDual <- genos_ont_gtseq_samplesBlood_lociDual %>%
+  mutate(
+    samplesGenotyped = rowSums(!is.na(.))
+  )
+```
+
+Plots
+
+```{r}
+# Illumina
+ggplot(genoSuccess_byLocus_ill_gtseq_samplesBlood_lociDual, aes(y = samplesGenotyped)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 30, 5)) + 
+  ggtitle(label = "[ILLUMINA] gtseq: Number of blood samples genotyped per locus") +
+  labs(y = "Samples genotyped", x = "# of loci") +
+  theme_bw()
+
+# Nanopore
+ggplot(genoSuccess_byLocus_ont_gtseq_samplesBlood_lociDual, aes(y = samplesGenotyped)) +
+  geom_bar() +
+  scale_y_continuous(breaks = seq(0, 30, 5)) + 
+  ggtitle(label = "[NANOPORE] gtseq: Number of blood samples genotyped per locus") +
+  labs(y = "Samples genotyped", x = "# of loci") +
+  theme_bw()
+```
+
+### Summary
+
+Based on the table below, I would recommend reporting results based on the 20 blood samples that have ~100 loci genotyped... BUT are these the same loci??
+
+```{r}
+table_countLoci_v_countGenoSuccess <- data.frame(
+  samplesGenotyped = as.numeric(seq_len(30))
+) %>%
+  arrange(desc(samplesGenotyped)) %>%
+  mutate(
+    propSamples = round(samplesGenotyped/30, 2)
+         ) %>%
+  rowwise() %>%
+  mutate(
+    # gtscore
+    loci_ill.gtscore10x = sum(genoSuccess_byLocus_ill_gtscore_samplesBlood_lociDual$samplesGenotyped >= samplesGenotyped),
+    loci_ont.gtscore10x = sum(genoSuccess_byLocus_ont_gtscore_samplesBlood_lociDual$samplesGenotyped >= samplesGenotyped),
+    # gtseq
+    loci_ill.gtseq = sum(genoSuccess_byLocus_ill_gtseq_samplesBlood_lociDual$samplesGenotyped >= samplesGenotyped),
+    loci_ont.gtseq = sum(genoSuccess_byLocus_ont_gtscore_samplesBlood_lociDual$samplesGenotyped >= samplesGenotyped)
+    )
+
+write.csv(table_countSamples_v_countGenoSuccess, "./paper1_nanoporeValidation/countSamples_vs_genLociGenos.csv", row.names = F)
+```
+
+# 5 Identify optimal sample/loci combos
+
+## 5.1 Functions
+
+Function 1: For a given dataframe of genotypes, this function returns the number of loci genotyped at the desired proportion of n samples ("propSamples") for subsets of 2 to 30 samples
+
+```{r}
+# number of loci genotyped at propSamples (0 to 1.0) of samples from 10 to 30 samples
+optimize_samplesLoci <- function(df, propSamples) {
+  # Initialize an empty list to store results
+  result_list <- list()
+
+  for (n in 2:30) {
+    # create matrix where NAs are 0 and non-NAs are 1
+    is_na_vector <- ifelse(is.na(df), 0, 1)
+
+    crossprod_vector <- crossprod(is_na_vector)
+    col_sums <- colSums(crossprod_vector)
+
+    x_df <- as.data.frame(df)  # to get meaningful colnames
+    # use colSums vector to select n columns; will rank all columns and give the n first; gives n columns w/the max number of non-NA rows
+    res <- x_df[, rank(-col_sums, ties.method = "first") <= n]
+
+    # Store the result in the list
+    result_list[[as.character(n)]] <- c(n, nrow(res[which(rowMeans(!is.na(res)) >= propSamples), ]))
+  }
+
+  # Convert the list to a dataframe
+  result_df <- do.call(rbind, result_list)
+
+  # Rename columns
+  colnames(result_df) <- c("samples", "loci")
+
+  return(result_df)
+}
+```
+
+Function 2: For a given dataframe of genotypes, this function returns an optimized set of genotypes for n samples, where the number of samples (n) and the proportion of those n samples successfully genotyped per locus (propSamples) is chosen based on the results of function 1 above
+
+```{r}
+optimized_genos <- function(df, n, propSamples) {
+  is_na_vector <- ifelse(is.na(df), 0, 1)
+  crossprod_vector <- crossprod(is_na_vector)
+  col_sums <- colSums(crossprod_vector)
+
+  x_df <- as.data.frame(df)
+  res <- x_df[, rank(-col_sums, ties.method = "first") <= n]
+
+  result <- res[which(rowMeans(!is.na(res)) >= propSamples), ]
+  return(result)
+}
+```
+
+## 5.2 Blood samples
+
+### Identify optimal sample/loci combos
+
+#### gtscore
+
+```{r}
+# loci genotyped at 100% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_ill_gtscore_blood <- optimize_samplesLoci(genos_ill_gtscore_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ill.gtscore" = "loci")
+
+opt100_samplesLoci_ont_gtscore_blood <- optimize_samplesLoci(genos_ont_gtscore_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ont.gtscore" = "loci")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_ill_gtscore_blood <- optimize_samplesLoci(genos_ill_gtscore_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ill.gtscore" = "loci")
+
+opt90_samplesLoci_ont_gtscore_blood <- optimize_samplesLoci(genos_ont_gtscore_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ont.gtscore" = "loci")
+```
+
+#### gtseq
+
+```{r}
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_ill_gtseq_blood <- optimize_samplesLoci(genos_ill_gtseq_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ill.gtseq" = "loci")
+
+opt100_samplesLoci_ont_gtseq_blood <- optimize_samplesLoci(genos_ont_gtseq_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ont.gtseq" = "loci")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_ill_gtseq_blood <- optimize_samplesLoci(genos_ill_gtseq_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ill.gtseq" = "loci")
+
+opt90_samplesLoci_ont_gtseq_blood <- optimize_samplesLoci(genos_ont_gtseq_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ont.gtseq" = "loci")
+```
+
+#### Summaries
+
+```{r}
+# loci genotyped at 100% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_blood_summary <- merge(opt100_samplesLoci_ill_gtscore_blood, opt100_samplesLoci_ont_gtscore_blood, by = "samples") %>%
+  merge(., opt100_samplesLoci_ill_gtseq_blood, by = "samples") %>%
+  merge(., opt100_samplesLoci_ont_gtseq_blood, by = "samples")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_blood_summary <- merge(opt90_samplesLoci_ill_gtscore_blood, opt90_samplesLoci_ont_gtscore_blood, by = "samples") %>%
+  merge(., opt90_samplesLoci_ill_gtseq_blood, by = "samples") %>%
+  merge(., opt90_samplesLoci_ont_gtseq_blood, by = "samples")
+```
+
+### Dataframes
+
+#### 100% geno success
+
+##### gtscore
+
+```{r}
+optGenos100_ill_gtscore_blood <- optimized_genos(genos_ill_gtscore_samplesBlood_lociDual, 20, 1.0)
+
+optGenos100_ont_gtscore_blood <- optimized_genos(genos_ont_gtscore_samplesBlood_lociDual, 20, 1.0)
+```
+
+##### gtseq
+
+```{r}
+optGenos100_ill_gtseq_blood <- optimized_genos(genos_ill_gtseq_samplesBlood_lociDual, 10, 1.0)
+
+optGenos100_ont_gtseq_blood <- optimized_genos(genos_ont_gtseq_samplesBlood_lociDual, 10, 1.0)
+```
+
+#### 90% geno success
+
+##### gtscore
+
+```{r}
+optGenos90_ill_gtscore_blood <- optimized_genos(genos_ill_gtscore_samplesBlood_lociDual, 20, 0.9)
+
+optGenos90_ont_gtscore_blood <- optimized_genos(genos_ont_gtscore_samplesBlood_lociDual, 20, 0.9)
+```
+
+##### gtseq
+
+```{r}
+optGenos90_ill_gtseq_blood <- optimized_genos(genos_ill_gtseq_samplesBlood_lociDual, 10, 0.9)
+
+optGenos90_ont_gtseq_blood <- optimized_genos(genos_ont_gtseq_samplesBlood_lociDual, 10, 0.9)
+```
+
+## 5.3 Fecal samples
+
+### Identify optimal sample/loci combos
+
+#### gtscore
+
+```{r}
+# loci genotyped at 100% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_ill_gtscore_fecal <- optimize_samplesLoci(genos_ill_gtscore_samplesFecal_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ill.gtscore" = "loci")
+
+opt100_samplesLoci_ont_gtscore_fecal <- optimize_samplesLoci(genos_ont_gtscore_samplesFecal_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ont.gtscore" = "loci")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_ill_gtscore_fecal <- optimize_samplesLoci(genos_ill_gtscore_samplesFecal_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ill.gtscore" = "loci")
+
+opt90_samplesLoci_ont_gtscore_fecal <- optimize_samplesLoci(genos_ont_gtscore_samplesFecal_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ont.gtscore" = "loci")
+```
+
+#### gtseq
+
+```{r}
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_ill_gtseq_fecal <- optimize_samplesLoci(genos_ill_gtseq_samplesFecal_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ill.gtseq" = "loci")
+
+opt100_samplesLoci_ont_gtseq_fecal <- optimize_samplesLoci(genos_ont_gtseq_samplesFecal_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ont.gtseq" = "loci")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_ill_gtseq_fecal <- optimize_samplesLoci(genos_ill_gtseq_samplesFecal_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ill.gtseq" = "loci")
+
+opt90_samplesLoci_ont_gtseq_fecal <- optimize_samplesLoci(genos_ont_gtseq_samplesFecal_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ont.gtseq" = "loci")
+```
+
+#### Summaries
+
+```{r}
+# loci genotyped at 100% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_fecal_summary <- merge(opt100_samplesLoci_ill_gtscore_fecal, opt100_samplesLoci_ont_gtscore_fecal, by = "samples") %>%
+  merge(., opt100_samplesLoci_ill_gtseq_fecal, by = "samples") %>%
+  merge(., opt100_samplesLoci_ont_gtseq_fecal, by = "samples")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_fecal_summary <- merge(opt90_samplesLoci_ill_gtscore_fecal, opt90_samplesLoci_ont_gtscore_fecal, by = "samples") %>%
+  merge(., opt90_samplesLoci_ill_gtseq_fecal, by = "samples") %>%
+  merge(., opt90_samplesLoci_ont_gtseq_fecal, by = "samples")
+```
+
+### Dataframes
+
+#### 100% geno success
+
+##### gtscore
+
+```{r}
+optGenos100_ill_gtscore_fecal <- optimized_genos(genos_ill_gtscore_samplesFecal_lociDual, 20, 1.0)
+
+optGenos100_ont_gtscore_fecal <- optimized_genos(genos_ont_gtscore_samplesFecal_lociDual, 20, 1.0)
+```
+
+##### gtseq
+
+```{r}
+optGenos100_ill_gtseq_fecal <- optimized_genos(genos_ill_gtseq_samplesFecal_lociDual, 10, 1.0)
+
+optGenos100_ont_gtseq_fecal <- optimized_genos(genos_ont_gtseq_samplesFecal_lociDual, 10, 1.0)
+```
+
+#### 90% geno success
+
+##### gtscore
+
+```{r}
+optGenos90_ill_gtscore_fecal <- optimized_genos(genos_ill_gtscore_samplesFecal_lociDual, 20, 0.9)
+
+optGenos90_ont_gtscore_fecal <- optimized_genos(genos_ont_gtscore_samplesFecal_lociDual, 20, 0.9)
+```
+
+##### gtseq
+
+```{r}
+optGenos90_ill_gtseq_fecal <- optimized_genos(genos_ill_gtseq_samplesFecal_lociDual, 10, 0.9)
+
+optGenos90_ont_gtseq_fecal <- optimized_genos(genos_ont_gtseq_samplesFecal_lociDual, 10, 0.9)
+```
+
+# 6 Geno consistency
+
+Using the desired optimized set of genotypes, we can compare the consistency between Illumina and Nanopore genotype results
+
+## 6.1 Blood samples
+
+### 100% geno success
+
+#### gtscore
+
+We'll start by looking at the 20 blood samples + 122 loci w/100% genotype success using Illumina sequences + gtscore pipeline
+
+```{r}
+# Convert genotypes to long-format
+optGenos100_ill_gtscore_blood_l <- optGenos100_ill_gtscore_blood %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtscore_samplesBlood_lociDual_l <- genos_ont_gtscore_samplesBlood_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare100_illONT_optGenos_gtscore_blood <- merge(optGenos100_ill_gtscore_blood_l, genos_ont_gtscore_samplesBlood_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+```
+
+#### gtseq
+
+For gtseq, we'll use the Illumina blood genotypes w/10 samples + 56 loci w/100% genotypes
+
+```{r}
+# Convert genotypes to long-format
+optGenos100_ill_gtseq_blood_l <- optGenos100_ill_gtseq_blood %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtseq_samplesBlood_lociDual_l <- genos_ont_gtseq_samplesBlood_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare100_illONT_optGenos_gtseq_blood <- merge(optGenos100_ill_gtseq_blood_l, genos_ont_gtseq_samplesBlood_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+```
+
+### 90% geno success
+
+#### gtscore
+
+Using 20 samples + 131 loci w/genotypes for at least 90% of samples in Illumina results as a base
+
+```{r}
+# Convert genotypes to long-format
+optGenos90_ill_gtscore_blood_l <- optGenos90_ill_gtscore_blood %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtscore_samplesBlood_lociDual_l <- genos_ont_gtscore_samplesBlood_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare90_illONT_optGenos_gtscore_blood <- merge(optGenos90_ill_gtscore_blood_l, genos_ont_gtscore_samplesBlood_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ill_geno) ~ "NA",
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+```
+
+#### gtseq
+
+Using 10 samples + 94 loci w/genotypes for at least 90% of samples in Illumina results as a base
+
+```{r}
+# Convert genotypes to long-format
+optGenos90_ill_gtseq_blood_l <- optGenos90_ill_gtseq_blood %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtseq_samplesBlood_lociDual_l <- genos_ont_gtseq_samplesBlood_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare90_illONT_optGenos_gtseq_blood <- merge(optGenos90_ill_gtseq_blood_l, genos_ont_gtseq_samplesBlood_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+```
+
+### Summary
+
+```{r}
+genoCompare_illONT_blood_summary <- data.frame(
+  match = c("illONT_NA", "illONT_mismatch", "illONT_match"),
+  gtscore100 = table(genoCompare100_illONT_optGenos_gtscore_blood$match),
+  gtscore90 = table(genoCompare90_illONT_optGenos_gtscore_blood$match),
+  gtseq100 = table(genoCompare100_illONT_optGenos_gtseq_blood$match),
+  gtseq90 = table(genoCompare90_illONT_optGenos_gtseq_blood$match)
+) %>%
+  select(-ends_with("Var1")) %>%
+  column_to_rownames("match") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    samples = c("20", "20", "10", "10"),
+    loci = c("122", "131", "56", "94")
+  ) %>%
+  relocate(c(samples, loci)) %>%
+  mutate(
+    propNA = round(illONT_NA/(illONT_NA + illONT_match + illONT_mismatch), 2),
+    propMatch = round(illONT_match/(illONT_match + illONT_mismatch), 2),
+    propMismatch = round(illONT_mismatch/(illONT_match + illONT_mismatch), 2)
+  ) %>%
+  rowwise() %>%
+  mutate(
+    genosTotal = illONT_NA + illONT_match + illONT_mismatch,
+    genosCommon = illONT_match + illONT_mismatch
+  ) %>%
+  select(c(samples, loci, genosTotal, genosCommon, illONT_NA, propNA, illONT_mismatch, propMismatch, illONT_match, propMatch))
+```
+
+## 6.2 Fecal: samples vs. loci
+
+### 100% geno success
+
+#### gtscore
+
+We'll start by looking at the 20 blood samples + 122 loci w/100% genotype success using Illumina sequences + gtscore pipeline
+
+```{r}
+optGenos100_ill_gtscore_fecal_l <- optGenos100_ill_gtscore_fecal %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtscore_samplesFecal_lociDual_l <- genos_ont_gtscore_samplesFecal_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare100_illONT_optGenos_gtscore_fecal <- merge(optGenos100_ill_gtscore_fecal_l, genos_ont_gtscore_samplesFecal_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+
+table(genoCompare100_illONT_optGenos_gtscore_fecal$match)
+```
+
+#### gtseq
+
+For gtseq, we'll use the Illumina blood genotypes w/10 samples + 56 loci w/100% genotypes
+
+```{r}
+optGenos100_ill_gtseq_fecal_l <- optGenos100_ill_gtseq_fecal %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtseq_samplesFecal_lociDual_l <- genos_ont_gtseq_samplesFecal_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare100_illONT_optGenos_gtseq_fecal <- merge(optGenos100_ill_gtseq_fecal_l, genos_ont_gtseq_samplesFecal_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+
+table(genoCompare100_illONT_optGenos_gtseq_fecal$match)
+```
+
+### 90% geno success
+
+#### gtscore
+
+Using 20 samples + 131 loci w/genotypes for at least 90% of samples in Illumina results as a base
+
+```{r}
+optGenos90_ill_gtscore_fecal_l <- optGenos90_ill_gtscore_fecal %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtscore_samplesFecal_lociDual_l <- genos_ont_gtscore_samplesFecal_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare90_illONT_optGenos_gtscore_fecal <- merge(optGenos90_ill_gtscore_fecal_l, genos_ont_gtscore_samplesFecal_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ill_geno) ~ "NA",
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+
+table(genoCompare90_illONT_optGenos_gtscore_fecal$match)
+```
+
+#### gtseq
+
+Using 10 samples + 94 loci w/genotypes for at least 90% of samples in Illumina results as a base
+
+```{r}
+optGenos90_ill_gtseq_fecal_l <- optGenos90_ill_gtseq_fecal %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+genos_ont_gtseq_samplesFecal_lociDual_l <- genos_ont_gtseq_samplesFecal_lociDual %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique) %>%
+  select(-sampleID)
+
+# compare ill vs. ont genos
+genoCompare90_illONT_optGenos_gtseq_fecal <- merge(optGenos90_ill_gtseq_fecal_l, genos_ont_gtseq_samplesFecal_lociDual_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(ont_geno) ~ "NA",
+      ill_geno == ont_geno ~ "yes",
+      ill_geno != ont_geno ~ "no"
+      )
+    )
+
+table(genoCompare90_illONT_optGenos_gtseq_fecal$match)
+```
+
+### Summary
+
+```{r}
+genoCompare_illONT_fecal_summary <- data.frame(
+  match = c("NA", "illONT_mismatch", "illONT_match"),
+  gtscore100 = table(genoCompare100_illONT_optGenos_gtscore_fecal$match),
+  gtscore90 = table(genoCompare90_illONT_optGenos_gtscore_fecal$match),
+  gtseq100 = table(genoCompare100_illONT_optGenos_gtseq_fecal$match),
+  gtseq90 = table(genoCompare90_illONT_optGenos_gtseq_fecal$match)
+) %>%
+  select(-ends_with("Var1")) %>%
+  column_to_rownames("match") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    samples = c("20", "10", "20", "10"),
+    loci = c("122", "56", "131", "94")
+  ) %>%
+  relocate(c(samples, loci)) %>%
+  mutate(
+    propMismatch = round(illONT_mismatch/(illONT_match + illONT_mismatch), 2)
+  )
+```
+
+### Dataframes
+
+#### gtscore
+
+```{r}
+optGenos100_ill_gtscore_fecal <- optimized_genos(genos_ill_gtscore_samplesFecal_lociDual, 20)
+```
+
+#### gtseq
+
+```{r}
+
+```
+
+genoRate100 metadata, including whether samples have whole genome sequenced
+
+```{r}
+wholeGenomeSeqs <- read_excel("./04_tamRun4/DNASubmissionForm_MEW.xlsx",
+                              range = "A17:R44") %>%
+  as.data.frame() %>%
+  dplyr::rename("animalID" = "Animal ID") %>%
+  select(animalID)
+
+genoRate100_blood_md_10x <- genoRate100_blood_10x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  merge(., md_tamRun4, by = "sampleID") %>%
+  mutate(
+    wholeGenome = 
+      case_when(
+        animalID %in% wholeGenomeSeqs$animalID ~ "yes",
+        .default = "no"
+      )
+  ) %>%
+  relocate(wholeGenome, .after = sampleID)
+```
+
+# RESOURCES
+
+for optimizing samples/loci to include: 
+https://stackoverflow.com/questions/24016612/subset-of-data-frame-columns-to-maximize-complete-observations
+
+alternative approach:
+https://stackoverflow.com/questions/42858959/best-possible-subset-of-data-frame-without-na
+
+# SCRAPS
+
+works well; updated above to return df instead of print
+```{r}
+for (n in 20:30) {
+  is_na_vector <- ifelse(is.na(df), 0, 1)
+
+  crossprod_vector <- crossprod(is_na_vector)
+  col_sums <- colSums(crossprod_vector)
+
+  x_df <- as.data.frame(df)  # to get meaningful colnames
+  res <- x_df[, rank(-col_sums, ties.method = "first") <= n]
+
+  # Print the value of n and the number of rows in the na.omit result for each iteration
+  cat("For sample subset =", n, "loci w/complete genos =", nrow(na.omit(res)), "\n")
+}
+```
+
+
+## Blood samples
+
+### 10x coverage
+
+Filtering to 10x coverage gives 27 blood samples + 71 loci with 100% genotype success + 3 blood samples with whole-genome seqs
+
+```{r}
+passSamples_blood_10x <- sampleSum_blood_10x %>%
+  filter(GenotypeRate >= 0.5)
+
+genoRate100_blood_10x <- genos_10x %>%
+  replace(., .==0, NA) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  # filter to blood samples w/ >50% geno success
+  filter(sampleID %in% passSamples_blood_10x$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  # remove species-specific loci
+  rownames_to_column("locus") %>%
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  column_to_rownames("locus") %>%
+  # filter to only samples/loci w/100% genotype success
+  na.omit()
+```
+
+### 30x coverage
+
+If we want 100% genotype success for each locus, filtering to 30x coverage gives 27 blood samples + 71 loci with 100% genotype success + 3 blood samples with whole-genome seqs (same as 10x)
+
+```{r}
+passSamples_blood_30x <- sampleSum_blood_30x %>%
+  filter(GenotypeRate >= 0.5)
+
+genoRate100_blood_30x <- genos_30x %>%
+  replace(., .==0, NA) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  # filter to blood samples w/ >50% geno success
+  filter(sampleID %in% passSamples_blood_30x$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  # remove species-specific loci
+  rownames_to_column("locus") %>%
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  column_to_rownames("locus") %>%
+  # filter to SAMPLES with no missing genos
+  select_if(~mean(is.na(.)) <= 0)
+
+genoRate90_blood_30x <- genos_30x %>%
+  replace(., .==0, NA) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  # filter to blood samples w/ >50% geno success
+  filter(sampleID %in% passSamples_blood_30x$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  # filter to LOCI with <= 10% missing genos
+  select_if(~mean(is.na(.)) <= 0.1) %>%
+  t() %>%
+  as.data.frame() %>%
+  # remove species-specific loci
+  rownames_to_column("locus") %>%
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  column_to_rownames("locus") %>%
+  # filter to SAMPLES with <= 10% missing genos
+  select_if(~mean(is.na(.)) <= 0.1)
+```
+
+genoRate100 metadata, including whether samples have whole genome sequenced
+
+```{r}
+wholeGenomeSeqs <- read_excel("./04_tamRun4/DNASubmissionForm_MEW.xlsx",
+                              range = "A17:R44") %>%
+  as.data.frame() %>%
+  dplyr::rename("animalID" = "Animal ID") %>%
+  select(animalID)
+
+genoRate100_blood_md_30x <- genoRate100_blood_30x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  merge(., md_tamRun4, by = "sampleID") %>%
+  mutate(
+    wholeGenome = 
+      case_when(
+        animalID %in% wholeGenomeSeqs$animalID ~ "yes",
+        .default = "no"
+      )
+  ) %>%
+  relocate(wholeGenome, .after = sampleID)
+
+genoRate90_blood_md_30x <- genoRate90_blood_30x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  merge(., md_tamRun4, by = "sampleID") %>%
+  mutate(
+    wholeGenome = 
+      case_when(
+        animalID %in% wholeGenomeSeqs$animalID ~ "yes",
+        .default = "no"
+      )
+  ) %>%
+  relocate(wholeGenome, .after = sampleID)
+```
+
+## Fecal samples
+
+### 10x coverage
+
+Filtering to 10x coverage gives 26 samples + 53 loci with 100% genotype success + 3 fecal samples with whole-genome seqs
+
+```{r}
+passSamples_fecal_10x <- sampleSum_fecal_10x %>%
+  filter(GenotypeRate >= 0.5)
+
+genoRate100_fecal_10x <- genos_10x %>%
+  replace(., .==0, NA) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  # filter to fecal samples w/ >50% geno success
+  filter(sampleID %in% passSamples_fecal_10x$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  # remove species-specific loci
+  rownames_to_column("locus") %>%
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  column_to_rownames("locus") %>%
+  # filter to only samples/loci w/100% genotype success
+  na.omit()
+```
+
+genoRate100 metadata, including whether samples have whole genome sequenced
+
+```{r}
+wholeGenomeSeqs <- read_excel("./04_tamRun4/DNASubmissionForm_MEW.xlsx",
+                              range = "A17:R44") %>%
+  as.data.frame() %>%
+  dplyr::rename("animalID" = "Animal ID") %>%
+  select(animalID)
+
+genoRate100_fecal_md_10x <- genoRate100_fecal_10x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  merge(., md_tamRun4, by = "sampleID") %>%
+  mutate(
+    wholeGenome = 
+      case_when(
+        animalID %in% wholeGenomeSeqs$animalID ~ "yes",
+        .default = "no"
+      )
+  ) %>%
+  relocate(wholeGenome, .after = sampleID)
+```
+
+### 30x coverage
+
+Filtering to 30x coverage gives 26 samples + 53 loci with 100% genotype success + 3 fecal samples with whole-genome seqs (same as 10x)
+
+```{r}
+passSamples_fecal_30x <- sampleSum_fecal_30x %>%
+  filter(GenotypeRate >= 0.5)
+
+genoRate100_fecal_30x <- genos_30x %>%
+  replace(., .==0, NA) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  # filter to fecal samples w/ >50% geno success
+  filter(sampleID %in% passSamples_fecal_30x$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  # remove species-specific loci
+  rownames_to_column("locus") %>%
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  column_to_rownames("locus") %>%
+  # filter to only samples/loci w/100% genotype success
+  na.omit()
+
+genoRate90_fecal_30x <- genos_30x %>%
+  replace(., .==0, NA) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  # filter to blood samples w/ >50% geno success
+  filter(sampleID %in% passSamples_fecal_30x$sampleID) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame() %>%
+  # remove species-specific loci
+  rownames_to_column("locus") %>%
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  column_to_rownames("locus") %>%
+  # filter to samples with < 10% missing genos
+  select_if(~mean(is.na(.)) <= 0.1)
+```
+
+genoRate100 metadata, including whether samples have whole genome sequenced
+
+```{r}
+wholeGenomeSeqs <- read_excel("./04_tamRun4/DNASubmissionForm_MEW.xlsx",
+                              range = "A17:R44") %>%
+  as.data.frame() %>%
+  dplyr::rename("animalID" = "Animal ID") %>%
+  select(animalID)
+
+genoRate100_fecal_md_30x <- genoRate100_fecal_30x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  merge(., md_tamRun4, by = "sampleID") %>%
+  mutate(
+    wholeGenome = 
+      case_when(
+        animalID %in% wholeGenomeSeqs$animalID ~ "yes",
+        .default = "no"
+      )
+  ) %>%
+  relocate(wholeGenome, .after = sampleID)
+
+genoRate90_fecal_md_30x <- genoRate90_fecal_30x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  merge(., md_tamRun4, by = "sampleID") %>%
+  mutate(
+    wholeGenome = 
+      case_when(
+        animalID %in% wholeGenomeSeqs$animalID ~ "yes",
+        .default = "no"
+      )
+  ) %>%
+  relocate(wholeGenome, .after = sampleID)
+```
+
+# Blood: loci vs. samples
+
+## Define function
+
+```{r}
+# number of samples genotyped at propLoci (0 to 1.0) of 2 to 140 loci
+optimize_lociSamples <- function(df, propLoci) {
+  # reformat genos
+  df <- df %>%
+    t() %>%
+    as.data.frame()
+  
+  # Initialize an empty list to store results
+  result_list <- list()
+
+  for (n in 2:140) {
+    # create matrix where NAs are 0 and non-NAs are 1
+    is_na_vector <- ifelse(is.na(df), 0, 1)
+
+    crossprod_vector <- crossprod(is_na_vector)
+    col_sums <- colSums(crossprod_vector)
+
+    x_df <- as.data.frame(df)  # to get meaningful colnames
+    res <- x_df[, rank(-col_sums, ties.method = "first") <= n]
+
+    # Store the result in the list
+    result_list[[as.character(n)]] <- c(n, nrow(res[which(rowMeans(!is.na(res)) >= propLoci), ]))
+  }
+
+  # Convert the list to a dataframe
+  result_df <- do.call(rbind, result_list)
+
+  # Rename columns
+  colnames(result_df) <- c("loci", "samples")
+
+  return(result_df)
+}
+```
+
+## Identify optimal sample/loci combos
+
+### gtscore
+
+```{r}
+# samples genotyped at 100% of loci among subsets of 1 to 140 loci
+opt100_lociSamples_ill_gtscore <-
+  optimize_lociSamples(genos_ill_gtscore_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("samples100_ill.gtscore" = "samples")
+
+opt100_samplesLoci_ont_gtscore <- optimize_samplesLoci(genos_ont_gtscore_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ont.gtscore" = "loci")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_ill_gtscore <- optimize_samplesLoci(genos_ill_gtscore_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ill.gtscore" = "loci")
+
+opt90_samplesLoci_ont_gtscore <- optimize_samplesLoci(genos_ont_gtscore_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ont.gtscore" = "loci")
+```
+
+### gtseq
+
+```{r}
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_ill_gtseq <- optimize_samplesLoci(genos_ill_gtseq_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ill.gtseq" = "loci")
+
+opt100_samplesLoci_ont_gtseq <- optimize_samplesLoci(genos_ont_gtseq_samplesBlood_lociDual, 1) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci100_ont.gtseq" = "loci")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_ill_gtseq <- optimize_samplesLoci(genos_ill_gtseq_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ill.gtseq" = "loci")
+
+opt90_samplesLoci_ont_gtseq <- optimize_samplesLoci(genos_ont_gtseq_samplesBlood_lociDual, 0.9) %>%
+  as.data.frame() %>%
+  dplyr::rename("loci90_ont.gtseq" = "loci")
+```
+
+### Summaries
+
+```{r}
+# loci genotyped at 100% of samples among subsets of 10 to 30 samples
+opt100_samplesLoci_summary <- merge(opt100_samplesLoci_ill_gtscore, opt100_samplesLoci_ont_gtscore, by = "samples") %>%
+  merge(., opt100_samplesLoci_ill_gtseq, by = "samples") %>%
+  merge(., opt100_samplesLoci_ont_gtseq, by = "samples")
+
+# loci genotyped at 90% of samples among subsets of 10 to 30 samples
+opt90_samplesLoci_summary <- merge(opt90_samplesLoci_ill_gtscore, opt90_samplesLoci_ont_gtscore, by = "samples") %>%
+  merge(., opt90_samplesLoci_ill_gtseq, by = "samples") %>%
+  merge(., opt90_samplesLoci_ont_gtseq, by = "samples")
+```
