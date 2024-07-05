@@ -1,8 +1,12 @@
 # ignore everything (dirs, files, sub-dirs, sub-files)
 *
-# but do not ignore .gitignore file, .Rmd files, or README (override)
+# but do not ignore .gitignore file
 !.gitignore
-!*.Rmd
+# and do not ignore the files below (override)
 !README.md
+!*.Rmd
+!*.R
+!*.pl
 # apply override to all dirs recursively
 !**/
+my_sourceScripts
