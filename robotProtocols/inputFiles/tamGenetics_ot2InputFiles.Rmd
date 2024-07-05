@@ -31,9 +31,11 @@ library(readxl)
 
 ```{r}
 # Labware
+deepwellPlate <- "vwr_96_wellplate_1000ul"
 nestPlate <- "nest_96_wellplate_100ul_pcr_full_skirt"
 basePlate <- "denvillewithaxygenbase_96_wellplate_200ul"
 tuberack <- "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
+reservoir_12well <- "nest_12_reservoir_15ml"
 magblock <- "magnetic_module_gen2"
 
 # Pipettes
@@ -67,6 +69,21 @@ colValues_tuberack <- rep(1:6, times = 4) %>%
 # Well values
 wellValues_plate <- str_c(rowValues_plate, colValues_plate)
 wellValues_tuberack <- str_c(rowValues_tuberack, colValues_tuberack)
+```
+
+## 3.3 csv headers
+
+```{r}
+transferHeaders <- c("ot2set",
+                 "reagent",
+                 "source_labware",
+                 "source_slot",
+                 "source_well",
+                 "asp_height",
+                 "dest_labware",
+                 "dest_slot",
+                 "dest_well",
+                 "transfer_volume")
 ```
 
 # 4 OT2 input for PRIMER protocols
@@ -122,10 +139,10 @@ primerPool3 <- primerPool_splitsOriginal %>%
   filter(primerPool == 3)
 
 # Primer list post-optimization 2
-primers_postOpt2 <- read.csv("./primers/03_lociChoices/primerList_postOpt2.csv")
+primers_postOpt2 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
 
 # Dilution plate post-optimization 2
-dilutionPlate <- read.csv("./primers/03_lociChoices/dilutionPlate_postOpt2.csv")
+dilutionPlate <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3_toDilute.csv")
 ```
 
 ### 4.2.2 Primer dilutions
@@ -493,7 +510,7 @@ uM_finalAdjust_ot2 <- data.frame(
 
 Combine dilutions, split primer pools, primer pool 1 creation, SDZ/laLab subsets, and uM adjustments:
 
-```{r}
+```{r, include=FALSE}
 ot2_final_plusPlates <- rbind(splitPools_ot2, uM_splitPoolAdjust_ot2, primerPool1_ot2, sdzLA_subsets_ot2, uM_finalAdjust_ot2) %>%
   mutate(transfer_volume = round(as.numeric(transfer_volume), digits = 1)) %>%
   select(-bp3index) %>%
@@ -528,7 +545,7 @@ ot2_final_noSet_noPlates <- ot2_final_plusPlates %>%
 
 Export
 
-```{r}
+```{r, include=FALSE}
 # comma-separated string with end-of-line delimiter
 ot2_string <- format_delim(ot2_final_plusPlates,
                            delim = ",",
@@ -573,6 +590,354 @@ sink()
 # csv file
 write.csv(ot2_final_splitPoolsOnly, "./robotProtocols/inputFiles/tamGenetics_primerPoolingOnly_postOpt2_forOT2.csv", row.names = F)
 ```
+
+## 4.3 Indexing primer plates
+
+```{r}
+indexPrimers <- read_excel("./primers/01_primerOrders/indexingAdapters_illumina.xlsx") %>%
+  as.data.frame() %>%
+  rename("well" = "Well Position",
+         "name" = "Name",
+         "sequence" = "Sequence")
+
+indexPrimers_i5List <- indexPrimers %>%
+  filter(str_detect(name, "S"))
+indexPrimers_i7List <- indexPrimers %>%
+  filter(str_detect(name, "N"))
+
+indexPrimers_setA <- data.frame(
+  transferID = 1:96,
+  i5 = rep(c("S502",
+             "S503",
+             "S505",
+             "S506",
+             "S507",
+             "S508",
+             "S510",
+             "S511"), 12),
+  i7 = c(rep("N701", 8),
+         rep("N702", 8),
+         rep("N703", 8),
+         rep("N704", 8),
+         rep("N705", 8),
+         rep("N706", 8),
+         rep("N707", 8),
+         rep("N710", 8),
+         rep("N711", 8),
+         rep("N712", 8),
+         rep("N714", 8),
+         rep("N715", 8))
+  ) %>%
+  mutate(
+    indexCombo = str_c(i5, "_", i7),
+    dest_well = wellValues_plate
+  )
+
+indexPrimers_setB <- data.frame(
+  transferID = 1:96,
+  i5 = rep(c("S502",
+             "S503",
+             "S505",
+             "S506",
+             "S507",
+             "S508",
+             "S510",
+             "S511"), 12),
+  i7 = c(rep("N716", 8),
+         rep("N718", 8),
+         rep("N719", 8),
+         rep("N720", 8),
+         rep("N721", 8),
+         rep("N722", 8),
+         rep("N723", 8),
+         rep("N724", 8),
+         rep("N726", 8),
+         rep("N727", 8),
+         rep("N728", 8),
+         rep("N729", 8))
+  ) %>%
+  mutate(
+    indexCombo = str_c(i5, "_", i7),
+    dest_well = wellValues_plate
+  )
+
+indexPrimers_setC <- data.frame(
+  transferID = 1:96,
+  i5 = rep(c("S513",
+             "S515",
+             "S516",
+             "S517",
+             "S518",
+             "S520",
+             "S521",
+             "S522"), 12),
+  i7 = c(rep("N701", 8),
+         rep("N702", 8),
+         rep("N703", 8),
+         rep("N704", 8),
+         rep("N705", 8),
+         rep("N706", 8),
+         rep("N707", 8),
+         rep("N710", 8),
+         rep("N711", 8),
+         rep("N712", 8),
+         rep("N714", 8),
+         rep("N715", 8))
+  ) %>%
+  mutate(
+    indexCombo = str_c(i5, "_", i7),
+    dest_well = wellValues_plate
+  )
+
+indexPrimers_setD <- data.frame(
+  transferID = 1:96,
+  i5 = rep(c("S513",
+             "S515",
+             "S516",
+             "S517",
+             "S518",
+             "S520",
+             "S521",
+             "S522"), 12),
+  i7 = c(rep("N716", 8),
+         rep("N718", 8),
+         rep("N719", 8),
+         rep("N720", 8),
+         rep("N721", 8),
+         rep("N722", 8),
+         rep("N723", 8),
+         rep("N724", 8),
+         rep("N726", 8),
+         rep("N727", 8),
+         rep("N728", 8),
+         rep("N729", 8))
+  ) %>%
+  mutate(
+    indexCombo = str_c(i5, "_", i7),
+    dest_well = wellValues_plate
+  )
+```
+
+### Check combos
+
+```{r}
+indexPrimers_combosAll <- apply(expand.grid(indexPrimers_i5List[, "name"], indexPrimers_i7List[, "name"]), 1, paste, collapse = "_") %>%
+  as.data.frame() %>%
+  rename("indexCombo" = ".") %>%
+  mutate(
+    i5 = str_sub(indexCombo, 1, 4),
+    i7 = str_sub(indexCombo, 6, -1)
+  )
+length(unique(indexPrimers_combosAll$indexCombo)) # 468 unique combos
+
+indexPrimers_combosSetABCD <- rbind(indexPrimers_setA,
+                                indexPrimers_setB,
+                                indexPrimers_setC,
+                                indexPrimers_setD)
+length(unique(indexPrimers_combosSetABCD$indexCombo)) # 384 unique set combos
+
+indexPrimers_combosCustom <- indexPrimers_combosAll %>%
+  filter(!indexCombo %in% indexPrimers_combosSetABCD$indexCombo)
+length(unique(indexPrimers_combosCustom$indexCombo)) # 84 unique custom combos
+```
+
+### Create index plates
+
+#### Individual plates
+
+```{r}
+# set source wells
+indexPlates_sourceWells <- data.frame(
+  name = c(indexPrimers_combosAll[, c("i5")], indexPrimers_combosAll[, c("i7")])
+) %>%
+  merge(., indexPrimers[, c("name", "well")], by = "name") %>%
+  rename("source_well" = "well") %>%
+  distinct()
+
+# set A
+indexPlate_setA_i5 <- indexPrimers_setA %>%
+  select(c("i5", "dest_well")) %>%
+  rename("name" = "i5")
+indexPlate_setA_i7 <- indexPrimers_setA %>%
+  select(c("i7", "dest_well")) %>%
+  rename("name" = "i7")
+
+indexPlate_setA <- rbind(indexPlate_setA_i5,
+                         indexPlate_setA_i7) %>%
+  merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
+  mutate(
+    ot2set = "indexSetA",
+    dest_slot = 2
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
+
+# set B
+indexPlate_setB_i5 <- indexPrimers_setB %>%
+  select(c("i5", "dest_well")) %>%
+  rename("name" = "i5")
+indexPlate_setB_i7 <- indexPrimers_setB %>%
+  select(c("i7", "dest_well")) %>%
+  rename("name" = "i7")
+
+indexPlate_setB <- rbind(indexPlate_setB_i5,
+                         indexPlate_setB_i7) %>%
+  merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
+  mutate(
+    ot2set = "indexSetB",
+    dest_slot = 3
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
+
+# set C
+indexPlate_setC_i5 <- indexPrimers_setC %>%
+  select(c("i5", "dest_well")) %>%
+  rename("name" = "i5")
+indexPlate_setC_i7 <- indexPrimers_setC %>%
+  select(c("i7", "dest_well")) %>%
+  rename("name" = "i7")
+
+indexPlate_setC <- rbind(indexPlate_setC_i5,
+                         indexPlate_setC_i7) %>%
+  merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
+  mutate(
+    ot2set = "indexSetC",
+    dest_slot = 5
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
+
+# set D
+indexPlate_setD_i5 <- indexPrimers_setD %>%
+  select(c("i5", "dest_well")) %>%
+  rename("name" = "i5")
+indexPlate_setD_i7 <- indexPrimers_setD %>%
+  select(c("i7", "dest_well")) %>%
+  rename("name" = "i7")
+
+indexPlate_setD <- rbind(indexPlate_setD_i5,
+                         indexPlate_setD_i7) %>%
+  merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
+  mutate(
+    ot2set = "indexSetD",
+    dest_slot = 6
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
+
+# set E (custom)
+indexPrimers_setE <- indexPrimers_combosCustom %>%
+  mutate(
+    transferID = row_number(),
+    i5 = str_sub(indexCombo, 1, 4),
+    i7= str_sub(indexCombo, 6, -1),
+    dest_well = wellValues_plate[1:length(transferID)]
+  ) %>%
+  relocate(indexCombo, .after = i7)
+
+indexPlate_setE_i5 <- indexPrimers_setE %>%
+  select(c("i5", "dest_well")) %>%
+  rename("name" = "i5")
+indexPlate_setE_i7 <- indexPrimers_setE %>%
+  select(c("i7", "dest_well")) %>%
+  rename("name" = "i7")
+
+indexPlate_setE <- rbind(indexPlate_setE_i5,
+                         indexPlate_setE_i7) %>%
+  merge(., indexPlates_sourceWells, by = "name", all.x = T) %>%
+  mutate(
+    ot2set = "indexSetE",
+    dest_slot = 9
+  ) %>%
+  arrange(name, str_sub(dest_well, 1, 1), as.numeric(str_sub(dest_well, 2, -1)))
+```
+
+#### Full transfer info
+
+```{r}
+indexPlates_transferInfo <- rbind(
+  indexPlate_setA,
+  indexPlate_setB,
+  indexPlate_setC,
+  indexPlate_setD,
+  indexPlate_setE
+) %>%
+  mutate(
+    ot2set = ot2set,
+    reagent = name,
+    source_labware = deepwellPlate,
+    source_slot = 1,
+    source_well = source_well,
+    asp_height = 1,
+    dest_labware = nestPlate,
+    dest_slot = dest_slot,
+    dest_well = dest_well,
+    transfer_volume = 5
+  ) %>%
+  select(c("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "transfer_volume"))
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+indexPlates_transferInfo_string <- format_delim(indexPlates_transferInfo,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/illuminaIndexPlates_setsABCDE_string.txt")
+
+indexPlates_transferInfo_string
+
+sink()
+
+# csv file
+write.csv(indexPlates_transferInfo, "./robotProtocols/inputFiles/illuminaIndexPlates_setsABCDE.csv", row.names = F)
+```
+
+Export minus set A
+
+```{r}
+indexPlates_transferInfo_setsBCDE <- indexPlates_transferInfo %>%
+  filter(ot2set != "indexSetA")
+
+# comma-separated string with end-of-line delimiter
+indexPlates_transferInfo_setsBCDE_string <- format_delim(indexPlates_transferInfo_setsBCDE,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/illuminaIndexPlates_setsBCDE_string.txt")
+
+indexPlates_transferInfo_setsBCDE_string
+
+sink()
+
+# csv file
+write.csv(indexPlates_transferInfo, "./robotProtocols/inputFiles/illuminaIndexPlates_setsBCDE.csv", row.names = F)
+```
+
+Export set E only
+
+```{r}
+indexPlates_transferInfo_setE <- indexPlates_transferInfo %>%
+  filter(ot2set == "indexSetE") %>%
+  mutate(dest_slot = 2) %>%
+  arrange(str_sub(reagent, 1, 1),
+          as.numeric(str_sub(dest_well, 2, -1)),
+          str_sub(dest_well, 1, 1))
+
+# comma-separated string with end-of-line delimiter
+indexPlates_transferInfo_setE_string <- format_delim(indexPlates_transferInfo_setE,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/indexPlates_transferInfo_setE_string.txt")
+
+indexPlates_transferInfo_setE_string
+
+sink()
+
+# csv file
+write.csv(indexPlates_transferInfo, "./robotProtocols/inputFiles/indexPlates_transferInfo_setE.csv", row.names = F)
+```
+
 
 # 5 OT2 input for SAMPLES 
 
@@ -687,6 +1052,8 @@ xtns_toSkip_onsiteChecks <- data.frame(
             "hair_p4.A1_e2",
             "hair_p4.H1_e2",
             # hair xtn tubes
+            "hair_t6_e1",
+            "hair_t6_e2",
             "hair_tx15A_e1",
             "hair_tx25A_e1",
             "hair_tx20A_e1",
@@ -749,6 +1116,10 @@ Update 'xtnRemaining' and add 'xtnPlate_beadsPresent'.
 
 There were two tamTiger xtn plates, but the original xtn records don't specify which sample is on which plate - I was able to find this info in past lab notebooks; update this info here as well.
 
+I'm also updating the entry for hair_tx47A/55A - both these extractions were an option for this animalID's hair sample, but I chose 47A for the spot in previous runs. 
+
+Found hair_t6_e1 w/volume remaining - also updating here
+
 ```{r}
 xtnsBlood_updated <- xtnsBlood_27July2023 %>%
   mutate(
@@ -778,15 +1149,27 @@ xtnsHair_updated <- xtnsHair_27July2023 %>%
   relocate(xtnPlate_beadsPresent, .before = xtnNotes) %>%
   relocate(c("xtnLoc", "eltn"), .after = xtnID) %>%
   mutate(
+    xtnRemaining = case_when(
+      xtnID == "hair_t6_e1" ~ "yes",
+      .default = xtnRemaining
+    ),
     xtnLoc = case_when(
       (xtnLoc == "ptamTiger" & lysisLoc %in% c("t53", "t54")) ~ "ptamTiger1",
       (xtnLoc == "ptamTiger" & lysisLoc %in% c("t55", "t56")) ~ "ptamTiger2",
+      xtnLoc == "tx47A;55A" ~ "tx47A",
+      xtnLoc == "tx47B;55B" ~ "tx47B",
       .default = xtnLoc
     ),
     xtnID = case_when(
       xtnLoc == "ptamTiger1" ~ gsub("ptamTiger", "ptamTiger1", xtnID),
       xtnLoc == "ptamTiger2" ~ gsub("ptamTiger", "ptamTiger2", xtnID),
+      xtnLoc == "tx47A" ~ "hair_tx47A_e1",
+      xtnLoc == "tx47B" ~ "hair_tx47B_e2",
       .default = xtnID
+    ),
+    xtnNotes = case_when(
+      str_detect(xtnLoc, "tx47") ~ "originally had both tx47 and tx55 in this spot; may need to check that capture date is correct (all other metadata should be fine)",
+      .default = xtnNotes
     )
   )
 
@@ -818,22 +1201,7 @@ xtns_toAdjust <- xtnsAll_updated %>%
 
 ## 5.2 PCR1
 
-### 5.2.1 csv headers
-
-```{r}
-pcr1Headers <- c("ot2set",
-                 "reagent",
-                 "source_labware",
-                 "source_slot",
-                 "source_well",
-                 "asp_height",
-                 "dest_labware",
-                 "dest_slot",
-                 "dest_well",
-                 "transfer_volume")
-```
-
-### 5.2.2 30x3
+### 5.2.1 30x3
 
 #### Xtns
 
@@ -946,6 +1314,18 @@ bfh_xtns <- bfh_samples %>%
   arrange(as.numeric(ID))
 ```
 
+Export xtn info
+
+```{r}
+md_bfh <- bfh_xtns %>%
+  mutate(wellID = row_number()) %>%
+  relocate(wellID) %>%
+  select(-ID)
+
+write.csv(md_bfh, "./04_tamRun4/tamRun4_metadata.csv", row.names = F)
+```
+
+
 #### Transfer info
 
 ##### Xtn tube source wells
@@ -1036,7 +1416,7 @@ bfh_transferInfo_pp2 <- bfh_xtns %>%
       .default = 4
     )
   ) %>%
-  select(pcr1Headers) %>%
+  select(transferHeaders) %>%
   arrange(ot2set) %>%
   mutate(id = row_number())
 
@@ -1057,7 +1437,7 @@ Blood samples only require 2ul xtn volume, so need to add 2ul water to match the
 bfh_pcr1_waterTransfer <- data.frame(
   ot2set = rep("set8_water.mm", 8),
   reagent = "nf-water",
-  source_labware = pcrPlate,
+  source_labware = basePlate,
   source_slot = 6,
   source_well = "A1",
   asp_height = 1,
@@ -1066,12 +1446,12 @@ bfh_pcr1_waterTransfer <- data.frame(
   dest_well = rep(c("A1", "A2", "A3", "A4"), 2),
   transfer_volume = 2
 ) %>%
-  select(pcr1Headers)
+  select(transferHeaders)
 
 bfh_pcr1_mmTransfer <- data.frame(
   ot2set = rep("set8_water.mm", 24),
   reagent = "mastermix",
-  source_labware = pcrPlate,
+  source_labware = basePlate,
   source_slot = 6,
   source_well = c(rep("A2", 12), rep("A3", 12)),
   asp_height = 1,
@@ -1080,7 +1460,7 @@ bfh_pcr1_mmTransfer <- data.frame(
   dest_well = rep(grep("A", wellValues_plate, value = T), 2),
   transfer_volume = 6
 ) %>%
-  select(pcr1Headers)
+  select(transferHeaders)
 ```
 
 #### Full OT2 input
@@ -1110,7 +1490,7 @@ sink()
 write.csv(bfh_pcr1_ot2Input, "./robotProtocols/inputFiles/30x3_pcr1setup_forOT2.csv", row.names = F)
 ```
 
-### 5.2.3 tamGenetics
+### 5.2.2 tamGenetics
 
 #### Plate 1 & 2 (blood samples)
 
@@ -1181,7 +1561,7 @@ tamGenetics_xtnTransfer_p1 <- tamGenetics_xtns_p1 %>%
       .default = 4
     )
   ) %>%
-  select(pcr1Headers) %>%
+  select(transferHeaders) %>%
   arrange(ot2set)
 ```
 
@@ -1200,7 +1580,7 @@ tamGenetics_mmTransfer_pcr1_p1 <- data.frame(
   dest_well = grep("A", wellValues_plate, value = T),
   transfer_volume = 8
   ) %>%
-  select(pcr1Headers)
+  select(transferHeaders)
 ```
 
 ##### Plate 2 xtn transfer
@@ -1268,7 +1648,7 @@ tamGenetics_xtnTransfer_p2 <- tamGenetics_xtns_p2 %>%
       .default = 4
     )
   ) %>%
-  select(pcr1Headers) %>%
+  select(transferHeaders) %>%
   arrange(ot2set)
 ```
 
@@ -1287,7 +1667,7 @@ tamGenetics_mmTransfer_pcr1_p2 <- data.frame(
   dest_well = grep("A", wellValues_plate, value = T),
   transfer_volume = 8
   ) %>%
-  select(pcr1Headers)
+  select(transferHeaders)
 ```
 
 ##### OT2 transfer info
@@ -1317,7 +1697,7 @@ tamGenetics_pcr1_p12_string
 sink()
 
 # csv file
-write.csv(tamGenetics_pcr1_p12_string, "./robotProtocols/inputFiles/tamGenetics_pcr1setup_forOT2_p12.csv", row.names = F)
+write.csv(tamGenetics_pcr1_p12, "./robotProtocols/inputFiles/tamGenetics_pcr1setup_forOT2_p12.csv", row.names = F)
 ```
 
 #### Strip 1 sample list (manual)
@@ -1403,7 +1783,7 @@ tamGenetics_xtnTransfer_p3a <- tamGenetics_xtns_p3ab %>%
     )
   ) %>%
   filter(ot2set != "EXCLUDE") %>%
-  select(pcr1Headers) %>%
+  select(transferHeaders) %>%
   arrange(ot2set) %>%
   mutate(id = row_number())
 
@@ -1431,7 +1811,7 @@ tamGenetics_mmTransfer_pcr1_p3ab <- data.frame(
   dest_well = rep(grep("A", wellValues_plate, value = T), 2),
   transfer_volume = 6
   ) %>%
-  select(pcr1Headers)
+  select(transferHeaders)
 ```
 
 ##### OT2 transfer info
@@ -1561,13 +1941,14 @@ tamGenetics_hairTubes.ptamTiger2 <- tamGenetics_xtns_ptamTiger2 %>%
   filter(str_detect(xtnID, "hair_t"))
 ```
 
-**all plate xtns for pcr1Plate4ab**
+###### All plate xtns for pcr1Plate4ab
 
 ```{r}
 # assign source wells for tube xtns originally in plates
-tamGenetics_sourceWells_hairTubes.p4ptamTiger12 <- rbind(tamGenetics_hairTubes.xtnPlate4,
-                                  tamGenetics_hairTubes.ptamTiger1,
-                                  tamGenetics_hairTubes.ptamTiger2)  %>%
+tamGenetics_sourceWells_hairTubes.p4ptamTiger12 <- rbind(
+  tamGenetics_hairTubes.xtnPlate4,
+  tamGenetics_hairTubes.ptamTiger1,
+  tamGenetics_hairTubes.ptamTiger2)  %>%
   mutate(
     source_well.t = wellValues_tuberack[1:length(xtnID)]
   )
@@ -1581,13 +1962,13 @@ tamGenetics_xtnTransfer_pcr1Plate4ab_plateXtns <- rbind(tamGenetics_xtns_xtnPlat
   select(c("transferID", "sampleType_animalID", "sampleType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnPlate_beadsPresent", "source_well.t"))
 ```
 
-**xtn tubes not originally in xtnPlates**
+###### Xtn tubes not originally in xtnPlates
 
 78 wells are taken up by xtns from xtnPlate4, xtnPlatetamTiger1, and xtnPlatetamTiger2. This leaves 18 wells to be filled with xtns not originally in xtn plates.
 
 ```{r}
 # number of wells available in pcr1Plate4ab after plate xtns
-wellsRemaining_pcr1Plate41b <- 96 - length(tamGenetics_xtnTransfer_pcr1Plate4ab_plateXtns$xtnID) # 18
+wellsRemaining_pcr1Plate4ab <- 96 - length(tamGenetics_xtnTransfer_pcr1Plate4ab_plateXtns$xtnID) # 18
 
 # xtn list for those not originally in xtn plates
 tamGenetics_nonPlateHairXtns <- xtnsAll_updated %>%
@@ -1596,53 +1977,71 @@ tamGenetics_nonPlateHairXtns <- xtnsAll_updated %>%
   filter(!str_c("hair_", animalID) %in% tamGenetics_xtns_p3ab$sampleType_animalID) %>%
   # remove tubes in plate xtns for pcr1Plate4ab
   filter(!str_c("hair_", animalID) %in% tamGenetics_xtnTransfer_pcr1Plate4ab_plateXtns$sampleType_animalID) %>%
-  filter(eltn == "e1")
+  filter(eltn == "e1") %>%
+  filter(!duplicated(animalID))
 
-# assign source wells for tubes to include in pcr1Plate4ab
-## number of tubes already present from xtnPlates
-wellValues_tuberack_toExclude <- sum(!is.na(tamGenetics_xtnTransfer_plateXtns$source_well.t))
+tamGenetics_nonPlateHairXtns_remaining <- tamGenetics_nonPlateHairXtns %>%
+  filter(xtnRemaining == "yes")
 
-## assign source wells
-tamGenetics_nonPlateHairXtns_1to18_forpcr1Plate4ab <- tamGenetics_nonPlateHairXtns[1:as.numeric(wellsRemaining_pcr1Plate41b),] %>%
+# number of tubes already present from xtnPlate tube xtns
+wellValues_tuberack_toExclude <- sum(!is.na(tamGenetics_xtnTransfer_pcr1Plate4ab_plateXtns$source_well.t))
+
+# choose tubes to include in pcr1Plate4ab & assign source wells
+tamGenetics_nonPlateHairXtns_pcr1Plate4ab <- tamGenetics_nonPlateHairXtns_remaining[1:as.numeric(wellsRemaining_pcr1Plate4ab),] %>%
   mutate(
     sampleType_animalID = str_c(sampleType, "_", animalID),
     source_well.t = wellValues_tuberack[as.numeric((wellValues_tuberack_toExclude)+1):(length(xtnID)+1)],
     transferID = (96-18+1):96
   ) %>%
+  # replace "SKIP" xtns
+  merge(., xtnsRemaining_byAnimalID, by = "sampleType_animalID", all.x = T) %>%
+  mutate(
+    xtnID = case_when(
+      xtnRemaining == "no" ~ xtnID.1,
+      .default = xtnID
+    )
+  ) %>%
   arrange(transferID) %>%
   select(c("transferID", "sampleType_animalID", "sampleType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnPlate_beadsPresent", "source_well.t"))
 ```
 
+###### All xtn transfers
 
 ```{r}
 # all xtns for pcr1Plate4ab
 tamGenetics_xtns_pcr1Plate4ab <- rbind(
   tamGenetics_xtnTransfer_pcr1Plate4ab_plateXtns,
-  tamGenetics_nonPlateHairXtns_1to18_forpcr1Plate4ab)
+  tamGenetics_nonPlateHairXtns_pcr1Plate4ab) %>%
+  mutate(
+    xtnID = case_when(
+      is.na(xtnID) ~ "hair_ptamTiger1.A1_e1",
+      .default = xtnID
+    )
+  )
 
 tamGenetics_xtnTransfer_p4a <- tamGenetics_xtns_pcr1Plate4ab %>%
   arrange(as.numeric(transferID)) %>%
   mutate(
     ot2set = case_when(
-      is.na(xtnID) ~ "EXCLUDE",
-      str_detect(xtnID, "p4") & eltn == "e1" ~ "set1.1_xtnPlate4_e1",
-      str_detect(xtnID, "p4") & eltn == "e2" ~ "set1.2_xtnPlate4_e2",
+#      is.na(xtnID) ~ "EXCLUDE",
+      str_detect(xtnID, "p4") & str_detect(xtnID, "e1") ~ "set1.1_xtnPlate4_e1",
+      str_detect(xtnID, "p4") & str_detect(xtnID, "e2") ~ "set1.2_xtnPlate4_e2",
       str_detect(xtnID, "ptamTiger1") ~ "set1.3_xtnPlate.tamTiger1",
       str_detect(xtnID, "ptamTiger2") ~ "set1.4_xtnPlate.tamTiger2",
       str_detect(xtnID, "hair_t") ~ "set1.5_xtnTubes"
       ),
     reagent = xtnID,
     source_labware = case_when(
-      is.na(xtnID) ~ "EXCLUDE",
+#      is.na(xtnID) ~ "EXCLUDE",
       str_detect(xtnID, "p1") ~ nestPlate,
       str_detect(xtnID, "p2") ~ nestPlate,
       str_detect(xtnID, "p3") ~ nestPlate,
       str_detect(xtnID, "p4") ~ basePlate,
-      str_detect(xtnID, "tamTiger") ~ basePlate,
+      str_detect(xtnID, "tamTiger") ~ nestPlate,
       str_detect(xtnID, "hair_t") ~ tuberack
     ),
     source_slot = case_when(
-      is.na(xtnID) ~ NA,
+#      is.na(xtnID) ~ NA,
       str_detect(ot2set, "set1.1") ~ 1,
       str_detect(ot2set, "set1.2") ~ 4,
       str_detect(ot2set, "set1.3") ~ 7,
@@ -1650,7 +2049,7 @@ tamGenetics_xtnTransfer_p4a <- tamGenetics_xtns_pcr1Plate4ab %>%
       str_detect(ot2set, "set1.5") ~ 3
     ),
     source_well = case_when(
-      is.na(xtnID) ~ "EXCLUDE",
+#      is.na(xtnID) ~ "EXCLUDE",
       str_detect(xtnID, "p") ~ str_c(xtnRow, xtnCol),
       !is.na(source_well.t) ~ source_well.t
       ),
@@ -1663,8 +2062,8 @@ tamGenetics_xtnTransfer_p4a <- tamGenetics_xtns_pcr1Plate4ab %>%
       .default = 4
     )
   ) %>%
-  filter(ot2set != "EXCLUDE") %>%
-  select(pcr1Headers) %>%
+#  filter(ot2set != "EXCLUDE") %>%
+  select(transferHeaders) %>%
   arrange(ot2set) %>%
   mutate(transferID = row_number())
 
@@ -1675,13 +2074,16 @@ tamGenetics_xtnTransfer_p4ab <- rbind(tamGenetics_xtnTransfer_p4a,
                                       tamGenetics_xtnTransfer_p4b) %>%
   arrange(transferID, dest_slot) %>%
   select(-transferID)
+
+tamGenetics_xtnTransfer_p4ab_distribute <- tamGenetics_xtnTransfer_p4a %>%
+  select(-transferID)
 ```
 
 ##### Plate 4a/b mastermix transfer
 
 ```{r}
 tamGenetics_mmTransfer_pcr1_p4ab <- data.frame(
-  ot2set = rep("set3_mm", 12),
+  ot2set = rep("set2_mm", 24),
   reagent = "mastermix",
   source_labware = nestPlate,
   source_slot = 6,
@@ -1692,23 +2094,26 @@ tamGenetics_mmTransfer_pcr1_p4ab <- data.frame(
   dest_well = rep(grep("A", wellValues_plate, value = T), 2),
   transfer_volume = 6
   ) %>%
-  select(pcr1Headers)
+  select(transferHeaders)
 ```
 
 ##### OT2 transfer info
 
-Full transfer info
+Full transfer info - use just the xtn transfers for one plate; will specify to distribute xtn volume to both xtn plates in the python script
 
 ```{r}
-tamGenetics_pcr1_p4ab <- rbind(tamGenetics_xtnTransfer_p4ab,
-                               tamGenetics_mmTransfer_pcr1_p4ab)
+# tamGenetics_pcr1_p4ab <- rbind(tamGenetics_xtnTransfer_p4ab,
+#                                tamGenetics_mmTransfer_pcr1_p4ab)
+
+tamGenetics_pcr1_4ab_distribute <- rbind(tamGenetics_xtnTransfer_p4ab_distribute,
+                                         tamGenetics_mmTransfer_pcr1_p4ab)
 ```
 
 Export
 
 ```{r}
 # comma-separated string with end-of-line delimiter
-tamGenetics_pcr1_p4ab_string <- format_delim(tamGenetics_pcr1_p4ab,
+tamGenetics_pcr1_p4ab_string <- format_delim(tamGenetics_pcr1_4ab_distribute,
                            delim = ",",
                            eol = "\\n")
 
@@ -1719,18 +2124,1202 @@ tamGenetics_pcr1_p4ab_string
 sink()
 
 # csv file
-write.csv(tamGenetics_pcr1_p4ab, "./robotProtocols/inputFiles/tamGenetics_pcr1_p4ab.csv", row.names = F)
+write.csv(tamGenetics_pcr1_4ab_distribute, "./robotProtocols/inputFiles/tamGenetics_pcr1_p4ab.csv", row.names = F)
 ```
 
 #### Plate 5ab (hair samples)
 
-```{r}
+##### Plate 5ab xtn transfer
 
+```{r}
+tamGenetics_nonPlateHairXtns_pcr1Plate5ab <- tamGenetics_nonPlateHairXtns %>%
+  filter(!str_c("hair_", animalID) %in% tamGenetics_xtns_pcr1Plate4ab$sampleType_animalID) %>%
+  mutate(
+    x1 = case_when(
+      str_detect(xtnLoc, "tx") ~ "tx",
+      .default = "t"
+      ),
+    x2 = case_when(
+      str_detect(xtnLoc, "tx") ~ str_sub(xtnLoc, start = 3, end = -1),
+      .default = str_sub(xtnLoc, 2, -1)
+    ),
+    x2 = case_when(
+      str_detect(x2, "A") ~ gsub("A", "", x2),
+      .default = x2
+    )
+  ) %>%
+  arrange(x1, as.numeric(x2)) %>%
+  mutate(
+    transferID = row_number(),
+    sampleType_animalID = str_c(sampleType, "_", animalID)
+    ) %>%
+  # replace "SKIP" xtns
+  merge(., xtnsRemaining_byAnimalID, by = "sampleType_animalID", all.x = T) %>%
+  mutate(
+    xtnID = case_when(
+      xtnRemaining == "no" ~ xtnID.1,
+      .default = xtnID
+    )
+  ) %>%
+  arrange(transferID) %>%
+  select(c("transferID", "sampleType_animalID", "sampleType", "xtnID", "xtnLoc", "eltn"))
+
+tamGenetics_negs_pcr1Plate5ab <- data.frame(
+  transferID = 26.1,
+  sampleType_animalID = "hair_pcr1Neg",
+  sampleType = "hair_pcr1Neg",
+  xtnID = "hair_pcr1Neg",
+  xtnLoc = NA,
+  eltn = NA
+)
+
+# source wells
+source_wells_3tuberacks <- rep(wellValues_tuberack, 3)
+
+# xtn transfer
+tamGenetics_xtnTransfer_p5ab <- rbind(tamGenetics_nonPlateHairXtns_pcr1Plate5ab,
+                                      tamGenetics_negs_pcr1Plate5ab) %>%
+  arrange(as.numeric(transferID)) %>%
+  mutate(
+    transferID = row_number(),
+    ot2set = case_when(
+      as.numeric(transferID) <= 24 ~ "set1_tubes1to24",
+      as.numeric(transferID) <= 48 ~ "set2_tubes25to48",
+      as.numeric(transferID) > 48 ~ "set3_tubes49up"
+    ),
+    reagent = xtnID,
+    source_labware = tuberack,
+    source_slot = 3,
+    source_well = source_wells_3tuberacks[1:length(xtnID)],
+    asp_height = 1,
+    dest_labware = basePlate,
+    dest_slot = 2,
+    dest_well = wellValues_plate[1:length(xtnID)],
+    transfer_volume = case_when(
+      str_detect(sampleType, "blood") ~ 2,
+      .default = 4
+    )
+  ) %>%
+  select(transferHeaders)
 ```
 
-## 5.3 1:20 dilutions
+##### Plate 5a/b mastermix transfer
 
-## 5.4 PCR2
+```{r}
+destValues_mastermix <- grep("A", wellValues_plate, value = T)
+
+tamGenetics_mmTransfer_pcr1_p5ab <- data.frame(
+  ot2set = rep("set4_mm", 14),
+  reagent = "mastermix",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = c(rep("A4", 7), rep("A5", 7)),
+  asp_height = 1,
+  dest_labware = nestPlate,
+  dest_slot = c(rep(2, 7), rep(5, 7)),
+  dest_well = rep(destValues_mastermix[1:7], 2),
+  transfer_volume = 6
+  ) %>%
+  select(transferHeaders)
+```
+
+##### OT2 transfer info
+
+Full transfer info - use just the xtn transfers for one plate; will specify to distribute xtn volume to both xtn plates in the python script
+
+```{r}
+tamGenetics_pcr1Plate5ab <- rbind(
+  tamGenetics_xtnTransfer_p5ab,
+  tamGenetics_mmTransfer_pcr1_p5ab)
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_pcr1Plate5ab_string <- format_delim(tamGenetics_pcr1Plate5ab,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_pcr1_p5ab_string.txt")
+
+tamGenetics_pcr1Plate5ab_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_pcr1Plate5ab, "./robotProtocols/inputFiles/tamGenetics_pcr1_p5ab.csv", row.names = F)
+```
+
+## 5.3 Dilutions + PCR2
+
+### 5.3.1 30x3
+
+##### Steps
+
+Transfering 8 ul water vs. 10 ul - spot-checked some wells and they ranged from 7-9ul in actual volume (vs. the 10 ul they were supposed to be at)
+
+```{r}
+# step 1: 8 ul water to pcr1 a >>
+# PYTHON SCRIPT: 4 ul pcr1 a to dilution plate > 4 ul dilution to pcr2 plate
+bfh_dPCR2_pcr1a.dilutionPlate <- data.frame(
+  ot2set = "set1_water.pcr1a.dilutionPlate",
+  reagent = "water.pcr1a.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 2,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+)
+
+# step 2: 8 ul water to pcr1 b >>
+# PYTHON SCRIPT: 4 ul pcr1 b to dilution plate > 4 ul dilution to pcr2 plate > 32 ul water to dilution plate > 6 ul dilution to pcr2 plate
+bfh_dPCR2_pcr1b.dilutionPlate <- data.frame(
+  ot2set = "set2_water.pcr1b.dilutionPlate.pcr2",
+  reagent = "water.pcr1b.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 3,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+)
+
+# step 3: index primers to pcr2 plate
+bfh_dPCR2_indexes.pcr2 <- data.frame(
+  ot2set = "set3_indexes.pcr2",
+  reagent = "indexPlate_setA",
+  source_labware = nestPlate,
+  source_slot = 11,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 3,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 4
+)
+
+# step 4: kapa to pcr2 plate
+bfh_dPCR2_kapa.pcr2 <- data.frame(
+  ot2set = "set4_kapa.pcr2",
+  reagent = "kapa",
+  source_labware = basePlate,
+  source_slot = 7,
+  source_well = "A1",
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 10
+)
+```
+
+##### OT2 transfer info
+
+```{r}
+bfh_dilutionsPCR2_p1ab <- rbind(
+  bfh_dPCR2_pcr1a.dilutionPlate,
+  bfh_dPCR2_pcr1b.dilutionPlate,
+  bfh_dPCR2_indexes.pcr2,
+  bfh_dPCR2_kapa.pcr2
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+bfh_dilutionsPCR2_p1ab_string <- format_delim(bfh_dilutionsPCR2_p1ab,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/30x3_dilutionsPCR2_p1ab_string.txt")
+
+bfh_dilutionsPCR2_p1ab_string
+
+sink()
+
+# csv file
+write.csv(bfh_dilutionsPCR2_p1ab, "./robotProtocols/inputFiles/30x3_dilutionsPCR2_p1ab.csv", row.names = F)
+```
+
+### 5.3.2 tamGenetics
+
+#### Plate 1: Take 1
+
+##### Steps
+
+Adding a dispense height variable & adjusting disp_height for water transfer so can reuse tips for dilutions to pcr2 plate transfer
+
+```{r}
+# step 1: pcr1 to dilution plate
+tamGenetics_dPCR2_pcr1.dilutionPlate_p1 <- data.frame(
+  ot2set = "set1_pcr1.dilutionPlate",
+  reagent = "pcr1Plate1",
+  source_labware = basePlate,
+  source_slot = 2,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = nestPlate,
+  dest_slot = 5,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 2
+)
+
+# step 2: water to dilution plate
+tamGenetics_dPCR2_water.dilutionPlate_p1 <- data.frame(
+  ot2set = "set2_water.dilutionPlate",
+  reagent = "nf-water",
+  source_labware = reservoir_12well,
+  source_slot = 7,
+  source_well = "A1",
+  asp_height = 1,
+  dest_labware = nestPlate,
+  dest_slot = 5,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 18
+)
+
+# step 3: dilutions to pcr2 plate
+tamGenetics_dPCR2_dilutionPlate.pcr2_p1 <- data.frame(
+  ot2set = "set3_dilutionPlate.pcr2",
+  reagent = "dilutionPlate",
+  source_labware = nestPlate,
+  source_slot = 5,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 6
+)
+
+# step 4: index primers to pcr2 plate
+tamGenetics_dPCR2_indexes.pcr2_p1 <- data.frame(
+  ot2set = "set4_indexes.pcr2",
+  reagent = "indexPlate_setA",
+  source_labware = nestPlate,
+  source_slot = 11,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 3,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 4
+)
+
+# step 5: kapa to pcr2 plate
+tamGenetics_dPCR2_kapa.pcr2_p1 <- data.frame(
+  ot2set = "set5_kapa.pcr2",
+  reagent = "kapa",
+  source_labware = reservoir_12well,
+  source_slot = 7,
+  source_well = "A4",
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 10
+)
+```
+
+##### OT2 transfer info
+
+```{r}
+tamGenetics_dilutionsPCR2_p1 <- rbind(
+  tamGenetics_dPCR2_pcr1.dilutionPlate_p1,
+  tamGenetics_dPCR2_water.dilutionPlate_p1,
+  tamGenetics_dPCR2_dilutionPlate.pcr2_p1,
+  tamGenetics_dPCR2_indexes.pcr2_p1,
+  tamGenetics_dPCR2_kapa.pcr2_p1
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p1_string <- format_delim(tamGenetics_dilutionsPCR2_p1,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p1_string.txt")
+
+tamGenetics_dilutionsPCR2_p1_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p1, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p1.csv", row.names = F)
+```
+
+
+blowout adjust
+
+```{r}
+tamGenetics_dilutionsPCR2_p1_blowoutAdjust <- tamGenetics_dilutionsPCR2_p1 %>%
+  filter(ot2set != "set1_pcr1.dilutionPlate1") %>%
+  mutate(id = row_number()) %>%
+  filter(id != c(1, 2, 3, 4)) %>%
+  select(-id)
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p1_blowoutAdjust_string <- format_delim(tamGenetics_dilutionsPCR2_p1_blowoutAdjust,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p1_blowoutAdjust_string.txt")
+
+tamGenetics_dilutionsPCR2_p1_blowoutAdjust_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p1_blowoutAdjust, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p1_blowoutAdjust.csv", row.names = F)
+```
+
+#### Plate 1: Take 2
+
+##### Steps
+
+```{r}
+# step 1: water to pcr1 >>
+# PYTHON SCRIPT: pcr1 to dilution plate > dilution plate to pcr2 plate
+tamGenetics_dPCR2_pcr1.dilutionPlate_p1Take2 <- data.frame(
+  ot2set = "set1_water.pcr1.dilutionPlate.pcr2",
+  reagent = "water.pcr1.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 2,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+)
+
+# step 2: index primers to pcr2 plate
+tamGenetics_dPCR2_indexes.pcr2_p1Take2 <- data.frame(
+  ot2set = "set2_indexes.pcr2",
+  reagent = "indexPlate_setA",
+  source_labware = nestPlate,
+  source_slot = 11,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 3,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 4
+)
+
+# step 3: kapa to pcr2 plate
+tamGenetics_dPCR2_kapa.pcr2_p1Take2 <- data.frame(
+  ot2set = "set3_kapa.pcr2",
+  reagent = "kapa",
+  source_labware = basePlate,
+  source_slot = 7,
+  source_well = "A1",
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 10
+)
+```
+
+##### OT2 transfer info
+
+```{r}
+tamGenetics_dilutionsPCR2_p1Take2 <- rbind(
+  tamGenetics_dPCR2_pcr1.dilutionPlate_p1Take2,
+  tamGenetics_dPCR2_indexes.pcr2_p1Take2,
+  tamGenetics_dPCR2_kapa.pcr2_p1Take2
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p1Take2_string <- format_delim(tamGenetics_dilutionsPCR2_p1Take2,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p1Take2_string.txt")
+
+tamGenetics_dilutionsPCR2_p1Take2_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p1Take2, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p1Take2.csv", row.names = F)
+```
+
+#### Plate 2
+
+##### Steps
+
+Ditching the higher dispense height for water; robot hangs onto the last few ul even with a blowout so opting for it to dispense at bottom of well
+
+```{r}
+# step 1: pcr1 to dilution plate
+tamGenetics_dPCR2_pcr1.dilutionPlate_p2 <- data.frame(
+  ot2set = "set1_pcr1.dilutionPlate",
+  reagent = "pcr1Plate2",
+  source_labware = basePlate,
+  source_slot = 2,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 0.25,
+  dest_labware = nestPlate,
+  dest_slot = 5,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 2
+)
+
+# step 2: water to dilution plate
+tamGenetics_dPCR2_water.dilutionPlate_p2 <- data.frame(
+  ot2set = "set2_water.dilutionPlate",
+  reagent = "nf-water",
+  source_labware = reservoir_12well,
+  source_slot = 7,
+  source_well = "A1",
+  asp_height = 1,
+  dest_labware = nestPlate,
+  dest_slot = 5,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 18
+)
+
+# step 3: dilutions to pcr2 plate
+tamGenetics_dPCR2_dilutionPlate.pcr2_p2 <- data.frame(
+  ot2set = "set3_dilutionPlate.pcr2",
+  reagent = "dilutionPlate",
+  source_labware = nestPlate,
+  source_slot = 5,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 6
+)
+
+# step 4: index primers to pcr2 plate
+tamGenetics_dPCR2_indexes.pcr2_p2 <- data.frame(
+  ot2set = "set4_indexes.pcr2",
+  reagent = "indexPlate_setB",
+  source_labware = nestPlate,
+  source_slot = 11,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 3,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 4
+)
+
+# step 5: kapa to pcr2 plate
+tamGenetics_dPCR2_kapa.pcr2_p2 <- data.frame(
+  ot2set = "set5_kapa.pcr2",
+  reagent = "kapa",
+  source_labware = reservoir_12well,
+  source_slot = 7,
+  source_well = "A4",
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 10
+)
+```
+
+##### OT2 transfer info
+
+```{r}
+tamGenetics_dilutionsPCR2_p2 <- rbind(
+  tamGenetics_dPCR2_pcr1.dilutionPlate_p2,
+  tamGenetics_dPCR2_water.dilutionPlate_p2,
+  tamGenetics_dPCR2_dilutionPlate.pcr2_p2,
+  tamGenetics_dPCR2_indexes.pcr2_p2,
+  tamGenetics_dPCR2_kapa.pcr2_p2
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p2_string <- format_delim(tamGenetics_dilutionsPCR2_p2,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p2_string.txt")
+
+tamGenetics_dilutionsPCR2_p2_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p2, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p2.csv", row.names = F)
+```
+
+#### Plate 3a/b
+
+##### Steps
+
+NOTE that since the water transfer step will require two OT2 transfers (due to higher volume), I'm using a plate with water to avoid contamination
+
+```{r}
+# step 1: pcr1 a to dilution plate
+tamGenetics_dPCR2_pcr1.dilutionPlate_p3a <- tamGenetics_dPCR2_pcr1.dilutionPlate_p1 %>%
+  mutate(
+    ot2set = "set1_pcr1a.dilutionPlate",
+    reagent = "pcr1Plate3a",
+    asp_height = 0.25,
+    disp_height = 0.5
+    )
+
+# step 2: pcr1 b to dilution plate
+tamGenetics_dPCR2_pcr1.dilutionPlate_p3b <- tamGenetics_dPCR2_pcr1.dilutionPlate_p3a %>%
+  mutate(
+    ot2set = "set2_pcr1b.dilutionPlate",
+    reagent = "pcr1Plate3b",
+    source_slot = 3,
+    asp_height = 0.25,
+    disp_height = 0.5
+    )
+
+# step 3: water to dilution plate
+tamGenetics_dPCR2_water.dilutionPlate_p3ab <- tamGenetics_dPCR2_water.dilutionPlate_p1 %>%
+  mutate(
+  ot2set = "set3_water.dilutionPlate",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = 36
+  )
+
+# step 4: dilutions to pcr2 plate
+tamGenetics_dPCR2_dilutionPlate.pcr2_p3ab <- tamGenetics_dPCR2_dilutionPlate.pcr2_p1 %>%
+  mutate(
+    ot2set = "set4_dilutionPlate.pcr2",
+)
+
+# step 5: index primers to pcr2 plate
+tamGenetics_dPCR2_indexes.pcr2_p3ab <- tamGenetics_dPCR2_indexes.pcr2_p1 %>%
+  mutate(
+    ot2set = "set5_indexes.pcr2",
+    reagent = "indexPlate_setC"
+    )
+
+# step 6: kapa to pcr2 plate
+tamGenetics_dPCR2_kapa.pcr2_p3ab <- tamGenetics_dPCR2_kapa.pcr2_p1 %>%
+  mutate(
+  ot2set = "set6_kapa.pcr2",
+  source_well = "A1"
+  )
+```
+
+##### OT2 transfer info
+
+```{r}
+tamGenetics_dilutionsPCR2_p3ab <- rbind(
+  tamGenetics_dPCR2_pcr1.dilutionPlate_p3a,
+  tamGenetics_dPCR2_pcr1.dilutionPlate_p3b,
+  tamGenetics_dPCR2_water.dilutionPlate_p3ab,
+  tamGenetics_dPCR2_dilutionPlate.pcr2_p3ab,
+  tamGenetics_dPCR2_indexes.pcr2_p3ab,
+  tamGenetics_dPCR2_kapa.pcr2_p3ab
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p3ab_string <- format_delim(tamGenetics_dilutionsPCR2_p3ab,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p3ab_string.txt")
+
+tamGenetics_dilutionsPCR2_p3ab_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p3ab, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p3ab.csv", row.names = F)
+```
+
+ADJUSTED
+
+```{r}
+tamGenetics_dilutionsPCR2_p3ab_waterAdjust <- rbind(
+  tamGenetics_dPCR2_water.dilutionPlate_p3ab,
+  tamGenetics_dPCR2_dilutionPlate.pcr2_p3ab,
+  tamGenetics_dPCR2_indexes.pcr2_p3ab,
+  tamGenetics_dPCR2_kapa.pcr2_p3ab
+) %>%
+  mutate(id = row_number()) %>%
+  filter(id != 1) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p3ab_waterAdjust_string <- format_delim(tamGenetics_dilutionsPCR2_p3ab_waterAdjust,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p3ab_waterAdjust_string.txt")
+
+tamGenetics_dilutionsPCR2_p3ab_waterAdjust_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p3ab_waterAdjust, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p3ab_waterAdjust.csv", row.names = F)
+```
+
+#### Plate 4a/b
+
+##### Steps
+
+Transfering 8 ul water vs. 10 ul - spot-checked some wells and they ranged from 7-9ul in actual volume (vs. the 10 ul they were supposed to be at)
+
+```{r}
+# step 1: 8 ul water to pcr1 a >>
+# PYTHON SCRIPT: 4 ul pcr1 a to dilution plate > 4 ul dilution to pcr2 plate
+tamGenetics_dPCR2_pcr1a.dilutionPlate <- data.frame(
+  ot2set = "set1_water.pcr1a.dilutionPlate",
+  reagent = "water.pcr1a.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 2,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+)
+
+# step 2: 8 ul water to pcr1 b >>
+# PYTHON SCRIPT: 4 ul pcr1 b to dilution plate > 4 ul dilution to pcr2 plate > 32 ul water to dilution plate > 6 ul dilution to pcr2 plate
+tamGenetics_dPCR2_pcr1b.dilutionPlate <- data.frame(
+  ot2set = "set2_water.pcr1b.dilutionPlate.pcr2",
+  reagent = "water.pcr1b.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 3,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+)
+
+# step 3: index primers to pcr2 plate
+tamGenetics_dPCR2_indexes.pcr2 <- tamGenetics_dPCR2_indexes.pcr2_p1 %>%
+  mutate(
+    ot2set = "set3_indexes.pcr2",
+    reagent = "indexPlate_setD"
+    )
+
+# step 4: kapa to pcr2 plate
+tamGenetics_dPCR2_kapa.pcr2 <- tamGenetics_dPCR2_kapa.pcr2_p1 %>%
+  mutate(
+  ot2set = "set4_kapa.pcr2",
+  source_well = "A1"
+  )
+```
+
+##### OT2 transfer info
+
+```{r}
+tamGenetics_dilutionsPCR2_p4ab <- rbind(
+  tamGenetics_dPCR2_pcr1a.dilutionPlate,
+  tamGenetics_dPCR2_pcr1b.dilutionPlate,
+  tamGenetics_dPCR2_indexes.pcr2,
+  tamGenetics_dPCR2_kapa.pcr2
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p4ab_string <- format_delim(tamGenetics_dilutionsPCR2_p4ab,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p4ab_string.txt")
+
+tamGenetics_dilutionsPCR2_p4ab_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p4ab, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p4ab.csv", row.names = F)
+```
+
+#### Plate 5a/b + Strip 1
+
+##### Steps
+
+Transfering 8 ul water vs. 10 ul - spot-checked some wells and they ranged from 7-9ul in actual volume (vs. the 10 ul they were supposed to be at)
+
+```{r}
+# step 1: 8 ul water to pcr1 a >>
+# PYTHON SCRIPT: 4 ul pcr1 a to dilution plate > 4 ul dilution to pcr2 plate
+tamGenetics_dPCR2_pcr1a.dilutionPlate_p5ab.s1 <- data.frame(
+  ot2set = "set1_water.pcr1a.dilutionPlate",
+  reagent = "water.pcr1a.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 2,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+) %>%
+  filter(!source_well %in% c("A8", "A9", "A10", "A11", "A12"))
+
+# step 2: 8 ul water to pcr1 b >>
+# PYTHON SCRIPT: 4 ul pcr1 b to dilution plate > 4 ul dilution to pcr2 plate > 32 ul water to dilution plate > 6 ul dilution to pcr2 plate
+tamGenetics_dPCR2_pcr1b.dilutionPlate_p5ab.s1 <- data.frame(
+  ot2set = "set2_water.pcr1b.dilutionPlate.pcr2",
+  reagent = "water.pcr1b.dilution",
+  source_labware = nestPlate,
+  source_slot = 6,
+  source_well = grep("A", wellValues_plate, value = T),
+  asp_height = 1,
+  dest_labware = basePlate,
+  dest_slot = 3,
+  dest_well = grep("A", wellValues_plate, value = T),
+  disp_height = 1,
+  transfer_volume = 8
+) %>%
+  filter(!source_well %in% c("A8", "A9", "A10", "A11", "A12"))
+
+# step 3: index primers to pcr2 plate
+tamGenetics_dPCR2_indexes.pcr2_p5ab.s1 <- tamGenetics_dPCR2_indexes.pcr2_p1 %>%
+  mutate(
+    ot2set = "set3_indexes.pcr2",
+    reagent = "indexPlate_setE"
+    ) %>%
+  filter(!source_well %in% c("A8", "A9", "A10", "A11", "A12"))
+
+# step 4: kapa to pcr2 plate
+tamGenetics_dPCR2_kapa.pcr2_p5ab.s1 <- tamGenetics_dPCR2_kapa.pcr2_p1 %>%
+  mutate(
+  ot2set = "set4_kapa.pcr2",
+  source_labware = basePlate,
+  source_well = "A1"
+  ) %>%
+  filter(!source_well %in% c("A8", "A9", "A10", "A11", "A12"))
+```
+
+##### OT2 transfer info
+
+```{r}
+tamGenetics_dilutionsPCR2_p5ab.s1 <- rbind(
+  tamGenetics_dPCR2_pcr1a.dilutionPlate_p5ab.s1,
+  tamGenetics_dPCR2_pcr1b.dilutionPlate_p5ab.s1,
+  tamGenetics_dPCR2_indexes.pcr2_p5ab.s1,
+  tamGenetics_dPCR2_kapa.pcr2_p5ab.s1
+) %>%
+  select("ot2set", "reagent", "source_labware", "source_slot", "source_well", "asp_height", "dest_labware", "dest_slot", "dest_well", "disp_height", "transfer_volume")
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_dilutionsPCR2_p5ab.s1_string <- format_delim(tamGenetics_dilutionsPCR2_p5ab.s1,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p5ab,s1_string.txt")
+
+tamGenetics_dilutionsPCR2_p5ab.s1_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_dilutionsPCR2_p5ab.s1, "./robotProtocols/inputFiles/tamGenetics_dilutionsPCR2_p5ab,s1.csv", row.names = F)
+```
+
+## 5.4 Normalization & pooling
+
+### 5.4.1 Picogreen results
+
+```{r}
+picoResults_all <- read.csv("./picogreen/16Aug2023_pcr2_tamRun5.p12345_30x3.p1.csv", fileEncoding = "UTF-16LE")
+```
+
+### 5.4.2 Excluded samples
+
+The samples below were not added to the PCR1 plates (no xtn volume remaining), and should thus be excluded from normalization calculations and pooling:
+
+```{r}
+tamGenetics_samplesToExclude <- data.frame(
+  plate = c("p3", "p3", "p5"),
+  well = c("F6", "B12", "C1")
+) %>%
+  mutate(pcr2ID = str_c(plate, ".", well))
+
+bfh_samplesToExclude <- data.frame(
+  plate = c("p1"),
+  well = c("B7")
+) %>%
+  mutate(pcr2ID = str_c(plate, ".", well))
+```
+
+### 5.4.3 tamGenetics
+
+ADD SKIPPED SAMPLES? OR JUST REMOVE PIPETTE TIPS?
+
+#### sample_ng.ul overview
+
+```{r}
+tamGenetics_picoResults <- picoResults_all %>%
+  filter(str_detect(Sample, "tamGenetics"))
+
+ggplot(picoResults_tamGenetics, aes(Result)) +
+  geom_histogram(color = 4, fill = "white", bins = 100) +
+  scale_x_continuous(breaks = round(seq(min(picoResults_tamGenetics$Result), max(picoResults_tamGenetics$Result), by = 1),1))
+```
+
+#### Steps
+
+Outline initial transfer steps here; do the rest in python
+
+```{r}
+norm_ng.ul <- 10
+sampleVol <- 7
+
+tamGenetics_normPool_generalInfo <- picoResults_all %>%
+  filter(str_detect(Sample, "tamGenetics")) %>%
+  dplyr::rename("reagent" = "Sample",
+         "well" = "Wells",
+         "sample_ng.ul" = "MeanResult") %>%
+  mutate(
+    pcr2ID = case_when(
+      str_detect(reagent, "p1") ~ str_c("p1.", well),
+      str_detect(reagent, "p2") ~ str_c("p2.", well),
+      str_detect(reagent, "p3") ~ str_c("p3.", well),
+      str_detect(reagent, "p4") ~ str_c("p4.", well),
+      str_detect(reagent, "p5") ~ str_c("p5.", well),
+    ),
+    sampleType = case_when(
+      well %in% c("C4", "F9") ~ "negative",
+      pcr2ID %in% tamGenetics_samplesToExclude$pcr2ID ~ "EXCLUDE",
+      .default = NA
+    ),
+    waterVol = case_when(
+      pcr2ID %in% tamGenetics_samplesToExclude$pcr2ID ~ 0,
+      sample_ng.ul < 10 ~ 0,
+      .default = round(((as.numeric(sample_ng.ul)*sampleVol)/norm_ng.ul)-sampleVol, 1)
+      ),
+    waterVol = case_when(
+      waterVol < 2 ~ 0, 
+      .default = waterVol
+    ),
+    waterSum = cumsum(waterVol)
+  ) %>%
+  select(c("reagent", "sampleType", "well", "sample_ng.ul", "waterVol", "waterSum"))
+
+tamGenetics_normPool_water.normPlate <- tamGenetics_normPool_generalInfo %>%
+  mutate(
+    ot2set = "set1_water.normPlate",
+    source_labware = tuberack,
+    source_slot = 6,
+    source_well = case_when(
+      waterSum < 1400 ~ "A1",
+      waterSum < 1400*2 ~ "B1",
+      waterSum < 1400*3 ~ "C1",
+      waterSum < 1400*4 ~ "D1",
+      waterSum < 1400*5 ~ "A2",
+      waterSum < 1400*6 ~ "B2",
+      waterSum < 1400*7 ~ "C2",
+      waterSum < 1400*8 ~ "D2",
+      waterSum < 1400*9 ~ "A3",
+      waterSum < 1400*10 ~ "B3",
+      waterSum < 1400*11 ~ "C3",
+      waterSum < 1400*12 ~ "D3",
+      waterSum < 1400*13 ~ "A4",
+      waterSum < 1400*14 ~ "B4",
+      waterSum < 1400*15 ~ "C4",
+      waterSum < 1400*16 ~ "D4",
+      waterSum < 1400*17 ~ "A5",
+      waterSum < 1400*18 ~ "B5",
+      waterSum < 1400*19 ~ "C5",
+      waterSum < 1400*20 ~ "D5",
+      waterSum < 1400*21 ~ "A6",
+      waterSum < 1400*22 ~ "B6",
+      waterSum < 1400*23 ~ "C6",
+      waterSum < 1400*24 ~ "D6"
+    ),
+    dest_labware = nestPlate,
+    dest_slot = case_when(
+      str_detect(reagent, "p1") ~ 4,
+      str_detect(reagent, "p2") ~ 7,
+      str_detect(reagent, "p3") ~ 2,
+      str_detect(reagent, "p4") ~ 5,
+      str_detect(reagent, "p5") ~ 8,
+    ),
+    dest_well = well,
+    transfer_volume = waterVol
+    ) %>%
+  select(c("ot2set", "reagent", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume"))
+
+tamGenetics_normPool_sample.normPlate_p1 <- data.frame(
+  ot2set = "set2_sample.normPlate_p1",
+  reagent = "pcr2Plate1",
+  source_labware = nestPlate,
+  source_slot = 1,
+  source_well = grep("A", wellValues_plate, value = T),
+  dest_labware = nestPlate,
+  dest_slot = 4,
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = sampleVol
+)
+
+tamGenetics_normPool_sample.normPlate_p2 <- data.frame(
+  ot2set = "set3_sample.normPlate_p2",
+  reagent = "pcr2Plate2",
+  source_labware = nestPlate,
+  source_slot = 1,
+  source_well = grep("A", wellValues_plate, value = T),
+  dest_labware = nestPlate,
+  dest_slot = 7,
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = sampleVol
+)
+
+tamGenetics_normPool_sample.normPlate_p3 <- data.frame(
+  ot2set = "set4_sample.normPlate_p3",
+  reagent = "pcr2Plate3",
+  source_labware = nestPlate,
+  source_slot = 1,
+  source_well = grep("A", wellValues_plate, value = T),
+  dest_labware = nestPlate,
+  dest_slot = 2,
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = sampleVol
+)
+
+tamGenetics_normPool_sample.normPlate_p4 <- data.frame(
+  ot2set = "set5_sample.normPlate_p4",
+  reagent = "pcr2Plate4",
+  source_labware = nestPlate,
+  source_slot = 1,
+  source_well = grep("A", wellValues_plate, value = T),
+  dest_labware = nestPlate,
+  dest_slot = 5,
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = sampleVol
+)
+
+tamGenetics_normPool_sample.normPlate_p5 <- data.frame(
+  ot2set = "set6_sample.normPlate_p5",
+  reagent = "pcr2Plate5",
+  source_labware = nestPlate,
+  source_slot = 1,
+  source_well = grep("A", wellValues_plate, value = T),
+  dest_labware = nestPlate,
+  dest_slot = 8,
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = sampleVol
+) %>%
+  filter(!source_well %in% c("A8", "A9", "A10", "A11", "A12"))
+```
+
+#### OT2 transfer 
+
+Transfer info
+
+```{r}
+tamGenetics_normPool <- rbind(
+  tamGenetics_normPool_water.normPlate,
+  tamGenetics_normPool_sample.normPlate_p1,
+  tamGenetics_normPool_sample.normPlate_p2,
+  tamGenetics_normPool_sample.normPlate_p3,
+  tamGenetics_normPool_sample.normPlate_p4,
+  tamGenetics_normPool_sample.normPlate_p5
+)
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+tamGenetics_normPool_string <- format_delim(tamGenetics_normPool,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/tamGenetics_normPool_string.txt")
+
+tamGenetics_normPool_string
+
+sink()
+
+# csv file
+write.csv(tamGenetics_normPool, "./robotProtocols/inputFiles/tamGenetics_normPool.csv", row.names = F)
+```
+
+### 5.4.2 30x3
+
+#### Steps
+
+Outline initial transfer steps here; do the rest in python
+
+```{r}
+norm_ng.ul <- 10
+sampleVol <- 7
+
+bfh_normPool_generalInfo <- picoResults_all %>%
+  filter(str_detect(Sample, "30x3")) %>%
+  dplyr::rename("reagent" = "Sample",
+         "well" = "Wells",
+         "sample_ng.ul" = "MeanResult") %>%
+  mutate(
+    pcr2ID = str_c("p1.", well),
+    sampleType = case_when(
+      well %in% c("C4", "F9") ~ "negative",
+      pcr2ID %in% bfh_samplesToExclude$pcr2ID ~ "EXCLUDE",
+      .default = NA
+    ),
+    waterVol = case_when(
+      pcr2ID %in% bfh_samplesToExclude$pcr2ID ~ 0,
+      sample_ng.ul < 10 ~ 0,
+      .default = round(((as.numeric(sample_ng.ul)*sampleVol)/norm_ng.ul)-sampleVol, 1)
+      ),
+    waterVol = case_when(
+      waterVol < 2 ~ 0, 
+      .default = waterVol
+    ),
+    waterSum = cumsum(waterVol)
+  ) %>%
+  select(c("reagent", "sampleType", "well", "sample_ng.ul", "waterVol", "waterSum"))
+
+bfh_normPool_water.normPlate <- bfh_normPool_generalInfo %>%
+  mutate(
+    ot2set = "set1_water.normPlate",
+    source_labware = tuberack,
+    source_slot = 6,
+    source_well = case_when(
+      waterSum < 1400 ~ "A1",
+      waterSum < 1400*2 ~ "B1",
+      waterSum < 1400*3 ~ "C1",
+      waterSum < 1400*4 ~ "D1",
+      waterSum < 1400*5 ~ "A2",
+      waterSum < 1400*6 ~ "B2",
+      waterSum < 1400*7 ~ "C2",
+      waterSum < 1400*8 ~ "D2",
+      waterSum < 1400*9 ~ "A3",
+      waterSum < 1400*10 ~ "B3",
+      waterSum < 1400*11 ~ "C3",
+      waterSum < 1400*12 ~ "D3",
+      waterSum < 1400*13 ~ "A4",
+      waterSum < 1400*14 ~ "B4",
+      waterSum < 1400*15 ~ "C4",
+      waterSum < 1400*16 ~ "D4",
+      waterSum < 1400*17 ~ "A5",
+      waterSum < 1400*18 ~ "B5",
+      waterSum < 1400*19 ~ "C5",
+      waterSum < 1400*20 ~ "D5",
+      waterSum < 1400*21 ~ "A6",
+      waterSum < 1400*22 ~ "B6",
+      waterSum < 1400*23 ~ "C6",
+      waterSum < 1400*24 ~ "D6"
+    ),
+    dest_labware = nestPlate,
+    dest_slot = 2,
+    dest_well = well,
+    transfer_volume = waterVol
+    ) %>%
+  select(c("ot2set", "reagent", "source_labware", "source_slot", "source_well", "dest_labware", "dest_slot", "dest_well", "transfer_volume"))
+
+bfh_normPool_sample.normPlate_p1 <- data.frame(
+  ot2set = "set2_sample.normPlate_p1",
+  reagent = "pcr2Plate1",
+  source_labware = nestPlate,
+  source_slot = 1,
+  source_well = grep("A", wellValues_plate, value = T),
+  dest_labware = nestPlate,
+  dest_slot = 2,
+  dest_well = grep("A", wellValues_plate, value = T),
+  transfer_volume = sampleVol
+)
+```
+
+#### OT2 transfer 
+
+Transfer info
+
+```{r}
+bfh_normPool <- rbind(
+  bfh_normPool_water.normPlate,
+  bfh_normPool_sample.normPlate_p1
+)
+```
+
+Export
+
+```{r}
+# comma-separated string with end-of-line delimiter
+bfh_normPool_string <- format_delim(bfh_normPool,
+                           delim = ",",
+                           eol = "\\n")
+
+sink("./robotProtocols/inputFiles/30x3_normPool_string.txt")
+
+bfh_normPool_string
+
+sink()
+
+# csv file
+write.csv(bfh_normPool, "./robotProtocols/inputFiles/30x3_normPool.csv", row.names = F)
+```
 
 # SCRAPS
 
