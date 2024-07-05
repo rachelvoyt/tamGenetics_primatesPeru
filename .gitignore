@@ -1,7 +1,10 @@
+# general stuff to ignore
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
+
+# directories to ignore
 /01_run2_fecalHairBlood
 /02_laLab_run1
 /bearTest
@@ -12,6 +15,8 @@
 /primers
 /robotProtocols
 /samFiles
+
+# files to ignore
 *archived*
 *.fastq.gz
 *.fastq
