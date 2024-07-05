@@ -1,0 +1,129 @@
+---
+title: "tamRun4_filePrep"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 1 Overview
+
+Doc is to prep files for tamRun4 GTscore pipeline and genoAnalyses so they're not so cluttered
+
+# 2 Packages
+
+```{r}
+library(janitor)
+library(tidyverse)
+```
+
+# 3 Metadata
+
+For this run, we need to create the metadata files from scratch. We can use the extraction lists from the tamGenetics_ot2InputFiles.Rmd and merge it with the full extraction list to add metadata.
+
+#### Extractions included in run
+
+```{r}
+tamRun4_xtns <- read.csv("./04_tamRun4/tamRun4_xtnsUsed.csv") %>%
+  select(c(wellID, xtnID)) %>%
+  mutate(xtnID = 
+           case_when(
+             xtnID == "tH2O.1" ~ "fecal_pcr1Neg.1",
+             xtnID == "tH2O.2" ~ "fecal_pcr1Neg.2",
+             .default = xtnID
+           ))
+```
+
+#### Add metadata
+
+```{r}
+xtnsAll_updated_postTamGenetics_Aug2023 <- read.csv("./extractions/tamGenetics_xtnsBloodFecalHair_master_updated22Aug2023.csv") %>%
+  dplyr::rename("sampleName" = "sampleID") %>%
+  mutate(
+    xtnID = 
+      case_when(
+        str_detect(xtnID, "Neg") & xtnLoc %in% c("p1", "p2") ~ str_c("blood_", xtnID),
+        str_detect(xtnID, "Neg") & xtnLoc %in% c("p3", "p4") ~ str_c("hair_", xtnID),
+        .default = xtnID
+      )
+  )
+
+tamRun4_sampleSheet <- read.csv("./04_tamRun4/00_illumina/ill_tamRun4_30x3_sampleSheet.csv") %>%
+  filter(str_detect(X.Header., "tamRun4")) %>%
+  dplyr::rename("sampleID" = "X.Header.",
+         "plate" = "X",
+         "well" = "X.1",
+         "i7_index" = "X.2",
+         "i7_seq" = "X.3",
+         "i5_index" = "X.4",
+         "i5_seq" = "X.5") %>%
+  select(c("sampleID", "plate", "well", "i7_index", "i5_index")) %>%
+  mutate(
+    well = gsub("01", "1", well),
+    well = gsub("02", "2", well),
+    well = gsub("03", "3", well),
+    well = gsub("04", "4", well),
+    well = gsub("05", "5", well),
+    well = gsub("06", "6", well),
+    well = gsub("07", "7", well),
+    well = gsub("08", "8", well),
+    well = gsub("09", "9", well),
+  ) %>%
+  mutate(wellID = row_number())
+
+md_tamRun4 <- merge(tamRun4_xtns, tamRun4_sampleSheet, by = "wellID") %>%
+  select(-wellID) %>%
+  merge(., xtnsAll_updated_postTamGenetics_Aug2023, by = "xtnID", all.x = T) %>%
+  mutate(sampleID = gsub("_","-", sampleID)) %>%
+  arrange(plate, as.numeric(str_sub(well, 2, -1)), str_sub(well, 1, 1)) %>%
+  mutate(sampleFile = paste0(sampleID, ".fastq"),
+         sampleID = gsub("-", "\\.", sampleID),
+         sampleType = 
+           case_when(
+             xtnID == "fecal_pcr1Neg.1" ~ "pcr1Neg",
+             xtnID == "fecal_pcr1Neg.2" ~ "pcr1Neg",
+             str_detect(xtnID, "Neg") ~ "xtnNeg",
+             .default = sampleType
+           ),
+         animalID = case_when(
+           xtnID == "fecal_pcr1Neg.1" ~ "pcr1Neg.1",
+           xtnID == "fecal_pcr1Neg.2" ~ "pcr1Neg.2",
+           .default = animalID
+         )) %>%
+  select(c("sampleID", "sampleFile", "i5_index", "i7_index", "well", "animalID", "sampleName", "sampleType", "sampleNotes", "lysisDate", "lysisType", "lysisLoc", "lysisRow", "lysisCol", "lysisVol_ul", "lysisDuration", "lysis_prokProp", "lysisProtocol", "lysisNotes", "xtnID", "xtnDate", "xtnYear", "xtnType", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnProtocol", "xtnNotes", "qubit_ng.ul", "qubitDate", "pico_ng.ul", "picoDate", "purity_260.280", "purity_260.230", "purityDate", "fieldNotes", "captureDate", "captureYear", "group", "animalName", "species", "sex", "animalLog_microchip", "animalLog_group", "animalLog_name")) %>%
+  arrange(sampleID) %>%
+  mutate(
+    sampleID_unique = case_when(
+      str_detect(sampleType, "Neg") ~ animalID,
+    .default = str_c(animalID, "_", sampleType)
+  )) %>%
+  relocate(sampleID_unique)
+
+# remove extra fecal t30
+md_tamRun4 <- md_tamRun4[-64,]
+
+write.csv(md_tamRun4, "./04_tamRun4/tamRun4_metadata_ill.csv", row.names = F)
+```
+
+## clean md
+
+```{r, eval=FALSE}
+# Illumina samples
+md_ill_samplesAll <- read.csv("./04_tamRun4/tamRun4_metadata_ill.csv") %>%
+  dplyr::rename("sampleID_ill" = "sampleID",
+                "sampleFile_ill" = "sampleFile")
+
+# Nanopore samples
+md_ont_samplesAll <- read.csv("./04_tamRun4/tamRun4_metadata_ont.csv") %>%
+  dplyr::rename("sampleID_ont" = "sampleID",
+                "sampleFile_ont" = "sampleFile")
+
+# Metadata w/both Illumina and Nanopore sampleIDs/sampleFiles
+md_illONT_samplesAll <- merge(md_ill_samplesAll, md_ont_samplesAll[, c("sampleID_unique", "sampleID_ont", "sampleFile_ont")], by = "sampleID_unique") %>%
+  relocate(c(sampleID_ont, sampleFile_ont), .after = sampleFile_ill) %>%
+  arrange(sampleID_ill) %>%
+  select(-c(animalLog_microchip, animalLog_group, animalLog_name))
+
+# EXPORT
+write.csv(md_illONT_samplesAll, "./04_tamRun4/tamRun4_metadata_illONT.csv", row.names = F)
+```
+

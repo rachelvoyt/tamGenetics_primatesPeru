@@ -1,0 +1,4667 @@
+---
+title: "tamRun4_genoAnalyses"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto
+}
+
+pre[class] {
+  max-height: 100px;
+}
+```
+
+# 1 Overview
+
+**NOTE** this document is the cleaned up version -- old version is "archived"
+
+This pipeline is for the analysis of genotypes acquired via GTscorePipeline_tamRun4.Rmd, including sequencing results from both Illumina and Nanopore platforms. Analyses include the following:
+
+1)  Locus genotype success
+2)  Sample genotype success
+3)  Genotype consistency
+4)  Species (mis)matches
+5)  Sex (mis)matches
+
+# 2 Packages
+
+```{r}
+library(forcats) # reorder factor by another variable
+library(gsubfn) # gtseq locus read sums
+library(janitor) # duptest
+library(kableExtra) # pretty tables
+library(plotrix) # plotrix::std.error()
+library(scales) # scales::percentage()
+library(tidyverse) # general data manipulation
+```
+
+Fix scrolling issue with large dataframes:
+
+```{r}
+rstudioapi::writeRStudioPreference("data_viewer_max_columns", 250L)
+```
+
+# 3 Data
+
+## 3.1 Metadata
+
+### Sample metadata
+
+df_seqPlatform_pipeline_species_sampleType
+
+genos_ill_gtscore0x_spLS_stA_lF
+
+seqPlatform = i(llumina), n(anopore), 0
+pipeline = gr0x (gtscore0x), gr10x(gtscore10x), gs (gtseq)
+species = l(wed), s(imp)
+sampleType = b(lood), f(ecal), h(air), a(ll - including negs)
+lociSet = F (fullSet), L (lwedSet), S (simpSet)
+
+```{r}
+# md w/both Illumina and Nanopore sampleIDs/sampleFiles
+md_tamRun4 <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
+
+# species subsets
+md_tamRun4_lwed <- md_tamRun4 %>%
+  filter(species == "LWED")
+
+md_tamRun4_simp <- md_tamRun4 %>%
+  filter(species == "SIMP")
+
+md_tamRun4_negs <- md_tamRun4 %>%
+  filter(str_detect(sampleType, "Neg"))
+
+# Metadata subsets by sample type
+md_tamRun4_blood <- md_tamRun4 %>%
+  filter(sampleType == "blood")
+
+md_tamRun4_fecal <- md_tamRun4 %>%
+  filter(sampleType == "fecal")
+
+md_tamRun4_hair <- md_tamRun4 %>%
+  filter(sampleType == "hair")
+```
+
+### Loci metadata
+
+```{r}
+# gtscore primer-probe file
+primerProbeFile <- read.table("./tamAnalyses_generalFiles/primerProbeFile_panelv3_fullSet.txt", header = T)
+
+# primer list
+primerList <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+primerList_lwed <- primerList %>%
+  filter(!str_detect(locusType, "SIMP"))
+
+primerList_simp <- primerList %>%
+  filter(!str_detect(locusType, "LWED"))
+```
+
+```{r, echo=FALSE}
+# for html
+lociOverview <- primerProbeFile %>%
+  mutate(
+    lociSet = case_when(
+      str_detect(Locus, "SEXID_LWED") ~ "sexSNP_lwed",
+      str_detect(Locus, "SEXID_SIMP") ~ "sexSNP_simp",
+      str_detect(Locus, "SEXID") ~ "sexSNP_dual",
+      str_detect(Locus, "INDID") ~ "indSNP_dual",
+      str_detect(Locus, "LWED") ~ "indSNP_lwed",
+      str_detect(Locus, "SIMP") ~ "indSNP_simp",
+      str_detect(Locus, "SPECIES") ~ "spSNP_dual"
+    )
+  ) %>%
+  group_by(lociSet) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  adorn_totals("row")
+  
+lociOverview %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+## 3.2 Genotypes
+
+### gtscore0x
+
+```{r}
+# all samples
+genos_ill_gtscore0x_samplesAll_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+genos_ont_gtscore0x_samplesAll_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+# Blood samples
+genos_ill_gtscore0x_samplesBlood_lociAll <- genos_ill_gtscore0x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_blood$sampleID_ill))
+
+genos_ont_gtscore0x_samplesBlood_lociAll <- genos_ont_gtscore0x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_blood$sampleID_ont))
+
+# Fecal samples
+genos_ill_gtscore0x_samplesFecal_lociAll <- genos_ill_gtscore0x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_fecal$sampleID_ill))
+
+genos_ont_gtscore0x_samplesFecal_lociAll <- genos_ont_gtscore0x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_fecal$sampleID_ont))
+
+# Hair samples
+genos_ill_gtscore0x_samplesHair_lociAll <- genos_ill_gtscore0x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_hair$sampleID_ill))
+
+genos_ont_gtscore0x_samplesHair_lociAll <- genos_ont_gtscore0x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_hair$sampleID_ont))
+```
+
+### gtscore10x
+
+```{r}
+# all samples
+genos_ill_gtscore10x_samplesAll_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+genos_ont_gtscore10x_samplesAll_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+# Blood samples
+genos_ill_gtscore10x_samplesBlood_lociAll <- genos_ill_gtscore10x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_blood$sampleID_ill))
+
+genos_ont_gtscore10x_samplesBlood_lociAll <- genos_ont_gtscore10x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_blood$sampleID_ont))
+
+# Fecal samples
+genos_ill_gtscore10x_samplesFecal_lociAll <- genos_ill_gtscore10x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_fecal$sampleID_ill))
+
+genos_ont_gtscore10x_samplesFecal_lociAll <- genos_ont_gtscore10x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_fecal$sampleID_ont))
+
+# Hair samples
+genos_ill_gtscore10x_samplesHair_lociAll <- genos_ill_gtscore10x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_hair$sampleID_ill))
+
+genos_ont_gtscore10x_samplesHair_lociAll <- genos_ont_gtscore10x_samplesAll_lociAll %>%
+  select(c(md_tamRun4_hair$sampleID_ont))
+```
+
+### gtseq
+
+```{r}
+# All samples
+genos_ill_gtseq_samplesAll_lociAll <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+genos_ont_gtseq_samplesAll_lociAll <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/01_nanopore/04_run4GTseq/genos/ont_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = str_sub(Sample, 1, 9)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+# Blood samples
+genos_ill_gtseq_samplesBlood_lociAll <- genos_ill_gtseq_samplesAll_lociAll %>%
+  select(c(md_tamRun4_samplesBlood$sampleID_ill))
+
+genos_ont_gtseq_samplesBlood_lociAll <- genos_ont_gtseq_samplesAll_lociAll %>%
+  select(c(md_tamRun4_samplesBlood$sampleID_ont))
+
+# Fecal samples
+genos_ill_gtseq_samplesFecal_lociAll <- genos_ill_gtseq_samplesAll_lociAll %>%
+  select(c(md_tamRun4_samplesFecal$sampleID_ill))
+
+genos_ont_gtseq_samplesFecal_lociAll <- genos_ont_gtseq_samplesAll_lociAll %>%
+  select(c(md_tamRun4_samplesFecal$sampleID_ont))
+```
+
+## 3.3 Summaries
+
+### Locus summaries
+
+Exclude negatives, filtered by species-specific loci sets
+
+#### gtscore0x, gtscore10x
+
+```{r}
+locusSum_ill_gtscore <- 
+```
+
+#### gtseq
+
+```{r}
+
+```
+
+
+### gtscore0x NOT UPDATED
+
+The locus and sample summaries below are both products of GTscorePipeline_tamRun4.Rmd and provide metrics such as genotype rate and on-/off-target coverage depth. The sample master summary includes all metadata as well.
+
+#### Locus summaries
+
+
+
+
+
+
+##### Negs included
+
+###### Unfiltered species-specific loci
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll_uf_yesNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIESID"
+           ))
+
+locusSum_ont_gtscore_samplesAll_uf_yesNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# LWED
+locusSum_ill_gtscore_samplesLWED_uf_yesNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesLWED_uf_yesNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SIMP
+locusSum_ill_gtscore_samplesSIMP_uf_yesNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesSIMP_uf_yesNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+```
+
+###### Filtered species-specific loci
+
+Full set = all samples where dual-species loci reads are from both species and species-specific loci are from just their species
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll_f_yesNegs <- locusSum_ill_gtscore_samplesAll_uf_yesNegs %>%
+  filter(!str_detect(Locus, "LWED|SIMP")) %>%
+  rbind(., locusSum_ill_gtscore_samplesLWED_uf_yesNegs %>%
+          filter(str_detect(Locus, "LWED"))) %>%
+  rbind(., locusSum_ill_gtscore_samplesSIMP_uf_yesNegs %>%
+          filter(str_detect(Locus, "SIMP")))
+
+locusSum_ont_gtscore_samplesAll_f_yesNegs <- locusSum_ont_gtscore_samplesAll_uf_yesNegs %>%
+  filter(!str_detect(Locus, "LWED|SIMP")) %>%
+  rbind(., locusSum_ont_gtscore_samplesLWED_uf_yesNegs %>%
+          filter(str_detect(Locus, "LWED"))) %>%
+  rbind(., locusSum_ont_gtscore_samplesSIMP_uf_yesNegs %>%
+          filter(str_detect(Locus, "SIMP")))
+
+# LWED
+locusSum_ill_gtscore_samplesLWED_f_yesNegs <- locusSum_ill_gtscore_samplesLWED_uf_yesNegs %>%
+  filter(!str_detect(Locus, "SIMP"))
+
+locusSum_ont_gtscore_samplesLWED_f_yesNegs <- locusSum_ont_gtscore_samplesLWED_uf_yesNegs %>%
+  filter(!str_detect(Locus, "SIMP"))
+
+# SIMP
+locusSum_ill_gtscore_samplesSIMP_f_yesNegs <- locusSum_ill_gtscore_samplesSIMP_uf_yesNegs %>%
+  filter(!str_detect(Locus, "LWED"))
+
+locusSum_ont_gtscore_samplesSIMP_f_yesNegs <- locusSum_ont_gtscore_samplesSIMP_uf_yesNegs %>%
+  filter(!str_detect(Locus, "LWED"))
+```
+
+**By locus set**
+
+START HERE - I don't think I need this section??
+
+```{r}
+# SPECIESID
+ill_locusSum_speciesid_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SPECIESID")
+ont_locusSum_speciesid_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SPECIESID")
+
+# SEXID - dual
+ill_locusSum_sexidDual_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID")
+ont_locusSum_sexidDual_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID")
+
+# SEXID - LWED
+ill_locusSum_sexidLWED_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_LWED")
+ont_locusSum_sexidLWED_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_LWED")
+
+# SEXID - SIMP
+ill_locusSum_sexidSIMP_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_SIMP")
+ont_locusSum_sexidSIMP_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_SIMP")
+
+# INDID - dual
+ill_locusSum_indidDual_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "INDID")
+ont_locusSum_indidDual_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "INDID")
+
+# INDID - LWED
+ill_locusSum_indidLWED_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "LWED")
+ont_locusSum_indidLWED_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "LWED")
+
+# INDID - SIMP
+ill_locusSum_indidSIMP_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SIMP")
+ont_locusSum_indidSIMP_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SIMP")
+```
+
+##### Negs excluded
+
+###### Unfiltered
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll_uf_noNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_noNegs_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesAll_uf_noNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# LWED
+locusSum_ill_gtscore_samplesLWED_uf_noNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_noNegs_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesLWED_uf_noNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SIMP
+locusSum_ill_gtscore_samplesSIMP_uf_noNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_noNegs_simp_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesSIMP_uf_noNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+```
+
+###### Filtered
+
+Full set = all samples where dual-species loci reads are from both species and species-specific loci are from just their species
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll_f_noNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesAll_f_noNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SPECIESID
+
+# SEXID_DUAL
+
+# SEXID_LWED
+
+# SEXID_SIMP
+
+# INDID_DUAL
+
+# INDID_LWED
+
+# INDID_SIMP
+```
+
+#### Sample summaries
+
+##### Unfiltered species-specific loci
+
+The sample summaries below are based on read counts and genotyping that do NOT take species-specific loci into account - that is, reads for SIMP-specific loci are counted for LWED samples and vice versa.
+
+**Full set**
+
+```{r}
+sampleSum_ill_gtscore_samplesAll_stAll_uf <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  merge(., md_ill_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "Sample", by.y = "sampleID_ill")
+
+sampleSum_ont_gtscore_samplesAll_stAll_uf <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
+  merge(., md_ont_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "Sample", by.y = "sampleID_ont")
+```
+
+**By sample type**
+
+```{r}
+# Illumina
+sampleSum_ill_gtscore_samplesAll_stBlood_uf <- sampleSum_ill_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "blood")
+
+sampleSum_ill_gtscore_samplesAll_stFecal_uf <- sampleSum_ill_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ill_gtscore_samplesAll_stHair_uf <- sampleSum_ill_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "hair")
+
+# Nanopore
+sampleSum_ont_gtscore_samplesAll_stBlood_uf <- sampleSum_ont_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "blood")
+
+sampleSum_ont_gtscore_samplesAll_stFecal_uf <- sampleSum_ont_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ont_gtscore_samplesAll_stHair_uf <- sampleSum_ont_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "hair")
+```
+
+##### Filtered species-specific loci
+
+The sample summaries below are based on read counts and genotyping that take species-specific loci into account - that is, reads for SIMP-specific loci are ignored for LWED samples and vice versa.
+
+**Full set**
+
+```{r}
+# Sample summaries INCLUDING negatives
+sampleSum_ill_gtscore_samplesAll_stAll_f <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles_ill/ill_tamRun4_master_sampleSummary_10x.csv")
+
+sampleSum_ont_gtscore_samplesAll_stAll_f <- read.csv("./04_tamRun4/01_nanopore/03_run4GTscore/summaryFiles_ont/ont_tamRun4_master_sampleSummary_10x.csv")
+
+## Sample summaries NO NEGATIVES
+sampleSum_ill_gtscore_samplesAll.noNegs_stAll_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(!str_detect(sampleType, "Neg"))
+
+sampleSum_ont_gtscore_samplesAll.noNegs_stAll_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(!str_detect(sampleType, "Neg"))
+
+#ont_sampleSum_subset <- ont_sampleSum %>%
+#  select(c("sampleID_unique", "sampleID", "sampleFile", "Total.Reads", "Off.target.Reads", "Primer.Only.Reads", "Primer.Probe.Reads", "Off.target.Proportion", "Primer.Only.Proportion", "Primer.Probe.Proportion", "lociSet", "GenotypeRate", "Heterozygosity", "conScore"))
+
+#illONT_sampleSum <- ill_sampleSum %>%
+#  mutate(sampleID_unique = replace(sampleID_unique, duplicated(sampleID_unique), NA_integer_)) %>%
+#  left_join(., ont_sampleSum_subset, by = "sampleID_unique", suffix = c("_ill", "_ont")) %>%
+#  select(-Sample) %>%
+#  relocate(sampleID_ill, .after = sampleID_unique)
+```
+
+**By sample type**
+
+```{r}
+# Illumina
+sampleSum_ill_gtscore_samplesAll_stBlood_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "blood")
+
+sampleSum_ill_gtscore_samplesAll_stFecal_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ill_gtscore_samplesAll_stHair_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "hair")
+
+# Nanopore
+sampleSum_ont_gtscore_samplesAll_stBlood_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "blood")
+
+sampleSum_ont_gtscore_samplesAll_stFecal_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ont_gtscore_samplesAll_stHair_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "hair")
+```
+
+
+### gtscore10x
+
+The locus and sample summaries below are both products of GTscorePipeline_tamRun4.Rmd and provide metrics such as genotype rate and on-/off-target coverage depth. The sample master summary includes all metadata as well.
+
+#### Locus summaries
+
+##### Negs included
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll.yesNegs_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIESID"
+           ))
+
+locusSum_ont_gtscore_samplesAll.yesNegs_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# LWED
+locusSum_ill_gtscore_samplesLWED.yesNegs_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesLWED.yesNegs_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SIMP
+locusSum_ill_gtscore_samplesSIMP.yesNegs_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesSIMP.yesNegs_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+```
+
+##### Negs excluded
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll.noNegs_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_noNegs_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesAll.noNegs_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# LWED
+locusSum_ill_gtscore_samplesLWED.noNegs_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_noNegs_lwed_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesLWED.noNegs_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_lwed_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SIMP
+locusSum_ill_gtscore_samplesSIMP.noNegs_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_noNegs_simp_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesSIMP.noNegs_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_simp_lociAll_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+```
+
+#### Sample summaries
+
+##### lociAll
+
+The sample summaries below are based on read counts and genotyping that do NOT take species-specific loci into account - that is, reads for SIMP-specific loci are counted for LWED samples and vice versa.
+
+**Full set**
+
+```{r}
+sampleSum_ill_gtscore_samplesAll_lociAll <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType", "species")], by.x = "Sample", by.y = "sampleID_ill")
+
+sampleSum_ont_gtscore_samplesAll_lociAll <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType", "species")], by.x = "Sample", by.y = "sampleID_ont")
+```
+
+**By sample type**
+
+```{r}
+# Illumina
+sampleSum_ill_gtscore_samplesBlood_lociAll <- sampleSum_ill_gtscore_samplesAll_lociAll %>%
+  filter(sampleType == "blood")
+
+sampleSum_ill_gtscore_samplesFecal_lociAll <- sampleSum_ill_gtscore_samplesAll_lociAll %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ill_gtscore_samplesHair_lociAll <- sampleSum_ill_gtscore_samplesAll_lociAll %>%
+  filter(sampleType == "hair")
+
+# Nanopore
+sampleSum_ont_gtscore_samplesBlood_lociAll <- sampleSum_ont_gtscore_samplesAll_lociAll %>%
+  filter(sampleType == "blood")
+
+sampleSum_ont_gtscore_samplesFecal_lociAll <- sampleSum_ont_gtscore_samplesAll_lociAll %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ont_gtscore_samplesHair_lociAll <- sampleSum_ont_gtscore_samplesAll_lociAll %>%
+  filter(sampleType == "hair")
+```
+
+##### lociFiltered
+
+The sample summaries below are based on read counts and genotyping that take species-specific loci into account - that is, reads for SIMP-specific loci are ignored for LWED samples and vice versa.
+
+```{r}
+# Sample summaries full set samples
+sampleSum_ill_gtscore_samplesAll_lociF <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles_ill/ill_tamRun4_master_sampleSummary_10x.csv")
+
+sampleSum_ont_gtscore_samplesAll_lociF <- read.csv("./04_tamRun4/01_nanopore/03_run4GTscore/summaryFiles_ont/ont_tamRun4_master_sampleSummary_10x.csv")
+
+# Subsets by sample type
+# Illumina
+sampleSum_ill_gtscore_samplesBlood_lociF <- sampleSum_ill_gtscore_samplesAll_lociF %>%
+  filter(sampleType == "blood")
+
+sampleSum_ill_gtscore_samplesFecal_lociF <- sampleSum_ill_gtscore_samplesAll_lociF %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ill_gtscore_samplesHair_lociF <- sampleSum_ill_gtscore_samplesAll_lociF %>%
+  filter(sampleType == "hair")
+
+# Nanopore
+sampleSum_ont_gtscore_samplesBlood_lociF <- sampleSum_ont_gtscore_samplesAll_lociF %>%
+  filter(sampleType == "blood")
+
+sampleSum_ont_gtscore_samplesFecal_lociF <- sampleSum_ont_gtscore_samplesAll_lociF %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ont_gtscore_samplesHair_lociF <- sampleSum_ont_gtscore_samplesAll_lociF %>%
+  filter(sampleType == "hair")
+```
+
+### GTseq
+
+#### Data prep
+
+GTseq doesn't automatically output allele reads in an easily usable
+format - instead, we need to extract this data from the ".genos" files
+as follows:
+
+1.  Convert .genos files to csv files
+2.  Import as one dataframe
+3.  Subset relevant columns and reformat
+
+##### Illumina
+
+```{r}
+readCounts_ill_gtseq <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/ill_gtseq_alleleReads.txt", header = T)
+
+# Sum read counts per sample/locus combo
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+readSums_ill_gtseq <- readCounts_ill_gtseq %>%
+  replace(., TRUE, lapply(., repl)) %>%
+  mutate(across(everything(), as.numeric))
+
+readSums_ill_gtseq_samplesAll_lociDual <- readSums_ill_gtseq %>%
+  rownames_to_column("locus") %>%
+  mutate(across(!locus,
+                ~ case_when(
+                  str_detect(locus, "LWED|SIMP") ~ NA,
+                  .default = .)))
+
+readSums_ill_gtseq_samplesLWED_lociLWED <- readSums_ill_gtseq %>%
+  rownames_to_column("locus") %>%
+  mutate(
+    across(c(md_tamRun4_samplesLWED$sampleID_ill),
+           ~ case_when(
+             !str_detect(locus, "LWED") ~ NA,
+             .default = .)),
+    across(c(md_tamRun4_samplesSIMP$sampleID_ill, md_tamRun4_samplesNegs$sampleID_ill),
+           ~ NA))
+
+readSums_ill_gtseq_samplesSIMP_lociSIMP <- readSums_ill_gtseq %>%
+  rownames_to_column("locus") %>%
+  mutate(
+    across(c(md_tamRun4_samplesSIMP$sampleID_ill),
+           ~ case_when(
+             !str_detect(locus, "SIMP") ~ NA,
+             .default = .)),
+    across(c(md_tamRun4_samplesLWED$sampleID_ill, md_tamRun4_samplesNegs$sampleID_ill),
+           ~ NA))
+```
+
+##### Nanopore
+
+**Convert .genos to .csv in bash**
+
+```{bash, eval = FALSE}
+# first copied all .genos files to genos_csv
+# then cd to genos_csv and run the following:
+
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/01_nanopore/04_run4GTseq_ont/genos/genos_csv
+
+for f in *.all.genos; do
+    g="${f%.all.genos}.csv"
+    mv "${f}" "${g}"
+done
+```
+
+**Import all csv files as one dataframe & reformat**
+
+```{r}
+fileNames_ont_gtseq <- dir("./04_tamRun4/01_nanopore/04_run4GTseq/genos/genos_csv", full.names = T)
+
+readCounts_ont_gtseq.list <- lapply(fileNames_ont_gtseq, function(file.name) {
+  df <- read.csv(file.name, skip = 1, header = F)
+  df$file.name <- file.name
+  return(df)
+  })
+
+readCounts_ont_gtseq <- rlist::list.rbind(readCounts_ont_gtseq.list) %>%
+  dplyr::rename("locus" = "V1",
+         "allele1_counts" = "V2",
+         "allele2_counts" = "V3",
+         "a1.a2_ratio" = "V4",
+         "geno" = "V5",
+         "genoClass" = "V6",
+         "a1_correctionValue" = "V7",
+         "a2_corectionValue" = "V8",
+         "onTargetReads" = "V9",
+         "locus_otProp.readTotal" = "V10",
+         "locus_otProp.otTotal" = "V11",
+         "sampleID" = "file.name") %>%
+  # remove read counts from overhangs
+  filter(locus %in% primerList.v3$locus) %>%
+  mutate(
+    readCounts = str_c(sub(".*=", "", allele1_counts), ",", sub(".*=", "", allele2_counts)),
+    sampleID = sub("./04_tamRun4/01_nanopore/04_run4GTseq/genos/genos_csv/", "", sampleID),
+    sampleID = sub(".csv", "", sampleID),
+    sampleID = gsub("-", "\\.", sampleID)
+    ) %>%
+  select(c("sampleID", "locus", "readCounts")) %>%
+  pivot_wider(names_from = sampleID, values_from = readCounts) %>%
+  column_to_rownames("locus") %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+# Sum read counts per sample/locus combo
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+readSums_ont_gtseq <- readCounts_ont_gtseq %>%
+  replace(., TRUE, lapply(., repl)) %>%
+  mutate(across(everything(), as.numeric))
+
+readSums_ont_gtseq_samplesAll_lociDual <- readSums_ont_gtseq %>%
+  rownames_to_column("locus") %>%
+  mutate(across(!locus,
+                ~ case_when(
+                  str_detect(locus, "LWED|SIMP") ~ NA,
+                  .default = .)))
+
+readSums_ont_gtseq_samplesLWED_lociLWED <- readSums_ont_gtseq %>%
+  rownames_to_column("locus") %>%
+  mutate(
+    across(c(md_tamRun4_samplesLWED$sampleID_ont),
+           ~ case_when(
+             !str_detect(locus, "LWED") ~ NA,
+             .default = .)),
+    across(c(md_tamRun4_samplesSIMP$sampleID_ont, md_tamRun4_samplesNegs$sampleID_ont),
+           ~ NA))
+
+readSums_ont_gtseq_samplesSIMP_lociSIMP <- readSums_ont_gtseq %>%
+  rownames_to_column("locus") %>%
+  mutate(
+    across(c(md_tamRun4_samplesSIMP$sampleID_ont),
+           ~ case_when(
+             !str_detect(locus, "SIMP") ~ NA,
+             .default = .)),
+    across(c(md_tamRun4_samplesLWED$sampleID_ont, md_tamRun4_samplesNegs$sampleID_ont),
+           ~ NA))
+```
+
+#### Locus summaries
+
+##### Negs included
+
+###### *Unfiltered species-specific loci
+
+*only have locus name, primer-probe reads, and locus set - not total reads
+
+```{r}
+# Full set
+locusReadSum_ill_gtseq_samplesAll_uf_yesNegs <- readSums_ill_gtseq %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusReadSum_ont_gtseq_samplesAll_uf_yesNegs <- readSums_ont_gtseq %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# LWED
+locusSum_ill_gtseq_samplesLWED_uf_yesNegs <- readSums_ill_gtseq %>%
+  select(as.character(md_tamRun4_samplesLWED$sampleID_ill), as.character(md_tamRun4_samplesNegs$sampleID_ill)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtseq_samplesLWED_uf_yesNegs <- readSums_ont_gtseq %>%
+  select(as.character(md_tamRun4_samplesLWED$sampleID_ont), as.character(md_tamRun4_samplesNegs$sampleID_ont)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SIMP
+locusSum_ill_gtseq_samplesSIMP_uf_yesNegs <- readSums_ill_gtseq %>%
+  select(as.character(md_tamRun4_samplesSIMP$sampleID_ill), as.character(md_tamRun4_samplesNegs$sampleID_ill)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtseq_samplesSIMP_uf_yesNegs <- readSums_ont_gtseq %>%
+  select(as.character(md_tamRun4_samplesSIMP$sampleID_ont), as.character(md_tamRun4_samplesNegs$sampleID_ont)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+```
+
+###### *Filtered species-specific loci
+
+*PARTIALLY UPDATED*
+
+Full set = all samples where dual-species loci reads are from both species and species-specific loci are from just their species
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll_f_yesNegs <- rows_patch(readSums_ill_gtseq_samplesAll_lociDual, readSums_ill_gtseq_samplesLWED_lociLWED, by = "locus") %>%
+  rows_patch(., readSums_ill_gtseq_samplesSIMP_lociSIMP, by = "locus") %>%
+  column_to_rownames("locus") %>%
+  mutate(Primer.Probe.Reads = rowSums(., na.rm = T)) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesAll_f_yesNegs <- rows_patch(readSums_ont_gtseq_samplesAll_lociDual, readSums_ont_gtseq_samplesLWED_lociLWED, by = "locus") %>%
+  rows_patch(., readSums_ont_gtseq_samplesSIMP_lociSIMP, by = "locus") %>%
+  column_to_rownames("locus") %>%
+  mutate(Primer.Probe.Reads = rowSums(., na.rm = T)) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# *LWED
+locusSum_ill_gtscore_samplesLWED_f_yesNegs <- locusSum_ill_gtscore_samplesLWED_uf_yesNegs %>%
+  filter(!str_detect(Locus, "SIMP"))
+
+locusSum_ont_gtscore_samplesLWED_f_yesNegs <- locusSum_ont_gtscore_samplesLWED_uf_yesNegs %>%
+  filter(!str_detect(Locus, "SIMP"))
+
+# *SIMP
+locusSum_ill_gtscore_samplesSIMP_f_yesNegs <- locusSum_ill_gtscore_samplesSIMP_uf_yesNegs %>%
+  filter(!str_detect(Locus, "LWED"))
+
+locusSum_ont_gtscore_samplesSIMP_f_yesNegs <- locusSum_ont_gtscore_samplesSIMP_uf_yesNegs %>%
+  filter(!str_detect(Locus, "LWED"))
+```
+
+**By locus set**
+
+I don't think I need this section??
+
+```{r}
+# SPECIESID
+ill_locusSum_speciesid_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SPECIESID")
+ont_locusSum_speciesid_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SPECIESID")
+
+# SEXID - dual
+ill_locusSum_sexidDual_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID")
+ont_locusSum_sexidDual_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID")
+
+# SEXID - LWED
+ill_locusSum_sexidLWED_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_LWED")
+ont_locusSum_sexidLWED_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_LWED")
+
+# SEXID - SIMP
+ill_locusSum_sexidSIMP_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_SIMP")
+ont_locusSum_sexidSIMP_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SEXID_SIMP")
+
+# INDID - dual
+ill_locusSum_indidDual_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "INDID")
+ont_locusSum_indidDual_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "INDID")
+
+# INDID - LWED
+ill_locusSum_indidLWED_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "LWED")
+ont_locusSum_indidLWED_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "LWED")
+
+# INDID - SIMP
+ill_locusSum_indidSIMP_filtered <- ill_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SIMP")
+ont_locusSum_indidSIMP_filtered <- ont_locusSum_fullSet_filtered %>%
+  filter(lociSet == "SIMP")
+```
+
+##### Negs excluded
+
+###### *Unfiltered
+
+*only have locus name, primer-probe reads, and locus set - not total reads
+
+```{r}
+# Full set
+locusSum_ill_gtseq_samplesAll_uf_noNegs <- readSums_ill_gtseq %>%
+  # remove negatives
+  select(-c(md_tamRun4_samplesNegs$sampleID_ill)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesAll_uf_noNegs <- readSums_ont_gtseq %>%
+  # remove negatives
+  select(-c(md_tamRun4_samplesNegs$sampleID_ont)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# LWED
+locusSum_ill_gtseq_samplesLWED_uf_noNegs <- readSums_ill_gtseq %>%
+  # select LWED samples (no negs)
+  select(as.character(md_tamRun4_samplesLWED$sampleID_ill)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtseq_samplesLWED_uf_noNegs <- readSums_ont_gtseq %>%
+  # select LWED samples (no negs)
+  select(as.character(md_tamRun4_samplesLWED$sampleID_ont)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SIMP
+locusSum_ill_gtseq_samplesSIMP_uf_noNegs <- readSums_ill_gtseq %>%
+  # select SIMP samples (no negs)
+  select(as.character(md_tamRun4_samplesSIMP$sampleID_ill)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtseq_samplesSIMP_uf_noNegs <- readSums_ont_gtseq %>%
+  # select SIMP samples (no negs)
+  select(as.character(md_tamRun4_samplesSIMP$sampleID_ont)) %>%
+  mutate(
+    Primer.Probe.Reads = rowSums(., na.rm = T)
+  ) %>%
+  select(Primer.Probe.Reads) %>%
+  rownames_to_column("Locus") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+```
+
+###### **Filtered
+
+**NOT UPDATED**
+
+```{r}
+# Full set
+locusSum_ill_gtscore_samplesAll_f_noNegs <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+locusSum_ont_gtscore_samplesAll_f_noNegs <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(lociSet =
+           case_when(
+             str_detect(Locus, "INDID") ~ "INDID",
+             str_detect(Locus, "SEXID_LWED") ~ "SEXID_LWED",
+             str_detect(Locus, "SEXID_SIMP") ~ "SEXID_SIMP",
+             str_detect(Locus, "SEXID") ~ "SEXID",
+             str_detect(Locus, "LWED") ~ "LWED",
+             str_detect(Locus, "SIMP") ~ "SIMP",
+             str_detect(Locus, "SPECIES") ~ "SPECIES"
+           ))
+
+# SPECIESID
+
+# SEXID_DUAL
+
+# SEXID_LWED
+
+# SEXID_SIMP
+
+# INDID_DUAL
+
+# INDID_LWED
+
+# INDID_SIMP
+```
+
+#### Sample summaries
+
+##### Unfiltered species-specific loci
+
+The sample summaries below are based on read counts and genotyping that do NOT take species-specific loci into account - that is, reads for SIMP-specific loci are counted for LWED samples and vice versa.
+
+**Full set**
+
+```{r}
+sampleSum_ill_gtseq_samplesAll_stAll_uf <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  select(c(Sample, Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
+  dplyr::rename(
+    "Total.Reads" = "Raw.Reads",
+    "Primer.Probe.Reads" = "On.Target.Reads",
+    "Primer.Probe.Proportion" = "X.On.Target",
+    "GenotypeRate" = "X.GT"
+  ) %>%
+  mutate(
+    Primer.Probe.Proportion = round(Primer.Probe.Proportion/100, 2),
+    GenotypeRate = round(GenotypeRate/100, 2)
+    )
+
+sampleSum_ont_gtscore_samplesAll_stAll_uf <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/01_nanopore/04_run4GTseq_ont/genos/ont_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = str_sub(Sample, 1, 9)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  select(c(Sample, Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
+  dplyr::rename(
+    "Total.Reads" = "Raw.Reads",
+    "Primer.Probe.Reads" = "On.Target.Reads",
+    "Primer.Probe.Proportion" = "X.On.Target",
+    "GenotypeRate" = "X.GT"
+  ) %>%
+  mutate(
+    Primer.Probe.Proportion = round(Primer.Probe.Proportion/100, 2),
+    GenotypeRate = round(GenotypeRate/100, 2)
+    )
+```
+
+**By sample type**
+
+```{r}
+# Illumina
+sampleSum_ill_gtscore_samplesAll_stBlood_uf <- sampleSum_ill_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "blood")
+
+sampleSum_ill_gtscore_samplesAll_stFecal_uf <- sampleSum_ill_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ill_gtscore_samplesAll_stHair_uf <- sampleSum_ill_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "hair")
+
+# Nanopore
+sampleSum_ont_gtscore_samplesAll_stBlood_uf <- sampleSum_ont_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "blood")
+
+sampleSum_ont_gtscore_samplesAll_stFecal_uf <- sampleSum_ont_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ont_gtscore_samplesAll_stHair_uf <- sampleSum_ont_gtscore_samplesAll_stAll_uf %>%
+  filter(sampleType == "hair")
+```
+
+##### Filtered species-specific loci
+
+The sample summaries below are based on read counts and genotyping that take species-specific loci into account - that is, reads for SIMP-specific loci are ignored for LWED samples and vice versa.
+
+**Full set**
+
+```{r}
+# Sample summaries INCLUDING negatives
+sampleSum_ill_gtscore_samplesAll_stAll_f <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore_ill/summaryFiles_ill/ill_tamRun4_master_sampleSummary_10x.csv")
+
+sampleSum_ont_gtscore_samplesAll_stAll_f <- read.csv("./04_tamRun4/01_nanopore/03_run4GTscore_ont/summaryFiles_ont/ont_tamRun4_master_sampleSummary_10x.csv")
+
+## Sample summaries NO NEGATIVES
+sampleSum_ill_gtscore_samplesAll.noNegs_stAll_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(!str_detect(sampleType, "Neg"))
+
+sampleSum_ont_gtscore_samplesAll.noNegs_stAll_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(!str_detect(sampleType, "Neg"))
+
+#ont_sampleSum_subset <- ont_sampleSum %>%
+#  select(c("sampleID_unique", "sampleID", "sampleFile", "Total.Reads", "Off.target.Reads", "Primer.Only.Reads", "Primer.Probe.Reads", "Off.target.Proportion", "Primer.Only.Proportion", "Primer.Probe.Proportion", "lociSet", "GenotypeRate", "Heterozygosity", "conScore"))
+
+#illONT_sampleSum <- ill_sampleSum %>%
+#  mutate(sampleID_unique = replace(sampleID_unique, duplicated(sampleID_unique), NA_integer_)) %>%
+#  left_join(., ont_sampleSum_subset, by = "sampleID_unique", suffix = c("_ill", "_ont")) %>%
+#  select(-Sample) %>%
+#  relocate(sampleID_ill, .after = sampleID_unique)
+```
+
+**By sample type**
+
+```{r}
+# Illumina
+sampleSum_ill_gtscore_samplesAll_stBlood_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "blood")
+
+sampleSum_ill_gtscore_samplesAll_stFecal_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ill_gtscore_samplesAll_stHair_f <- sampleSum_ill_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "hair")
+
+# Nanopore
+sampleSum_ont_gtscore_samplesAll_stBlood_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "blood")
+
+sampleSum_ont_gtscore_samplesAll_stFecal_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "fecal")
+
+sampleSum_ont_gtscore_samplesAll_stHair_f <- sampleSum_ont_gtscore_samplesAll_stAll_f %>%
+  filter(sampleType == "hair")
+```
+
+## 3.4 Sample counts
+
+```{r, echo=FALSE}
+sampleCounts <- data.frame(
+  variable = c("Total blood samples",
+               "Female blood samples",
+               "Male blood samples",
+               "Total fecal samples",
+               "Female fecal samples",
+               "Male fecal samples",
+               "Total hair samples",
+               "Female hair samples",
+               "Male hair samples",
+               "TOTAL"
+               ),
+  LWED = c(sum(md_tamRun4_samplesLWED$sampleType == "blood"),
+           sum(md_tamRun4_samplesLWED$sampleType == "blood" &
+                 md_tamRun4_samplesLWED$sex == "F"),
+           sum(md_tamRun4_samplesLWED$sampleType == "blood" &
+                 md_tamRun4_samplesLWED$sex == "M"),
+           sum(md_tamRun4_samplesLWED$sampleType == "fecal"),
+           sum(md_tamRun4_samplesLWED$sampleType == "fecal" &
+                 md_tamRun4_samplesLWED$sex == "F"),
+           sum(md_tamRun4_samplesLWED$sampleType == "fecal" &
+                 md_tamRun4_samplesLWED$sex == "M"),
+           sum(md_tamRun4_samplesLWED$sampleType == "hair"),
+           sum(md_tamRun4_samplesLWED$sampleType == "hair" &
+                 md_tamRun4_samplesLWED$sex == "F"),
+           sum(md_tamRun4_samplesLWED$sampleType == "hair" &
+                 md_tamRun4_samplesLWED$sex == "M"),
+           nrow(md_tamRun4_samplesLWED)
+           ),
+  SIMP = c(sum(md_tamRun4_samplesSIMP$sampleType == "blood"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "blood" &
+                 md_tamRun4_samplesSIMP$sex == "F"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "blood" &
+                 md_tamRun4_samplesSIMP$sex == "M"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "fecal"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "fecal" &
+                 md_tamRun4_samplesSIMP$sex == "F"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "fecal" &
+                 md_tamRun4_samplesSIMP$sex == "M"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "hair"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "hair" &
+                 md_tamRun4_samplesSIMP$sex == "F"),
+           sum(md_tamRun4_samplesSIMP$sampleType == "hair" &
+                 md_tamRun4_samplesSIMP$sex == "M"),
+           nrow(md_tamRun4_samplesSIMP)
+           ),
+  Negatives = c(0, 0, 0, 0, 0, 0, 0, 0, 0, nrow(md_tamRun4_samplesNegs))
+) %>%
+  column_to_rownames("variable") %>%
+  mutate(TOTAL = rowSums(.))
+
+sampleCounts %>%
+  kable(caption = "tamRun4 sample counts by species, sample type, and sex") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+## 3.5 Loci counts
+
+```{r}
+lociCounts <- data.frame(
+  locusType = c("INDID_dual", "INDID_LWED", "INDID_SIMP", "SPECIESID", "SEXID_dual", "SEXID_LWED", "SEXID_SIMP", "TOTAL"),
+  lwedPanel = c(
+    sum(primerList.v3$locusType == "INDID"),
+    sum(primerList.v3$locusType == "LWED"),
+    NA,
+    sum(primerList.v3$locusType == "SPECIESID"),
+    sum(primerList.v3$locusType == "SEXID"),
+    sum(primerList.v3$locusType == "SEXID_LWED"),
+    NA,
+    nrow(primerList.v3_lwed)
+  ),
+  simpPanel = c(
+    sum(primerList.v3$locusType == "INDID"),
+    NA,
+    sum(primerList.v3$locusType == "SIMP"),
+    sum(primerList.v3$locusType == "SPECIESID"),
+    sum(primerList.v3$locusType == "SEXID"),
+    NA,
+    sum(primerList.v3$locusType == "SEXID_SIMP"),
+    nrow(primerList.v3_simp)
+  ),
+  fullPanel = c(
+    sum(primerList.v3$locusType == "INDID"),
+    sum(primerList.v3$locusType == "LWED"),
+    sum(primerList.v3$locusType == "SIMP"),
+    sum(primerList.v3$locusType == "SPECIESID"),
+    sum(primerList.v3$locusType == "SEXID"),
+    sum(primerList.v3$locusType == "SEXID_LWED"),
+    sum(primerList.v3$locusType == "SEXID_SIMP"),
+    nrow(primerList.v3)
+  )
+)
+
+lociCounts %>%
+  kable(caption = "Loci counts by locus type for species-specific and full SNP panel") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+# 4 Read counts
+
+## 4.1 GTscore
+
+### By locus
+
+#### UNFILTERED species-specific loci
+
+Illumina had 10,727,250 total reads while Nanopore had 1,528,891 total reads (unfiltered for species-specific loci).
+
+The proportion of on-target reads to total reads are as follows for Illumina vs. Nanopore:
+
+-   All samples: Illumina 9% HIGHER than Nanopore
+
+    -   Illumina 0.34
+    -   Nanopore 0.25
+
+-   Blood samples: Illumina 15% HIGHER than Nanopore
+
+    -   Illumina 0.43
+    -   Nanopore 0.28
+
+-   Fecal samples: Illumina 8% HIGHER than Nanopore
+
+    -   Illumina 0.30
+    -   Nanopore 0.22
+
+-   Hair samples: Illumina 8% LOWER than Nanopore
+
+    -   Illumina 0.16
+    -   Nanopore 0.24
+
+##### Full set
+
+```{r}
+illONT_readSummary_fullSet_unfiltered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_uf$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_uf$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_uf$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_uf$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "fullSet"
+  )
+
+illONT_readSummary_fullSet_unfiltered %>%
+  kable(
+    caption = "[UNFILTERED] All samples: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+##### By sample type
+
+**Blood**
+
+```{r}
+illONT_readSummary_blood_unfiltered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stBlood_uf$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stBlood_uf$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stBlood_uf$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stBlood_uf$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "blood"
+  )
+
+illONT_readSummary_blood_unfiltered %>%
+  kable(
+    caption = "[UNFILTERED] Blood: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Fecal**
+
+```{r}
+illONT_readSummary_fecal_unfiltered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stFecal_uf$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stFecal_uf$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stFecal_uf$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stFecal_uf$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "fecal"
+  )
+
+illONT_readSummary_fecal_unfiltered %>%
+  kable(
+    caption = "[UNFILTERED] Fecal: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Hair**
+
+```{r}
+illONT_readSummary_hair_unfiltered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stHair_uf$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stHair_uf$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stHair_uf$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stHair_uf$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "hair"
+  )
+
+illONT_readSummary_hair_unfiltered %>%
+  kable(
+    caption = "[UNFILTERED] Hair: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+##### Summary
+
+```{r}
+illONT_readSummary_propOnTarget_unfiltered <- rbind(illONT_readSummary_fullSet_unfiltered, illONT_readSummary_blood_unfiltered, illONT_readSummary_fecal_unfiltered, illONT_readSummary_hair_unfiltered) %>%
+  select(c(seqType, prop_onTarget, sampleType)) %>%
+  pivot_wider(names_from = seqType, values_from = prop_onTarget)
+
+illONT_readSummary_propOnTarget_unfiltered %>%
+  kable(
+    caption = "[UNFILTERED] Summary: On-target read proportion by sample type for Illumina vs. Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+#### FILTERED species-specific loci
+
+Illumina had 9,185,206 total reads while Nanopore had 1,300,441 total reads (filtered for species-specific loci).
+
+The proportion of on-target reads to total reads are as follows for Illumina vs. Nanopore:
+
+-   All samples: Illumina 7% HIGHER than Nanopore
+
+    -   Illumina 0.28
+    -   Nanopore 0.21
+
+-   Blood samples: Illumina 13% HIGHER than Nanopore
+
+    -   Illumina 0.37
+    -   Nanopore 0.24
+
+-   Fecal samples: Illumina 7% HIGHER than Nanopore
+
+    -   Illumina 0.26
+    -   Nanopore 0.19
+
+-   Hair samples: Illumina 7% LOWER than Nanopore
+
+    -   Illumina 0.12
+    -   Nanopore 0.19
+
+##### Full set
+
+```{r}
+illONT_readSummary_fullSet_filtered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stAll_f$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stAll_f$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stAll_f$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stAll_f$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "fullSet"
+  )
+
+illONT_readSummary_fullSet_filtered %>%
+  kable(
+    caption = "[FILTERED] All samples: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+##### By sample type
+
+**Blood**
+
+```{r}
+illONT_readSummary_blood_filtered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stBlood_f$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stBlood_f$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stBlood_f$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stBlood_f$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "blood"
+  )
+
+illONT_readSummary_blood_filtered %>%
+  kable(
+    caption = "[FILTERED] Blood: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Fecal**
+
+```{r}
+illONT_readSummary_fecal_filtered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stFecal_f$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stFecal_f$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stFecal_f$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stFecal_f$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "fecal"
+  )
+
+illONT_readSummary_fecal_filtered %>%
+  kable(
+    caption = "[FILTERED] Fecal: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Hair**
+
+```{r}
+illONT_readSummary_hair_filtered <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  reads_onTarget = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stHair_f$Primer.Probe.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stHair_f$Primer.Probe.Reads)),
+  reads_total = c(
+    sum(sampleSum_ill_gtscore_samplesAll_stHair_f$Total.Reads),
+    sum(sampleSum_ont_gtscore_samplesAll_stHair_f$Total.Reads)
+    )
+) %>%
+  mutate(
+    prop_onTarget = round(reads_onTarget/reads_total, 2),
+    sampleType = "hair"
+  )
+
+illONT_readSummary_hair_filtered %>%
+  kable(
+    caption = "[FILTERED] Hair: On-target vs. total read counts for Illumina & Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+##### Summary
+
+```{r}
+illONT_readSummary_propOnTarget_filtered <- rbind(illONT_readSummary_fullSet_filtered, illONT_readSummary_blood_filtered, illONT_readSummary_fecal_filtered, illONT_readSummary_hair_filtered) %>%
+  select(c(seqType, prop_onTarget, sampleType)) %>%
+  pivot_wider(names_from = seqType, values_from = prop_onTarget)
+
+illONT_readSummary_propOnTarget_filtered %>%
+  kable(
+    caption = "[FILTERED] Summary: On-target read proportion by sample type for Illumina vs. Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+### By sample
+
+#### UNFILTERED
+
+
+#### FILTERED
+
+
+
+## 4.2 GTseq
+
+# 5 Geno success
+
+## 4.1 GTscore
+
+Genotype success is based only on FILTERED species-specific loci - that is, genotypes for LWED samples at SIMP-specific loci are ignored and vice versa.
+
+### 5.1 By locus
+
+#### Full set
+
+```{r}
+illONT_genoSummary_byLocus_fullSet <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_fullSet_filtered$GenotypeRate),
+    mean(ont_locusSum_fullSet_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "fullSet")
+```
+
+#### By loci set
+
+```{r}
+# SPECIESID
+illONT_genoSummary_byLocus_speciesid <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_speciesid_filtered$GenotypeRate),
+    mean(ont_locusSum_speciesid_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "SPECIESID")
+
+# SEXID - dual
+illONT_genoSummary_byLocus_sexidDual <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_sexidDual_filtered$GenotypeRate),
+    mean(ont_locusSum_sexidDual_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "SEXID_dual")
+
+# SEXID - LWED
+illONT_genoSummary_byLocus_sexidLWED <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_sexidLWED_filtered$GenotypeRate),
+    mean(ont_locusSum_sexidLWED_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "SEXID_LWED")
+
+# SEXID - SIMP
+illONT_genoSummary_byLocus_sexidSIMP <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_sexidSIMP_filtered$GenotypeRate),
+    mean(ont_locusSum_sexidSIMP_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "SEXID_SIMP")
+
+# INDID - dual
+illONT_genoSummary_byLocus_indidDual <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_indidDual_filtered$GenotypeRate),
+    mean(ont_locusSum_indidDual_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "INDID_dual")
+
+# INDID - LWED
+illONT_genoSummary_byLocus_indidLWED <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_indidLWED_filtered$GenotypeRate),
+    mean(ont_locusSum_indidLWED_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "INDID_LWED")
+
+# INDID - SIMP
+illONT_genoSummary_byLocus_indidSIMP <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(ill_locusSum_indidSIMP_filtered$GenotypeRate),
+    mean(ont_locusSum_indidSIMP_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(lociSet = "INDID_SIMP")
+```
+
+#### Summary
+
+```{r}
+illONT_genoSummary_byLocus_filtered <- rbind(
+  illONT_genoSummary_byLocus_fullSet,
+  illONT_genoSummary_byLocus_speciesid,
+  illONT_genoSummary_byLocus_sexidDual,
+  illONT_genoSummary_byLocus_sexidLWED,
+  illONT_genoSummary_byLocus_sexidSIMP,
+  illONT_genoSummary_byLocus_indidDual,
+  illONT_genoSummary_byLocus_indidLWED,
+  illONT_genoSummary_byLocus_indidSIMP
+) %>%
+  pivot_wider(names_from = seqType, values_from = genoSuccess) %>%
+  mutate(
+    Illumina = round(Illumina, 2),
+    Nanopore = round(Nanopore, 2)
+  )
+
+illONT_genoSummary_byLocus_filtered %>%
+  kable(
+    caption = "[FILTERED] Summary: Loci genotype success by set for Illumina vs. Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+#### Loci comparison
+
+START HERE
+
+create dumbbell plot of loci geno success for Illumina vs. Nanopore
+
+```{r}
+
+```
+
+### 5.2 By sample
+
+#### Full set
+
+```{r}
+illONT_genoSummary_bySample_fullSet <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(sampleSum_ill_gtscore_samplesAll.noNegs_stAll_f$GenotypeRate),
+    mean(ont_sampleSum_fullSet_noNegs_filtered$GenotypeRate)
+    )
+  ) %>%
+  mutate(sampleSet = "fullSet")
+```
+
+#### By sample set
+
+```{r}
+# Blood
+illONT_genoSummary_bySample_blood <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(sampleSum_ill_gtscore_samplesAll_stBlood_f$GenotypeRate),
+    mean(sampleSum_ont_gtscore_samplesAll_stBlood_f$GenotypeRate)
+    )
+  ) %>%
+  mutate(sampleSet = "blood")
+
+# Fecal
+illONT_genoSummary_bySample_fecal <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(sampleSum_ill_gtscore_samplesAll_stFecal_f$GenotypeRate),
+    mean(sampleSum_ont_gtscore_samplesAll_stFecal_f$GenotypeRate)
+    )
+  ) %>%
+  mutate(sampleSet = "fecal")
+
+# Hair
+illONT_genoSummary_bySample_hair <- data.frame(
+  seqType = c("Illumina", "Nanopore"),
+  genoSuccess = c(
+    mean(sampleSum_ill_gtscore_samplesAll_stHair_f$GenotypeRate),
+    mean(sampleSum_ont_gtscore_samplesAll_stHair_f$GenotypeRate)
+    )
+  ) %>%
+  mutate(sampleSet = "hair")
+```
+
+#### Summary
+
+```{r}
+illONT_genoSummary_bySample_filtered <- rbind(
+  illONT_genoSummary_bySample_fullSet,
+  illONT_genoSummary_bySample_blood,
+  illONT_genoSummary_bySample_fecal,
+  illONT_genoSummary_bySample_hair
+) %>%
+  pivot_wider(names_from = seqType, values_from = genoSuccess) %>%
+  mutate(
+    Illumina = round(Illumina, 2),
+    Nanopore = round(Nanopore, 2)
+  )
+
+illONT_genoSummary_bySample_filtered %>%
+  kable(
+    caption = "[FILTERED] Summary: Sample genotype success by sample type for Illumina vs. Nanopore",
+    format.args = list(big.mark = ",")) %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+#### Sample comparison
+
+```{r}
+
+```
+
+### 4.2 Distribution of geno success
+
+```{r, echo=FALSE}
+# Blood
+## Illumina
+ggplot() + 
+  geom_histogram(data = ill_sampleSum_blood, aes(x = GenotypeRate), binwidth = 0.01) +
+  #xlim(-0.01,1.01) +
+  geom_vline(xintercept = median(ill_sampleSum_blood$GenotypeRate), linetype = "dashed") +
+  annotate(x = 0.82, y = 27, label = "Median = 0.97", geom = "label") +
+  labs(title="[Illumina] Genotype success: Blood samples (n = 30)", x="Proportion of loci genotyped", y="Number of blood samples") +
+  theme_bw() + 
+  theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+
+## Nanopore
+ggplot() + 
+  geom_histogram(data = ont_sampleSum_blood, aes(x = GenotypeRate), binwidth = 0.01) +
+  #xlim(-0.01,1.01) +
+  geom_vline(xintercept = median(ont_sampleSum_blood$GenotypeRate), linetype = "dashed") +
+  annotate(x = 0.7, y = 27, label = "Median = 0.85", geom = "label") +
+  labs(title="[Nanopore] Genotype success: Blood samples (n = 30)", x="Proportion of loci genotyped", y="Number of blood samples") +
+  theme_bw() + 
+  theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+
+# Fecal
+## Illumina
+ggplot() + 
+  geom_histogram(data = ill_sampleSum_fecal, aes(x = GenotypeRate), binwidth = 0.01) +
+  #xlim(-0.01,1.01) +
+  geom_vline(xintercept = median(ill_sampleSum_fecal$GenotypeRate), linetype = "dashed") +
+  annotate(x = 0.68, y = 27, label = "Median = 0.83", geom = "label") +
+  labs(title="[Illumina] Genotype success: Fecal samples (n = 30)", x="Proportion of loci genotyped", y="Number of fecal samples") +
+  theme_bw() + 
+  theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+
+## Nanopore
+ggplot() + 
+  geom_histogram(data = ont_sampleSum_fecal, aes(x = GenotypeRate), binwidth = 0.01) +
+  #xlim(-0.01,1.01) +
+  geom_vline(xintercept = median(ont_sampleSum_fecal$GenotypeRate), linetype = "dashed") +
+  annotate(x = 0.4, y = 27, label = "Median = 0.55", geom = "label") +
+  labs(title="[Nanopore] Genotype success: Fecal samples (n = 30)", x="Proportion of loci genotyped", y="Number of fecal samples") +
+  theme_bw() + 
+  theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+
+# Hair
+## Illumina
+ggplot() + 
+  geom_histogram(data = ill_sampleSum_hair, aes(x = GenotypeRate), binwidth = 0.01) + 
+  geom_vline(xintercept = median(ill_sampleSum_hair$GenotypeRate), linetype = "dashed") +
+  annotate(x = 0.45, y = 27, label = "Median = 0.60", geom = "label") +
+  labs(title="[Illumina] Proportion of loci genotyped: Hair samples (n = 30)", x="Proportion of loci genotyped", y="Number of hair samples") +
+  theme_bw() + 
+  theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+
+## Nanopore
+ggplot() + 
+  geom_histogram(data = ont_sampleSum_hair, aes(x = GenotypeRate), binwidth = 0.01) + 
+  geom_vline(xintercept = median(ont_sampleSum_hair$GenotypeRate), linetype = "dashed") +
+  annotate(x = 0.14, y = 27, label = "Median = 0.29", geom = "label") +
+  labs(title="[Nanopore] Proportion of loci genotyped: Hair samples (n = 30)", x="Proportion of loci genotyped", y="Number of hair samples") +
+  theme_bw() + 
+  theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+### 4.3 Geno rate across sample types
+
+```{r}
+genoRates_bfh <- merge(sampleSum_blood[, c("animalID", "GenotypeRate")], sampleSum_fecal[, c("animalID", "GenotypeRate")], by = "animalID") %>%
+  dplyr::rename("genoRate_blood" = "GenotypeRate.x",
+                "genoRate_fecal" = "GenotypeRate.y") %>%
+  merge(., sampleSum_hair[, c("animalID", "GenotypeRate")], by = "animalID") %>%
+  dplyr::rename("genoRate_hair" = "GenotypeRate")
+```
+
+### 4.4 Illumina vs. Nanopore
+
+```{r}
+# Data prep
+ill_genoRate_bySample <- ill_sampleSum %>%
+  filter(!str_detect(sampleType, "Neg")) %>%
+  select(c("well", "GenotypeRate")) %>%
+  mutate(seqType = "Illumina") %>%
+  arrange(well)
+ont_genoRate_bySample <- ont_sampleSum %>%
+  filter(!str_detect(sampleType, "Neg")) %>%
+  select(c("well", "GenotypeRate")) %>%
+  mutate(seqType = "Nanopore") %>%
+  arrange(well)
+illONT_genoRate_bySample <- rbind(ill_genoRate_bySample, ont_genoRate_bySample) %>%
+  arrange(well)
+
+# Stats
+ill_mean_genoRate_bySample <- mean(ill_sampleSum$GenotypeRate)
+ill_mean_genoRate_bySample
+ont_mean_genoRate_bySample <- mean(ont_sampleSum$GenotypeRate)
+ont_mean_genoRate_bySample
+
+group_by(illONT_genoRate_bySample, seqType) %>%
+  summarise(
+    count = n(),
+    mean = mean(GenotypeRate, na.rm = TRUE),
+    sd = sd(GenotypeRate, na.rm = TRUE)
+  )
+
+t.test(illONT_sampleSum_noNegs$GenotypeRate_ill, illONT_sampleSum_noNegs$GenotypeRate_ont, paired = T)
+
+# Dumbbell plot
+dplot_genoRate_ill.ont <- ggplot(illONT_genoRate_bySample) +
+  geom_segment(data = ill_genoRate_bySample,
+                aes(x = GenotypeRate, y = reorder(well, GenotypeRate),
+                    yend=ont_genoRate_bySample$well, xend=ont_genoRate_bySample$GenotypeRate),
+               color = "#aeb6bf",
+              size = 2, #Note that I sized the segment to fit the points
+              alpha = .5) +
+  geom_point(aes(x=GenotypeRate, y=well, color=seqType), size=2) +
+  labs(x="Genotype Rate", y="Well ID", color = "Sequencing platform") +
+  theme_bw()
+dplot_genoRate_ill.ont
+```
+
+## 5.2 GTseq
+
+### By locus
+
+### By sample
+
+# 6 Geno consistency
+
+## 6.1 GTscore
+
+### Format genos
+
+Full set
+
+```{r}
+ill_genos_gtscore_l <- ill_genos_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ill_geno") %>%
+  merge(., ill_md_fullSet[, c("sampleID_ill", "animalID", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  select(c("animalID", "sampleType", "locus", "ill_geno"))
+
+ont_genos_gtscore_l <- ont_genos_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "ont_geno") %>%
+  merge(., ont_md_fullSet[, c("sampleID_ont", "animalID", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  select(c("animalID", "sampleType", "locus", "ont_geno"))
+```
+
+Subset by sample type
+
+```{r}
+# Illumina
+ill_genos_gtscore_l_blood <- ill_genos_gtscore_l %>%
+  filter(sampleType == "blood") %>%
+  select(c("animalID", "locus", "ill_geno")) %>%
+  rename("ill_geno_blood" = "ill_geno")
+
+ill_genos_gtscore_l_fecal <- ill_genos_gtscore_l %>%
+  filter(sampleType == "fecal") %>%
+  select(c("animalID", "locus", "ill_geno")) %>%
+  rename("ill_geno_fecal" = "ill_geno")
+
+ill_genos_gtscore_l_hair <- ill_genos_gtscore_l %>%
+  filter(sampleType == "hair") %>%
+  select(c("animalID", "locus", "ill_geno")) %>%
+  rename("ill_geno_hair" = "ill_geno")
+
+# Nanopore
+ont_genos_gtscore_l_blood <- ont_genos_gtscore_l %>%
+  filter(sampleType == "blood") %>%
+  select(c("animalID", "locus", "ont_geno")) %>%
+  rename("ont_geno_blood" = "ont_geno")
+
+ont_genos_gtscore_l_fecal <- ont_genos_gtscore_l %>%
+  filter(sampleType == "fecal") %>%
+  select(c("animalID", "locus", "ont_geno")) %>%
+  rename("ont_geno_fecal" = "ont_geno")
+
+ont_genos_gtscore_l_hair <- ont_genos_gtscore_l %>%
+  filter(sampleType == "hair") %>%
+  select(c("animalID", "locus", "ont_geno")) %>%
+  rename("ont_geno_hair" = "ont_geno")
+```
+
+### 5.2 Across sample types
+
+#### Illumina
+
+##### Blood vs. fecal vs. hair
+
+```{r}
+# Data
+ill_genos_bfh <- merge(ill_genos_gtscore_l_blood, ill_genos_gtscore_l_fecal, by = c("animalID", "locus")) %>%
+  merge(., ill_genos_gtscore_l_hair, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ill_geno_blood:ill_geno_hair)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ill_genoCompare_bfh <- ill_genos_bfh %>%
+  filter(genosCommon == 3) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         # 1 pair of sample types doesn't match
+         "genosMismatch_1" = "2",
+         # 2 pairs of sample types don't match
+         "genosMismatch_2" = "3") %>%
+  mutate(
+    genosMatch = case_when(
+      is.na(genosMatch) ~ 0,
+      .default = genosMatch
+    ),
+    genosMismatch_1 = case_when(
+      is.na(genosMismatch_1) ~ 0,
+      .default = genosMismatch_1
+    ),
+    genosMismatch_2 = case_when(
+      is.na(genosMismatch_2) ~ 0,
+      .default = genosMismatch_2
+    ),
+    genosCommon = genosMatch + genosMismatch_1 + genosMismatch_2,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch_1 = round(genosMismatch_1/genosCommon, 2),
+    propMismatch_2 = round(genosMismatch_2/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_bfh"))
+```
+
+##### Blood vs. fecal
+
+```{r}
+# Data
+ill_genos_bf <- merge(ill_genos_gtscore_l_blood, ill_genos_gtscore_l_fecal, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ill_geno_blood:ill_geno_fecal)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ill_genoCompare_bf <- ill_genos_bf %>%
+  filter(genosCommon == 2) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_bf"))
+```
+
+##### Blood vs. hair
+
+```{r}
+# Data
+ill_genos_bh <- merge(ill_genos_gtscore_l_blood, ill_genos_gtscore_l_hair, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ill_geno_blood:ill_geno_hair)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ill_genoCompare_bh <- ill_genos_bh %>%
+  filter(genosCommon == 2) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_bh"))
+```
+
+##### Fecal vs. hair
+
+```{r}
+# Data
+ill_genos_fh <- merge(ill_genos_gtscore_l_fecal, ill_genos_gtscore_l_hair, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ill_geno_fecal:ill_geno_hair)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ill_genoCompare_fh <- ill_genos_fh %>%
+  filter(genosCommon == 2) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_fh"))
+```
+
+##### Summary
+
+Finished for now; need a visual
+
+```{r}
+ill_genoCompare_summary <- merge(ill_genoCompare_bfh, ill_genoCompare_bf, by = "animalID") %>%
+  merge(., ill_genoCompare_bh, by = "animalID") %>%
+  merge(., ill_genoCompare_fh, by = "animalID") %>%
+  select(c("animalID", starts_with("genosCommon"), starts_with("propMatch"), starts_with("propMismatch")))
+```
+
+#### Nanopore
+
+##### Blood vs. fecal vs. hair
+
+```{r}
+# Data
+ont_genos_bfh <- merge(ont_genos_gtscore_l_blood, ont_genos_gtscore_l_fecal, by = c("animalID", "locus")) %>%
+  merge(., ont_genos_gtscore_l_hair, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ont_geno_blood:ont_geno_hair)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ont_genoCompare_bfh <- ont_genos_bfh %>%
+  filter(genosCommon == 3) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         # 1 pair of sample types doesn't match
+         "genosMismatch_1" = "2",
+         # 2 pairs of sample types don't match
+         "genosMismatch_2" = "3") %>%
+  mutate(
+    genosMatch = case_when(
+      is.na(genosMatch) ~ 0,
+      .default = genosMatch
+    ),
+    genosMismatch_1 = case_when(
+      is.na(genosMismatch_1) ~ 0,
+      .default = genosMismatch_1
+    ),
+    genosMismatch_2 = case_when(
+      is.na(genosMismatch_2) ~ 0,
+      .default = genosMismatch_2
+    ),
+    genosCommon = genosMatch + genosMismatch_1 + genosMismatch_2,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch_1 = round(genosMismatch_1/genosCommon, 2),
+    propMismatch_2 = round(genosMismatch_2/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_bfh"))
+```
+
+##### Blood vs. fecal
+
+```{r}
+# Data
+ont_genos_bf <- merge(ont_genos_gtscore_l_blood, ont_genos_gtscore_l_fecal, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ont_geno_blood:ont_geno_fecal)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ont_genoCompare_bf <- ont_genos_bf %>%
+  filter(genosCommon == 2) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_bf"))
+```
+
+##### Blood vs. hair
+
+```{r}
+# Data
+ont_genos_bh <- merge(ont_genos_gtscore_l_blood, ont_genos_gtscore_l_hair, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ont_geno_blood:ont_geno_hair)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ont_genoCompare_bh <- ont_genos_bh %>%
+  filter(genosCommon == 2) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_bh"))
+```
+
+##### Fecal vs. hair
+
+```{r}
+# Data
+ont_genos_fh <- merge(ont_genos_gtscore_l_fecal, ont_genos_gtscore_l_hair, by = c("animalID", "locus")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 3 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ont_geno_fecal:ont_geno_hair)) - zerosCalled)
+    )
+  )
+
+# Comparison
+ont_genoCompare_fh <- ont_genos_fh %>%
+  filter(genosCommon == 2) %>%
+  group_by(animalID, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = animalID) %>%
+  rename_at(vars(-animalID), function(x) paste0(x, "_fh"))
+```
+
+##### Summary
+
+Finished for now; need a visual
+
+```{r}
+ont_genoCompare_summary <- merge(ont_genoCompare_bfh, ont_genoCompare_bf, by = "animalID") %>%
+  merge(., ont_genoCompare_bh, by = "animalID") %>%
+  merge(., ont_genoCompare_fh, by = "animalID") %>%
+  select(c("animalID", starts_with("genosCommon"), starts_with("propMatch"), starts_with("propMismatch")))
+```
+
+### 5.3 Across seq platforms
+
+```{r}
+# Data
+illONT_genos <- merge(ill_genos_gtscore_l, ont_genos_gtscore_l, by = c("animalID", "sampleType", "locus")) %>%
+  # remove negatives
+  filter(!str_detect(animalID, "Neg")) %>%
+  mutate(
+    genosCommon = rowSums(select(., -animalID, -sampleType, -locus) != 0, na.rm = T),
+    zerosCalled = rowSums(select(., -animalID, -sampleType, -locus) == 0, na.rm = T)
+    ) %>%
+  rowwise() %>%
+  mutate(
+    uniqueGenos = case_when(
+      zerosCalled == 2 ~ 0,
+      .default = as.numeric(n_distinct(c_across(ill_geno:ont_geno)) - zerosCalled)
+    )
+  ) %>%
+  mutate(sampleID_unique = str_c(animalID, "_", sampleType)) %>%
+  relocate("sampleID_unique")
+```
+
+#### By locus
+
+START HERE
+
+```{r}
+illONT_genoCompare_byLocus <- illONT_genos %>%
+  filter(genosCommon == 2) %>%
+  group_by(locus, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = locus)
+```
+
+#### By sample
+
+```{r}
+illONT_genoCompare_bySample <- illONT_genos %>%
+  filter(genosCommon == 2) %>%
+  group_by(sampleID_unique, uniqueGenos) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  pivot_wider(names_from = uniqueGenos, values_from = count) %>%
+  rename("genosMatch" = "1",
+         "genosMismatch" = "2") %>%
+  mutate(
+    genosMismatch = case_when(
+      is.na(genosMismatch) ~ 0,
+      .default = genosMismatch
+    ),
+    genosCommon = genosMatch + genosMismatch,
+    propMatch = round(genosMatch/genosCommon, 2),
+    propMismatch = round(genosMismatch/genosCommon, 2)
+    ) %>%
+  relocate(genosCommon, .after = sampleID_unique)
+```
+
+# 6 Species assignments
+
+## 6.1 Code
+
+*Species key:*
+
+```{r}
+speciesKey <- read.csv("./03_tamRun3/04_genoAnalyses/speciesSNP_key_14Dec2022.csv")
+```
+
+*Function to assign species*
+
+```{r}
+assignSpecies <- function(data, seqType) {
+  result <- data %>%
+    t() %>%
+    as.data.frame() %>%
+    select(c(speciesKey$Locus)) %>%
+    rownames_to_column("sampleID") %>%
+    pivot_longer(!sampleID,
+                 names_to = "Locus",
+                 values_to = "genotype") %>%
+    left_join(speciesKey, by = c("Locus", "genotype")) %>%
+    select(-genotype) %>%
+    pivot_wider(names_from = sampleID,
+                values_from = species) %>%
+    column_to_rownames("Locus") %>%
+    t() %>%
+    as.data.frame() %>%
+    mutate(
+      totalGenos_sp = (rowSums(. == "LWED", na.rm = TRUE) + rowSums(. == "SIMP", na.rm = TRUE)),
+      propGenos_sp = totalGenos_sp / 12,
+      propLWED = (rowSums(. == "LWED", na.rm = TRUE) / totalGenos_sp),
+      propSIMP = (rowSums(. == "SIMP", na.rm = TRUE) / totalGenos_sp),
+      propMismatch_species = (1 - abs(propLWED - propSIMP)),
+      spAssigned = ifelse(propLWED == 1, "LWED", 
+                          ifelse(propSIMP == 1, "SIMP", 
+                                 ifelse(propLWED < 1 & propSIMP > 0, "MIX", NA)))
+    ) %>%
+    rownames_to_column("sampleID") %>%
+    relocate(c(spAssigned, totalGenos_sp, propGenos_sp, propMismatch_species, propLWED, propSIMP), .after = sampleID) %>%
+    filter(seqType == "ill" | seqType == "ont")
+
+  if (seqType == "ill") {
+    result <- merge(result, md_tamRun4_samplesAll[, c("sampleID_ill", "species")], by.x = "sampleID", by.y = "sampleID_ill")
+  } else if (seqType == "ont") {
+    result <- merge(result, md_tamRun4_samplesAll[, c("sampleID_ont", "species")], by.x = "sampleID", by.y = "sampleID_ont")
+  } else {
+    # Handle other cases or provide a default behavior
+    result <- NULL  # You can change this to an appropriate default value or behavior
+  }
+
+  result <- result %>%
+    dplyr::rename("mdSpecies" = "species") %>%
+    mutate(
+      mdMatch = case_when(
+        spAssigned == mdSpecies ~ TRUE,
+        spAssigned != mdSpecies ~ FALSE
+      )
+    ) %>%
+    relocate(mdMatch, .after = spAssigned) %>%
+    select(-mdSpecies)
+
+  return(result)
+}
+```
+
+## Assign species
+
+### gtscore0x
+
+```{r}
+spAssigned_ill_gtscore0x <- assignSpecies(genos_ill_gtscore0x_samplesAll_lociAll, seqType = "ill")
+
+spAssigned_ont_gtscore0x <- assignSpecies(genos_ont_gtscore0x_samplesAll_lociAll, "ont")
+```
+
+### gtscore10x
+
+```{r}
+spAssigned_ill_gtscore10x <- assignSpecies(genos_ill_gtscore10x_samplesAll_lociAll, seqType = "ill")
+
+spAssigned_ont_gtscore10x <- assignSpecies(genos_ont_gtscore10x_samplesAll_lociAll, "ont")
+```
+
+### gtseq
+
+```{r}
+spAssigned_ill_gtseq <- assignSpecies(genos_ill_gtseq_samplesAll_lociAll, seqType = "ill")
+
+spAssigned_ont_gtseq <- assignSpecies(genos_ont_gtseq_samplesAll_lociAll, "ont")
+```
+
+## Results
+
+### gtscore0x
+
+Without setting a coverage cutoff for GTscore, 91% of all samples (n = 82 out of 90) were assigned a species, including 93% of blood samples (n = 28 out of 30), 97% of fecal samples (n = 29 out of 30), and 83% of hair samples (n = 25 out of 30). One sample had a mix of species assignments.
+
+3 out of 6 negatives were genotyped at SPECIESID loci.
+
+```{r, echo=FALSE}
+spCount_ill.gtscore0x_samplesAll <- spAssigned_ill_gtscore0x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  group_by(sampleType) %>%
+  summarise(
+    spMix = sum(spAssigned == "MIX", na.rm = T),
+    spMatch = sum(mdMatch == TRUE, na.rm = T),
+    spMismatch = sum(mdMatch == FALSE, na.rm = T),
+    spNA = sum(is.na(spAssigned)),
+    spAssigned = sum(!is.na(spAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(spMismatch/spAssigned, 2),
+      sampleType == "pcr1Neg" ~ spMismatch/2,
+      sampleType == "xtnNeg" ~ spMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, spAssigned, spNA, spMismatch, spMix, spMatch)
+
+spCount_ont.gtscore0x_samplesAll <- spAssigned_ont_gtscore0x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  group_by(sampleType) %>%
+  summarise(
+    spMix = sum(spAssigned == "MIX", na.rm = T),
+    spMatch = sum(mdMatch == TRUE, na.rm = T),
+    spMismatch = sum(mdMatch == FALSE, na.rm = T),
+    spNA = sum(is.na(spAssigned)),
+    spAssigned = sum(!is.na(spAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(spMismatch/spAssigned, 2),
+      sampleType == "pcr1Neg" ~ spMismatch/2,
+      sampleType == "xtnNeg" ~ spMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, spAssigned, spNA, spMismatch, spMix, spMatch)
+```
+
+```{r, echo=FALSE}
+# for html
+spCount_ill.gtscore0x_samplesAll %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+
+spCount_ont.gtscore0x_samplesAll %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+### gtscore10x
+
+90% of all samples (n = 79 out of 90) were assigned a species, including 90% of blood samples (n = 27 out of 30), 97% of fecal samples (n = 29 out of 30), and 77% of hair samples (n = 23 out of 30). No samples had a mix of species assignments, so any species assigned had either 100% LWED or 100% SIMP assignments.
+
+1 out of 6 negatives were genotyped at SPECIESID loci (blood_xtnNeg_p1.C4_e1), with LWED assignments at SPECIESID_8 , SPECIESID_14 , and SPECIESID_15.
+
+```{r, echo=FALSE}
+spCount_ill.gtscore10x_samplesAll <- spAssigned_ill_gtscore10x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  group_by(sampleType) %>%
+  summarise(
+    spMix = sum(spAssigned == "MIX", na.rm = T),
+    spMatch = sum(mdMatch == TRUE, na.rm = T),
+    spMismatch = sum(mdMatch == FALSE, na.rm = T),
+    spNA = sum(is.na(spAssigned)),
+    spAssigned = sum(!is.na(spAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(spMismatch/spAssigned, 2),
+      sampleType == "pcr1Neg" ~ spMismatch/2,
+      sampleType == "xtnNeg" ~ spMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, spAssigned, spNA, spMismatch, spMix, spMatch)
+
+spCount_ont.gtscore10x_samplesAll <- spAssigned_ont_gtscore10x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  group_by(sampleType) %>%
+  summarise(
+    spMix = sum(spAssigned == "MIX", na.rm = T),
+    spMatch = sum(mdMatch == TRUE, na.rm = T),
+    spMismatch = sum(mdMatch == FALSE, na.rm = T),
+    spNA = sum(is.na(spAssigned)),
+    spAssigned = sum(!is.na(spAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(spMismatch/spAssigned, 2),
+      sampleType == "pcr1Neg" ~ spMismatch/2,
+      sampleType == "xtnNeg" ~ spMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, spAssigned, spNA, spMismatch, spMix, spMatch)
+```
+
+```{r, echo=FALSE}
+# for html
+spCount_ill.gtscore10x_samplesAll %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+
+spCount_ont.gtscore10x_samplesAll %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+### gtseq
+
+```{r, echo=FALSE}
+spCount_ill.gtseq_samplesAll <- spAssigned_ill_gtseq %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  group_by(sampleType) %>%
+  summarise(
+    spMix = sum(spAssigned == "MIX", na.rm = T),
+    spMatch = sum(mdMatch == TRUE, na.rm = T),
+    spMismatch = sum(mdMatch == FALSE, na.rm = T),
+    spNA = sum(is.na(spAssigned)),
+    spAssigned = sum(!is.na(spAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(spMismatch/spAssigned, 2),
+      sampleType == "pcr1Neg" ~ spMismatch/2,
+      sampleType == "xtnNeg" ~ spMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, spAssigned, spNA, spMismatch, spMix, spMatch)
+
+spCount_ont.gtseq_samplesAll <- spAssigned_ont_gtseq %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  group_by(sampleType) %>%
+  summarise(
+    spMix = sum(spAssigned == "MIX", na.rm = T),
+    spMatch = sum(mdMatch == TRUE, na.rm = T),
+    spMismatch = sum(mdMatch == FALSE, na.rm = T),
+    spNA = sum(is.na(spAssigned)),
+    spAssigned = sum(!is.na(spAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(spMismatch/spAssigned, 2),
+      sampleType == "pcr1Neg" ~ spMismatch/2,
+      sampleType == "xtnNeg" ~ spMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, spAssigned, spNA, spMismatch, spMix, spMatch)
+```
+
+```{r, echo=FALSE}
+# for html
+spCount_ill.gtseq_samplesAll %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+
+spCount_ont.gtseq_samplesAll %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+## Summary
+
+```{r}
+spAssigned_illONT_gtseqScore <- md_tamRun4_samplesAll %>%
+  select(sampleID_unique, sampleID_ill, sampleID_ont, species) %>%
+  
+  merge(., spAssigned_ill_gtscore0x[, c("sampleID", "mdMatch")], by.x = "sampleID_ill", by.y = "sampleID", all.x = T) %>%
+  merge(., spAssigned_ont_gtscore0x[, c("sampleID", "mdMatch")], by.x = "sampleID_ont", by.y = "sampleID", all.x = T, suffixes = c("_ill.0x", "_ont.0x")) %>%
+  
+  merge(., spAssigned_ill_gtscore10x[, c("sampleID", "mdMatch")], by.x = "sampleID_ill", by.y = "sampleID", all.x = T) %>%
+  merge(., spAssigned_ont_gtscore10x[, c("sampleID", "mdMatch")], by.x = "sampleID_ont", by.y = "sampleID", all.x = T, suffixes = c("_ill.10x", "_ont.10x")) %>%
+  
+  merge(., spAssigned_ill_gtseq[, c("sampleID", "mdMatch")], by.x = "sampleID_ill", by.y = "sampleID", all.x = T) %>%
+  merge(., spAssigned_ont_gtseq[, c("sampleID", "mdMatch")], by.x = "sampleID_ont", by.y = "sampleID", all.x = T, suffixes = c("_ill.seq", "_ont.seq"))
+```
+
+## vs. tamRun5
+
+None of the blood and hair samples present in tamRun5 had species mismatches.
+
+```{r}
+source("./my_sourceScripts/assignSpecies.R")
+speciesKey <- read.csv("./03_tamRun3/04_genoAnalyses/speciesSNP_key_14Dec2022.csv")
+
+md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  mutate(
+    sampleID_unique = str_c(animalID, "_", sampleType)
+  )
+
+genos_tamRun5_0x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+genos_tamRun5_10x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+# assign sp
+spCheck_tamRun5_0x <- assignSpecies(genos_tamRun5_0x, mdFile = md_tamRun5_v5, speciesKeyFile = speciesKey) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "sampleID_unique")], by = "sampleID") %>%
+  relocate(sampleID_unique)
+
+spCheck_tamRun5_10x <- assignSpecies(genos_tamRun5_10x, mdFile = md_tamRun5_v5, speciesKeyFile = speciesKey) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "sampleID_unique")], by = "sampleID") %>%
+  relocate(sampleID_unique)
+```
+
+```{r}
+spAssigned_illONT_gtseqScore_vsRun5 <- spAssigned_illONT_gtseqScore %>%
+  merge(., spCheck_tamRun5_0x[, c("sampleID_unique", "mdMatch")], by = "sampleID_unique", all.x = T) %>%
+  merge(., spCheck_tamRun5_10x[, c("sampleID_unique", "mdMatch")], by = "sampleID_unique", all.x = T, suffixes = c("ill.0x.r5", "ill.10x.r5"))
+```
+
+# 7 Sex assignments
+
+## 7.1 Code
+
+```{r}
+source("./my_sourceScripts/assignSex.R")
+
+primerList_v3 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+sexKey <- read.csv("./03_tamRun3/04_genoAnalyses/sexSNP_key_8Dec2022.csv") %>%
+  na.omit() %>%
+  unique() %>%
+  filter(Locus %in% primerList_v3$locus) %>%
+  dplyr::rename("locus" = "Locus")
+```
+
+## Genotypes
+
+```{r}
+genos_tamRun4_ill_gtscore0x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+genos_tamRun4_ill_gtscore10x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+genos_tamRun4_ont_gtscore0x <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+genos_tamRun4_ont_gtscore10x <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+```
+
+## 7.2 Sex assignments
+
+```{r}
+temp_ill <- md_tamRun4_samplesAll %>%
+  dplyr::rename("sampleID" = "sampleID_ill")
+
+temp_ont <- md_tamRun4_samplesAll %>%
+  dplyr::rename("sampleID" = "sampleID_ont")
+
+sexCheck_ill_gtscore0x <- assignSex(genos_tamRun4_ill_gtscore0x, temp_ill, sexKeyFile = sexKey)
+sexCheck_ont_gtscore0x <- assignSex(genos_tamRun4_ont_gtscore0x, temp_ont, sexKeyFile = sexKey)
+
+sexCheck_ill_gtscore10x <- assignSex(genos_tamRun4_ill_gtscore10x, temp_ill, sexKeyFile = sexKey)
+sexCheck_ont_gtscore10x <- assignSex(genos_tamRun4_ont_gtscore10x, temp_ont, sexKeyFile = sexKey)
+
+sexCheck_ill_gtseq <- assignSex(genos_ill_gtseq_samplesAll_lociAll, temp_ill, sexKeyFile = sexKey)
+sexCheck_ont_gtseq <- assignSex(genos_ont_gtseq_samplesAll_lociAll, temp_ont, sexKeyFile = sexKey)
+```
+
+## 7.2 Results
+
+### gtscore0x
+
+91% of all samples (n = 82 out of 90) were assigned a sex, including 97% of blood samples (n = 29 out of 30), 97% of fecal samples (n = 29 out of 30) and 80% of hair samples (n = 24 out of 30).
+
+1 out of 6 negatives were genotyped at a SEXID locus (the same one that had SPECIESID genotypes). blood_xtnNeg_p1.C4_e1 had F assignments at SEXID_200, SEXID_209, SEXID_215, and SEXID_SIMP_218 + one M assignment at SEXID_222.
+
+```{r, echo=FALSE}
+sexCount_ill.gtscore0x_samplesAll <- sexCheck_ill_gtscore0x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  group_by(sampleType) %>%
+  summarise(
+    sexMix = sum(sexAssigned == "MIX", na.rm = T),
+    sexMatch = sum(mdMatch == TRUE, na.rm = T),
+    sexMismatch = sum(mdMatch == FALSE, na.rm = T),
+    sexNA = sum(is.na(sexAssigned)),
+    sexAssigned = sum(!is.na(sexAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMismatch/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    ),
+    propMix = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMix/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, propMix, sexAssigned, sexNA, sexMismatch, sexMix, sexMatch)
+
+sexCount_ont.gtscore0x_samplesAll <- sexCheck_ont_gtscore0x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  group_by(sampleType) %>%
+  summarise(
+    sexMix = sum(sexAssigned == "MIX", na.rm = T),
+    sexMatch = sum(mdMatch == TRUE, na.rm = T),
+    sexMismatch = sum(mdMatch == FALSE, na.rm = T),
+    sexNA = sum(is.na(sexAssigned)),
+    sexAssigned = sum(!is.na(sexAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMismatch/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    ),
+    propMix = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMix/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, propMix, sexAssigned, sexNA, sexMismatch, sexMix, sexMatch)
+
+sexCount_ill.gtscore0x_samplesAll
+sexCount_ont.gtscore0x_samplesAll
+```
+
+### gtscore10x
+
+```{r, echo=FALSE}
+sexCount_ill.gtscore10x_samplesAll <- sexCheck_ill_gtscore10x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  group_by(sampleType) %>%
+  summarise(
+    sexMix = sum(sexAssigned == "MIX", na.rm = T),
+    sexMatch = sum(mdMatch == TRUE, na.rm = T),
+    sexMismatch = sum(mdMatch == FALSE, na.rm = T),
+    sexNA = sum(is.na(sexAssigned)),
+    sexAssigned = sum(!is.na(sexAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMismatch/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    ),
+    propMix = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMix/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, propMix, sexAssigned, sexNA, sexMismatch, sexMix, sexMatch)
+
+sexCount_ont.gtscore10x_samplesAll <- sexCheck_ont_gtscore10x %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  group_by(sampleType) %>%
+  summarise(
+    sexMix = sum(sexAssigned == "MIX", na.rm = T),
+    sexMatch = sum(mdMatch == TRUE, na.rm = T),
+    sexMismatch = sum(mdMatch == FALSE, na.rm = T),
+    sexNA = sum(is.na(sexAssigned)),
+    sexAssigned = sum(!is.na(sexAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMismatch/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    ),
+    propMix = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMix/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, propMix, sexAssigned, sexNA, sexMismatch, sexMix, sexMatch)
+
+sexCount_ill.gtscore10x_samplesAll
+sexCount_ont.gtscore10x_samplesAll
+```
+
+### gtseq
+
+```{r, echo=FALSE}
+sexCount_ill.gtseq_samplesAll <- sexCheck_ill_gtseq %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  group_by(sampleType) %>%
+  summarise(
+    sexMix = sum(sexAssigned == "MIX", na.rm = T),
+    sexMatch = sum(mdMatch == TRUE, na.rm = T),
+    sexMismatch = sum(mdMatch == FALSE, na.rm = T),
+    sexNA = sum(is.na(sexAssigned)),
+    sexAssigned = sum(!is.na(sexAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMismatch/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    ),
+    propMix = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMix/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, propMix, sexAssigned, sexNA, sexMismatch, sexMix, sexMatch)
+
+sexCount_ont.gtseq_samplesAll <- sexCheck_ont_gtseq %>%
+  merge(., md_tamRun4_samplesAll[, c("sampleID_ont", "sampleType")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  group_by(sampleType) %>%
+  summarise(
+    sexMix = sum(sexAssigned == "MIX", na.rm = T),
+    sexMatch = sum(mdMatch == TRUE, na.rm = T),
+    sexMismatch = sum(mdMatch == FALSE, na.rm = T),
+    sexNA = sum(is.na(sexAssigned)),
+    sexAssigned = sum(!is.na(sexAssigned))
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    propMismatch = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMismatch/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    ),
+    propMix = case_when(
+      sampleType %in% c("blood", "fecal", "hair") ~ round(sexMix/sexAssigned, 2),
+      sampleType == "pcr1Neg" ~ sexMismatch/2,
+      sampleType == "xtnNeg" ~ sexMismatch/4
+    )
+  ) %>%
+  relocate(sampleType, propMismatch, propMix, sexAssigned, sexNA, sexMismatch, sexMix, sexMatch)
+
+sexCount_ill.gtseq_samplesAll
+sexCount_ont.gtseq_samplesAll
+```
+
+### Summary
+
+```{r}
+sexAssigned_illONT_gtseqScore <- md_tamRun4_samplesAll %>%
+  select(sampleID_unique, sampleID_ill, sampleID_ont, sex, species) %>%
+  
+  merge(., sexCheck_ill_gtscore0x[, c("sampleID", "mdMatch")], by.x = "sampleID_ill", by.y = "sampleID", all.x = T) %>%
+  merge(., sexCheck_ont_gtscore0x[, c("sampleID", "mdMatch")], by.x = "sampleID_ont", by.y = "sampleID", all.x = T, suffixes = c("_ill.0x", "_ont.0x")) %>%
+  
+  merge(., sexCheck_ill_gtscore10x[, c("sampleID", "mdMatch")], by.x = "sampleID_ill", by.y = "sampleID", all.x = T) %>%
+  merge(., sexCheck_ont_gtscore10x[, c("sampleID", "mdMatch")], by.x = "sampleID_ont", by.y = "sampleID", all.x = T, suffixes = c("_ill.10x", "_ont.10x")) %>%
+  
+  merge(., sexCheck_ill_gtseq[, c("sampleID", "mdMatch")], by.x = "sampleID_ill", by.y = "sampleID", all.x = T) %>%
+  merge(., sexCheck_ont_gtseq[, c("sampleID", "mdMatch")], by.x = "sampleID_ont", by.y = "sampleID", all.x = T, suffixes = c("_ill.seq", "_ont.seq"))
+```
+
+### vs. tamRun5
+
+```{r}
+# assign sex
+sexCheck_tamRun5_0x <- assignSex(genos_tamRun5_0x, mdFile = md_tamRun5_v5, sexKeyFile = sexKey) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "sampleID_unique")], by = "sampleID") %>%
+  relocate(sampleID_unique)
+
+sexCheck_tamRun5_10x <- assignSex(genos_tamRun5_10x, mdFile = md_tamRun5_v5, sexKeyFile = sexKey) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "sampleID_unique")], by = "sampleID") %>%
+  relocate(sampleID_unique)
+```
+
+```{r}
+sexAssigned_illONT_gtseqScore_vsRun5 <- sexAssigned_illONT_gtseqScore %>%
+  merge(., sexCheck_tamRun5_0x[, c("sampleID_unique", "mdMatch")], by = "sampleID_unique", all.x = T) %>%
+  merge(., sexCheck_tamRun5_10x[, c("sampleID_unique", "mdMatch")], by = "sampleID_unique", all.x = T, suffixes = c("ill.0x.r5", "ill.10x.r5"))
+
+View(sexAssigned_illONT_gtseqScore_vsRun5 %>%
+       filter(str_detect(sampleID_unique, "hair")))
+```
+
+# 8 Investigating mismatches
+
+
+**START HERE -- DUPCHECKS W/TAMRUN5 & TAMRUN4** -- something to keep in mind; none of the LWED samples were genotyped at SIMP sex loci & vice versa (not for gtscore10x or 0x)
+
+
+
+
+As a data quality check, especially with regard to potential sample contamination, we can look at whether the species and sex assignments based on genotypes match those listed for each sample in the metadata.
+
+## 8.1 Species mismatches
+
+For all samples, including chimeric blood samples, we should expect 100% congruence with metadata for species.
+
+**NOTE** that all SPECIESID loci are in primer pool 2
+
+### Overview
+
+One fecal sample did NOT match the species listed in the metadata, though only one locus recieved a species assignation (recieved SIMP when it should've been LWED).
+
+**Species mismatches in tamRun4**
+
+```{r, echo=FALSE}
+# Extract samples with mismatches
+genos_species_mismatch <- genos_species_md %>%
+  filter(!mdMatch_sp4 == "TRUE")
+
+# By sample type
+speciesMismatchAll <- genos_species_mismatch %>%
+  summarise(total = length(sampleID))
+
+speciesMismatchBlood <- genos_species_mismatch %>%
+  summarise(blood = sum(sampleType == "blood"))
+
+speciesMismatchFecal <- genos_species_mismatch %>%
+  summarise(fecal = sum(sampleType == "fecal"))
+
+speciesMismatchHair <- genos_species_mismatch %>%
+  summarise(hair = sum(sampleType == "hair"))
+
+speciesMismatchNeg <- genos_species_mismatch %>%
+  summarise("(-)" = sum(!sampleType %in% c("blood", "fecal", "hair")))
+
+# How many mismatches for each data set?
+speciesMismatchCount_df <- cbind(speciesMismatchAll, speciesMismatchBlood, speciesMismatchFecal, speciesMismatchHair, speciesMismatchNeg)
+
+speciesMismatchCount_df %>%
+  kable(caption = "Species mismatch overview") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+## 8.2 Sex mismatches
+
+While we expect some sex mismatches for blood samples due to chimerism, all sex assignments for hair samples should match metadata.
+
+**NOTE** that we have 11 SEXID total, with 4 general, 4 SIMP-specific, and 2 LWED-specific SEXID loci. These are split between primer pool 2 and 3 as follows:
+
+-   7 SEXID loci are in primer pool 2:
+    -   197 SIMP
+    -   198 SIMP
+    -   203 SIMP
+    -   218 SIMP
+    -   219
+    -   222
+-   5 SEXID loci are in primer pool 3:
+    -   195 LWED
+    -   205
+    -   208 LWED
+    -   209
+    -   215
+
+### Overview
+
+Out of the 90 samples, 83 received sex assignments for at least 1 locus. Of these 83, 18 samples did not match sex metadata, including 6 blood samples (3 complete mismatch, 15 mixed calls), 6 fecal samples (1 complete mismatch, 5 mixed calls), and 6 hair samples (5 mixed calls). There was also 1 negative that had mixed sex calls.
+
+**Sex mismatches in tamRun4**
+
+```{r}
+# Extract samples with mismatches
+genos_sex_mismatchAll <- genos_sex_md %>%
+  filter(!mdMatch_sex == "TRUE")
+genos_sex_mismatchBlood <- genos_sex_mismatchAll %>%
+  filter(sampleType == "blood")
+genos_sex_mismatchFecal <- genos_sex_mismatchAll %>%
+  filter(sampleType == "fecal")
+genos_sex_mismatchHair <- genos_sex_mismatchAll %>%
+  filter(sampleType == "hair")
+genos_sex_mismatchNeg <- genos_sex_mismatchAll %>%
+  filter(str_detect(sampleType, "Neg"))
+
+# By sample type
+sexMismatchAll <- data.frame(
+    mismatchAll_gtscore = length(genos_sex_mismatchAll$sampleID),
+    mismatchComplete_gtscore = sum(grepl("FALSE", genos_sex_mismatchAll$mdMatch_sex)),
+    mismatchMix_gtscore = sum(grepl("MIX", genos_sex_mismatchAll$mdMatch_sex)),
+    sampleType = "all"
+  )
+
+sexMismatchBlood <- data.frame(
+    mismatchAll_gtscore = length(genos_sex_mismatchBlood$sampleID),
+    mismatchComplete_gtscore = sum(grepl("FALSE", genos_sex_mismatchBlood$mdMatch_sex)),
+    mismatchMix_gtscore = sum(grepl("MIX", genos_sex_mismatchBlood$mdMatch_sex)),
+    sampleType = "blood"
+  )
+
+sexMismatchFecal <- data.frame(
+    mismatchAll_gtscore = length(genos_sex_mismatchFecal$sampleID),
+    mismatchComplete_gtscore = sum(grepl("FALSE", genos_sex_mismatchFecal$mdMatch_sex)),
+    mismatchMix_gtscore = sum(grepl("MIX", genos_sex_mismatchFecal$mdMatch_sex)),
+    sampleType = "fecal"
+  )
+
+sexMismatchHair <- data.frame(
+    mismatchAll_gtscore = length(genos_sex_mismatchHair$sampleID),
+    mismatchComplete_gtscore = sum(grepl("FALSE", genos_sex_mismatchHair$mdMatch_sex)),
+    mismatchMix_gtscore = sum(grepl("MIX", genos_sex_mismatchHair$mdMatch_sex)),
+    sampleType = "hair"
+  )
+
+sexMismatchNeg <- data.frame(
+    mismatchAll_gtscore = length(genos_sex_mismatchNeg$sampleID),
+    mismatchComplete_gtscore = sum(grepl("FALSE", genos_sex_mismatchNeg$mdMatch_sex)),
+    mismatchMix_gtscore = sum(grepl("MIX", genos_sex_mismatchNeg$mdMatch_sex)),
+    sampleType = "neg"
+  )
+
+# How many mismatches for each data set?
+sexMismatchCount_df <- rbind(sexMismatchAll, sexMismatchBlood, sexMismatchFecal, sexMismatchHair, sexMismatchNeg) %>%
+  relocate(sampleType)
+
+sexMismatchCount_df %>%
+  kable(caption = "GTscore: Sex mismatch overview") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Sex mismatches in tamRun4 by sex listed in metadata**
+
+```{r, echo=FALSE}
+sexMismatch_summary <- matrix(c(
+  # FEMALES
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "blood") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "fecal") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "hair") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    filter(sampleType == "blood") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    filter(sampleType == "fecal") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    filter(sampleType == "hair") %>%
+    nrow(),
+  NA,
+  # MALES
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "blood") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "fecal") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "hair") %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    filter(sampleType == "blood") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    filter(sampleType == "fecal") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    filter(sampleType == "hair") %>%
+    nrow(),
+  NA,
+  # NEGATIVES
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    filter(!is.na(sexAssigned)) %>%
+    nrow(),
+  NA, NA, NA,
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  NA, NA, NA,
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow()),
+       nrow = 10,
+       ncol = 3) %>%
+       `rownames<-`(., c("totalSamples", "totalAssigned", "bloodAssigned", "fecalAssigned", "hairAssigned", "totalMismatch", "bloodMismatch", "fecalMismatch", "hairMismatch", "negMismatch")) %>%
+       `colnames<-`(., c("F", "M", "(-)")) %>%
+  as.data.frame() %>%
+  mutate(TOTAL = 
+           rowSums(.[1:3], na.rm = T)) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(propMismatch = 
+           scales::percent(totalMismatch/totalAssigned)) %>%
+  mutate(propMismatch_blood = 
+           scales::percent(bloodMismatch/bloodAssigned)) %>%
+  mutate(propMismatch_fecal = 
+           scales::percent(fecalMismatch/fecalAssigned)) %>%
+  mutate(propMismatch_hair = 
+           scales::percent(hairMismatch/hairAssigned)) %>%
+  mutate(propMismatch = gsub("100.0%", scales::percent(1/9), propMismatch)) %>%
+  select(c(totalSamples, totalAssigned, totalMismatch, propMismatch,
+           bloodAssigned, bloodMismatch, propMismatch_blood,
+           fecalAssigned, fecalMismatch, propMismatch_fecal,
+           hairAssigned, hairMismatch, propMismatch_hair,
+           negMismatch)) %>%
+  rownames_to_column("Metadata assignment")
+  
+sexMismatch_summary %>%
+  kable(caption = "Mismatched sex assignments") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+**Mismatch type (F, M, or MIX)**
+
+```{r}
+sexMismatch_types <- matrix(c(
+  # FEMALES (general)
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(),
+  # FEMALES (blood)
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "blood") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "blood") %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "blood") %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(),
+  # FEMALES (hair)
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "hair") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "hair") %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "F") %>%
+    filter(sampleType == "hair") %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(),
+  # MALES (general)
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(),
+  # MALES (blood)
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "blood") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "blood") %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "blood") %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(),
+  # MALES (hair)
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "hair") %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "hair") %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(sex == "M") %>%
+    filter(sampleType == "hair") %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(), 
+  # NEGATIVES
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    filter(!mdMatch_sex == "TRUE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    filter(mdMatch_sex == "FALSE") %>%
+    nrow(),
+  genos_sex_md %>%
+    filter(str_detect(sampleType, "Neg")) %>%
+    filter(mdMatch_sex == "MIX") %>%
+    nrow(), 
+  NA, NA, NA, NA, NA, NA
+  ),
+  nrow = 9, 
+  ncol = 3
+) %>%
+       `rownames<-`(., c("totalMismatch", "mismatchFALSE", "mismatchMIX", "bloodMismatch", "bloodMismatch_FALSE", "bloodMismatch_MIX", "hairMismatch", "hairMismatch_FALSE", "hairMismatch_MIX")) %>%
+       `colnames<-`(., c("F", "M", "(-)")) %>%
+  as.data.frame() %>%
+  mutate(TOTAL = 
+           rowSums(.[1:3], na.rm = T)) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Metadata assignment")
+  
+sexMismatch_types %>%
+  kable(caption = "Mismatch types") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+# GTseq vs. GTscore
+
+See "tamRun4_gtseq_vs_gtscore.Rmd" for details.
+
+Do gt-seq genotypes also give mismatches?
+
+## GTseq genos
+
+```{r}
+genos_tamRun4_gtseq <- read_csv("./paper2_snpPanelDev/genos/compiledGenos_gtseq_tamRun4.csv", col_names = T) %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate_all(funs(str_replace(., "00", "0")))
+```
+
+## GTseq species
+
+### Code
+
+```{r}
+speciesKey_gtseq <- speciesKey %>%
+  mutate(
+    genotype = gsub(",", "", genotype)
+  )
+
+genos_species_gtseq <- genos_tamRun4_gtseq %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SPECIES")) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!Locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  
+  # assign species to each genotype
+  left_join(speciesKey_gtseq, by = c("Locus", "genotype")) %>%
+  mutate(species = coalesce(species, genotype)) %>%
+  select(c(Locus, sampleID, species)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = species) %>%
+  column_to_rownames("Locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  
+  # count total loci w/species assignment
+  mutate(totalGenos_sp = (rowSums(. == "LWED") + rowSums(. == "SIMP"))) %>%
+  # get prop of loci w/species assignments
+  mutate(propGenos_sp = (totalGenos_sp/12)) %>%
+  
+  # get prop LWED assignments
+  mutate(propLWED = (rowSums(. == "LWED")/totalGenos_sp)) %>%
+  
+  # get prop SIMP assignments
+  mutate(propSIMP = (rowSums(. == "SIMP")/totalGenos_sp)) %>%
+  
+  # get prop mismatched assignments
+  mutate(propMismatch_species = (1 - abs(propLWED - propSIMP))) %>%
+  
+  # assign species
+  mutate(speciesAssigned = ifelse(propLWED == 1, "LWED", 
+                              ifelse(propSIMP == 1, "SIMP", 
+                                     ifelse(propLWED < 1 & propSIMP > 0, "MIX", NA)))) %>%
+  
+  rownames_to_column("sampleID") %>%
+  relocate(c(speciesAssigned, totalGenos_sp, propGenos_sp, propMismatch_species, propLWED, propSIMP), .after = sampleID)
+```
+
+### Results
+
+All metrics were the same as GTscore.
+
+```{r, echo=FALSE}
+# Connect metadata
+genos_species_md_gtseq <- md_tamRun4 %>%
+  mutate(sampleID = gsub("-","\\.", sampleID)) %>%
+  merge(., genos_species_gtseq, by = "sampleID") %>%
+  mutate(mdMatch_sp4 = ifelse(species == speciesAssigned,"TRUE", "FALSE")) %>%
+  relocate(animalID, .after = sampleID) %>%
+  relocate(mdMatch_sp4, .after = animalID) %>%
+  relocate(sampleType, .after = animalID) %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F)
+
+# How many assignments were made?
+speciesCount_all_gtseq <- genos_species_md_gtseq %>%
+  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
+  summarise(totalAll = sum(!is.na(speciesAssigned)))%>%
+  mutate(propAll = totalAll/(96 - 6)) %>%
+  mutate(propAll = signif(propAll, digits = 2)) %>%
+  mutate(propAll = scales::percent(propAll)) %>%
+  t() %>%
+  as.data.frame()
+
+speciesCount_blood_gtseq <- genos_species_md_gtseq %>%
+  filter(sampleType == "blood") %>%
+  summarise(totalBlood = sum(!is.na(speciesAssigned))) %>%
+  mutate(propBlood = totalBlood/30) %>%
+  mutate(propBlood = signif(propBlood, digits = 2)) %>%
+  mutate(propBlood = scales::percent(propBlood)) %>%
+  t() %>%
+  as.data.frame()
+
+speciesCount_fecal_gtseq <- genos_species_md_gtseq %>%
+  filter(sampleType == "fecal") %>%
+  summarise(totalFecal = sum(!is.na(speciesAssigned))) %>%
+  mutate(propFecal = totalFecal/30) %>%
+  mutate(propFecal = signif(propFecal, digits = 2)) %>%
+  mutate(propFecal = scales::percent(propFecal)) %>%
+  t() %>%
+  as.data.frame()
+
+speciesCount_hair_gtseq <- genos_species_md_gtseq %>%
+  filter(sampleType == "hair") %>%
+  summarise(totalHair = sum(!is.na(speciesAssigned))) %>%
+  mutate(propHair = totalHair/30) %>%
+  mutate(propHair = signif(propHair, digits = 2)) %>%
+  mutate(propHair = scales::percent(propHair)) %>%
+  t() %>%
+  as.data.frame()
+
+speciesCount_df_gtseq <- rbind(speciesCount_blood_gtseq, speciesCount_fecal_gtseq, speciesCount_hair_gtseq, speciesCount_all_gtseq) %>%
+  t() %>%
+  as.data.frame()
+
+speciesCount_df_gtseq %>%
+  kable(caption = "GTseq: Successful species assignments by sample type") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+
+# any with mixed assignments?
+genos_species_md_gtseq %>%
+  filter(speciesAssigned == "MIX") %>%
+  nrow()
+
+# any negatives assigned a sex?
+genos_species_negs_gtseq <- genos_species_md_gtseq %>%
+  filter(str_detect(sampleType, "Neg"))
+```
+
+### Species mismatches
+
+#### GTseq species mismatches
+
+```{r}
+# Extract samples with mismatches
+genos_species_mismatch_gtseq <- genos_species_md_gtseq %>%
+  filter(!mdMatch_sp4 == "TRUE")
+
+# By sample type
+speciesMismatchAll_gtseq <- genos_species_mismatch_gtseq %>%
+  summarise(total = length(sampleID))
+
+speciesMismatchBlood_gtseq <- genos_species_mismatch_gtseq %>%
+  summarise(blood = sum(sampleType == "blood"))
+
+speciesMismatchFecal_gtseq <- genos_species_mismatch_gtseq %>%
+  summarise(fecal = sum(sampleType == "fecal"))
+
+speciesMismatchHair_gtseq <- genos_species_mismatch_gtseq %>%
+  summarise(hair = sum(sampleType == "hair"))
+
+speciesMismatchNeg_gtseq <- genos_species_mismatch_gtseq %>%
+  summarise("(-)" = sum(!sampleType %in% c("blood", "fecal", "hair")))
+
+# How many mismatches for each data set?
+speciesMismatchCount_df_gtseq <- cbind(speciesMismatchAll_gtseq, speciesMismatchBlood_gtseq, speciesMismatchFecal_gtseq, speciesMismatchHair_gtseq, speciesMismatchNeg_gtseq)
+
+speciesMismatchCount_df_gtseq %>%
+  kable(caption = "Species mismatch overview") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+#### GTseq vs. GTscore species mismatches
+
+Species mismatches were the same for GTscore and GTseq (same fecal sample & negative).
+
+```{r}
+speciesMismatch_gtseqGTscore <- rbind(speciesMismatchCount_df, speciesMismatchCount_df_gtseq) %>%
+  mutate(
+    pipeline = c("gtscore", "gtseq")
+  ) %>%
+  column_to_rownames("pipeline")
+
+speciesMismatch_gtseqGTscore %>%
+  kable(caption = "Species mismatch overview: GTscore vs. GTseq") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+## GTseq sex
+
+### Code
+
+```{r}
+# sex key
+sexKey_gtseq <- sexKey %>%
+  mutate(
+    genotype = gsub(",", "", genotype)
+  )
+
+# sex assignments
+genos_sex_spSpecific_gtseq <- genos_tamRun4_gtseq %>%
+  rownames_to_column("locus") %>%
+  filter(str_detect(locus, "SEXID")) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  left_join(sexKey_gtseq, by = c("locus", "genotype")) %>%
+  mutate(sex = coalesce(sex, genotype)) %>%
+  select(c(locus, sampleID, sex)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = sex) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  merge(., md_tamRun4[, c("sampleID", "species")], by = "sampleID") %>%
+  mutate(
+    SEXID_LWED_195 = case_when(
+      species == "SIMP" ~ NA,
+      .default = SEXID_LWED_195
+    ),
+    SEXID_LWED_208 = case_when(
+      species == "SIMP" ~ NA,
+      .default = SEXID_LWED_208
+    ),
+    SEXID_SIMP_197 = case_when(
+      species == "LWED" ~ NA,
+      .default = SEXID_SIMP_197
+    ),
+    SEXID_SIMP_198 = case_when(
+      species == "LWED" ~ NA,
+      .default = SEXID_SIMP_198
+    ),
+    SEXID_SIMP_203 = case_when(
+      species == "LWED" ~ NA,
+      .default = SEXID_SIMP_203
+    ),
+    SEXID_SIMP_218 = case_when(
+      species == "LWED" ~ NA,
+      .default = SEXID_SIMP_218
+    )
+  ) %>%
+  column_to_rownames("sampleID") %>%
+  # assign sex
+  mutate(totalGenos_sex = (rowSums(. == "F", na.rm = T) + rowSums(. == "M", na.rm = T))) %>%
+  mutate(propGenos_sex = 
+           case_when(
+             species == "LWED" ~ (totalGenos_sex/7),
+             species == "SIMP" ~ (totalGenos_sex/9),
+             .default = totalGenos_sex/11
+             )
+         ) %>%
+  mutate(propF = (rowSums(. == "F", na.rm = T)/totalGenos_sex)) %>%
+  mutate(propM = (rowSums(. == "M", na.rm = T)/totalGenos_sex)) %>%
+  mutate(propMismatch_sex = (1 - abs(propF - propM))) %>%
+  mutate(sexAssigned = ifelse(propF == 1, "F", 
+                              ifelse(propM == 1, "M", 
+                                     ifelse(propF < 1 & propF > 0, "MIX", NA)))) %>%
+  rownames_to_column("sampleID") %>%
+  select(c("sampleID",
+           "sexAssigned",
+           "totalGenos_sex",
+           "propGenos_sex",
+           "propMismatch_sex",
+           "propF",
+           "propM",
+           "SEXID_200",
+           "SEXID_205",
+           "SEXID_209",
+           "SEXID_215",
+           "SEXID_222",
+           # LWED-specific SEXID
+           "SEXID_LWED_195",
+           "SEXID_LWED_208",
+           # SIMP-specific SEXID
+           "SEXID_SIMP_197",
+           "SEXID_SIMP_198",
+           "SEXID_SIMP_203",
+           "SEXID_SIMP_218"))
+```
+
+### Results
+
+All metrics were the same as GTscore.
+
+```{r}
+# Connect metadata
+genos_sex_md_gtseq <- md_tamRun4 %>%
+  merge(., genos_sex_spSpecific_gtseq, by = "sampleID") %>%
+  mutate(mdMatch_sex = 
+           case_when(
+             sexAssigned == "MIX" ~ "MIX",
+             sex == sexAssigned ~ "TRUE",
+             sex != sexAssigned ~ "FALSE",
+             is.na(sex) & !is.na(sexAssigned) ~ "FALSE")) %>%
+  relocate(mdMatch_sex, .after = sampleID) %>%
+  relocate(sampleType, .after = animalID) %>%
+  unite("sample", animalID:sampleType, sep = "_", remove = F) %>%
+  relocate(c(sex, sexAssigned, totalGenos_sex, propGenos_sex, propMismatch_sex, propF, propM), .after = mdMatch_sex) %>%
+  relocate(sample, .after = sampleID)
+
+# How many assignments were made?
+sexCount_all_gtseq <- genos_sex_md_gtseq %>%
+  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
+  summarise(totalAll = sum(!is.na(sexAssigned)))%>%
+  mutate(propAll = totalAll/(96 - 6)) %>%
+  mutate(propAll = signif(propAll, digits = 2)) %>%
+  mutate(propAll = scales::percent(propAll)) %>%
+  t() %>%
+  as.data.frame()
+
+sexCount_blood_gtseq <- genos_sex_md_gtseq %>%
+  filter(sampleType == "blood") %>%
+  summarise(totalBlood = sum(!is.na(sexAssigned))) %>%
+  mutate(propBlood = totalBlood/30) %>%
+  mutate(propBlood = signif(propBlood, digits = 2)) %>%
+  mutate(propBlood = scales::percent(propBlood)) %>%
+  t() %>%
+  as.data.frame()
+
+sexCount_fecal_gtseq <- genos_sex_md_gtseq %>%
+  filter(sampleType == "fecal") %>%
+  summarise(totalFecal = sum(!is.na(sexAssigned))) %>%
+  mutate(propFecal = totalFecal/30) %>%
+  mutate(propFecal = signif(propFecal, digits = 2)) %>%
+  mutate(propFecal = scales::percent(propFecal)) %>%
+  t() %>%
+  as.data.frame()
+
+sexCount_hair_gtseq <- genos_sex_md_gtseq %>%
+  filter(sampleType == "hair") %>%
+  summarise(totalHair = sum(!is.na(sexAssigned))) %>%
+  mutate(propHair = totalHair/30) %>%
+  mutate(propHair = signif(propHair, digits = 2)) %>%
+  mutate(propHair = scales::percent(propHair)) %>%
+  t() %>%
+  as.data.frame()
+
+sexCount_df_gtseq <- rbind(sexCount_blood_gtseq, sexCount_fecal_gtseq, sexCount_hair_gtseq, sexCount_all_gtseq) %>%
+  t() %>%
+  as.data.frame()
+
+sexCount_df_gtseq %>%
+  kable(caption = "GTseq: Successful sex assignments by sample type") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+
+# any negatives assigned a sex?
+genos_sex_negs_gtseq <- genos_sex_md_gtseq %>%
+  filter(str_detect(sampleType, "Neg"))
+```
+
+### Sex mismatches
+
+#### GTseq sex mismatches
+
+GTseq gave **5 fewer sex mismatches**. Of the 82 samples that received sex assignments, 13 (vs. 18) did not match metadata, with 4 blood mismatches (2 complete, 2 mix), 4 fecal mismatches (1 complete, 3 mix), and 4 hair mismatches (0 complete, 4 mix).
+
+Given that genotypes called by both GTscore and GTseq pipelines 100% match, this means that the additional mismatches from GTscore were from loci called by GTscore, but not GTseq.
+
+```{r}
+# Extract samples with mismatches
+genos_sex_mismatchAll_gtseq <- genos_sex_md_gtseq %>%
+  filter(!mdMatch_sex == "TRUE")
+genos_sex_mismatchBlood_gtseq <- genos_sex_mismatchAll_gtseq %>%
+  filter(sampleType == "blood")
+genos_sex_mismatchFecal_gtseq <- genos_sex_mismatchAll_gtseq %>%
+  filter(sampleType == "fecal")
+genos_sex_mismatchHair_gtseq <- genos_sex_mismatchAll_gtseq %>%
+  filter(sampleType == "hair")
+genos_sex_mismatchNeg_gtseq <- genos_sex_mismatchAll_gtseq %>%
+  filter(str_detect(sampleType, "Neg"))
+
+# By sample type
+sexMismatchAll_gtseq <- data.frame(
+    mismatchAll_gtseq = length(genos_sex_mismatchAll_gtseq$sampleID),
+    mismatchComplete_gtseq = sum(grepl("FALSE", genos_sex_mismatchAll_gtseq$mdMatch_sex)),
+    mismatchMix_gtseq = sum(grepl("MIX", genos_sex_mismatchAll_gtseq$mdMatch_sex)),
+    sampleType = "all"
+  )
+
+sexMismatchBlood_gtseq <- data.frame(
+    mismatchAll_gtseq = length(genos_sex_mismatchBlood_gtseq$sampleID),
+    mismatchComplete_gtseq = sum(grepl("FALSE", genos_sex_mismatchBlood_gtseq$mdMatch_sex)),
+    mismatchMix_gtseq = sum(grepl("MIX", genos_sex_mismatchBlood_gtseq$mdMatch_sex)),
+    sampleType = "blood"
+  )
+
+sexMismatchFecal_gtseq <- data.frame(
+    mismatchAll_gtseq = length(genos_sex_mismatchFecal_gtseq$sampleID),
+    mismatchComplete_gtseq = sum(grepl("FALSE", genos_sex_mismatchFecal_gtseq$mdMatch_sex)),
+    mismatchMix_gtseq = sum(grepl("MIX", genos_sex_mismatchFecal_gtseq$mdMatch_sex)),
+    sampleType = "fecal"
+  )
+
+sexMismatchHair_gtseq <- data.frame(
+    mismatchAll_gtseq = length(genos_sex_mismatchHair_gtseq$sampleID),
+    mismatchComplete_gtseq = sum(grepl("FALSE", genos_sex_mismatchHair_gtseq$mdMatch_sex)),
+    mismatchMix_gtseq = sum(grepl("MIX", genos_sex_mismatchHair_gtseq$mdMatch_sex)),
+    sampleType = "hair"
+  )
+
+sexMismatchNeg_gtseq <- data.frame(
+    mismatchAll_gtseq = length(genos_sex_mismatchNeg_gtseq$sampleID),
+    mismatchComplete_gtseq = sum(grepl("FALSE", genos_sex_mismatchNeg_gtseq$mdMatch_sex)),
+    mismatchMix_gtseq = sum(grepl("MIX", genos_sex_mismatchNeg_gtseq$mdMatch_sex)),
+    sampleType = "neg"
+  )
+
+# How many mismatches for each data set?
+sexMismatchCount_df_gtseq <- rbind(sexMismatchAll_gtseq, sexMismatchBlood_gtseq, sexMismatchFecal_gtseq, sexMismatchHair_gtseq, sexMismatchNeg_gtseq) %>%
+  relocate(sampleType)
+
+sexMismatchCount_df_gtseq %>%
+  kable(caption = "GTseq: Sex mismatch overview") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+#### GTseq vs. GTscore mismatches
+
+```{r}
+sexMismatch_gtseqGTscore <- merge(sexMismatchCount_df, sexMismatchCount_df_gtseq, by = "sampleType") %>%
+  select(order(colnames(.))) %>%
+  relocate(sampleType)
+
+sexMismatch_gtseqGTscore %>%
+  kable(caption = "Sex mismatch overview: GTscore vs. GTseq") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```
+
+## Coverage maps
+
+### GTscore.10x Illumina
+
+create long dataframes of genotypes & allele reads
+create scatterplot of number of allele reads for allele1 vs. allele2
+
+#### Genotypes
+
+```{r}
+# Primer-probe file
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T) %>%
+  dplyr::rename("allele1" = "Allele1",
+                "allele2" = "Allele2")
+
+# Genotypes
+genos_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+genos_ill_gtscore_l <- genos_ill_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno")
+```
+
+#### Allele reads
+
+```{r}
+# Allele reads
+readCounts_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+readCounts_ill_gtscore_l <- readCounts_ill_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "readCounts")
+```
+
+#### Full file
+
+```{r}
+geno.readCounts_ill_gtscore <- genos_ill_gtscore_l %>%
+  merge(., readCounts_ill_gtscore_l, by = c("sampleID", "locus")) %>%
+  separate(readCounts, c("readCounts1", "readCounts2")) %>%
+  merge(., pp_fullSet[, c("Locus", "allele1", "allele2")], by.x = "locus", by.y = "Locus") %>%
+  mutate(
+    readCounts1 = as.numeric(readCounts1),
+    readCounts2 = as.numeric(readCounts2),
+    alleleRatio1 = round(readCounts1/(readCounts1 + readCounts2), 2),
+    alleleRatio2 = round(readCounts2/(readCounts1 + readCounts2), 2)
+  ) %>% 
+  mutate(
+    pipeline = "gtscore"
+  ) %>%
+  relocate(pipeline)
+
+geno.readCounts_ill_gtscore_AA <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,A")
+geno.readCounts_ill_gtscore_AC <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,C")
+geno.readCounts_ill_gtscore_AG <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,G")
+geno.readCounts_ill_gtscore_AT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,T")
+
+geno.readCounts_ill_gtscore_CC <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "C,C")
+geno.readCounts_ill_gtscore_CG <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "C,G")
+geno.readCounts_ill_gtscore_CT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "C,T")
+
+geno.readCounts_ill_gtscore_GG <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "G,G")
+geno.readCounts_ill_gtscore_GT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "G,T")
+
+geno.readCounts_ill_gtscore_TT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "T,T")
+```
+
+```{r}
+ggplot(geno.readCounts_ill_gtscore_AA, aes(x = alleleRatio1, y = alleleRatio2)) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(0, 1, 0.025)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.025))
+
+ggplot(geno.readCounts_ill_gtscore_AC, aes(x = alleleRatio1, y = alleleRatio2)) +
+  geom_point()
+
+geno.readCounts_ill_gtscore %>%
+  na.omit() %>%
+ggplot(aes(y = alleleRatio1, group = geno)) +
+  geom_boxplot(aes(col = geno)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.025)) +
+  theme_bw()
+```
+
+### GTseq Illumina
+
+create long dataframes of genotypes & allele reads
+create scatterplot of number of allele reads for allele1 vs. allele2
+
+#### Genotypes
+
+```{r}
+# Genotypes
+genos_ill_gtseq <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+genos_ill_gtseq_l <- genos_ill_gtseq %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno")
+```
+
+#### Allele reads
+
+GTseq doesn't automatically output allele reads in an easily usable
+format - instead, we need to extract this data from the ".genos" files
+as follows:
+
+1.  Convert .genos files to csv files
+2.  Import as one dataframe
+3.  Subset relevant columns and reformat
+
+**Convert .genos to .csv in bash**
+
+```{bash, eval = FALSE}
+# first copied all .genos files to genos_csv
+# then cd to genos_csv and run the following:
+
+for f in *.genos; do
+    g="${f%.genos}.csv"
+    mv "${f}" "${g}"
+done
+```
+
+**Import all csv files as one dataframe & reformat**
+
+```{r}
+fileNames <- dir("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/genos_csv", full.names = T)
+
+readCounts_gtseq.list <- lapply(fileNames, function(file.name) {
+  df <- read.csv(file.name, skip = 1, header = F)
+  df$file.name <- file.name
+  return(df)
+  })
+
+readCounts_ill_gtseq <- rlist::list.rbind(readCounts_gtseq.list) %>%
+  rename("locus" = "V1",
+         "allele1_counts" = "V2",
+         "allele2_counts" = "V3",
+         "a1.a2_ratio" = "V4",
+         "geno" = "V5",
+         "genoClass" = "V6",
+         "a1_correctionValue" = "V7",
+         "a2_corectionValue" = "V8",
+         "onTargetReads" = "V9",
+         "locus_otProp.readTotal" = "V10",
+         "locus_otProp.otTotal" = "V11",
+         "sampleID" = "file.name") %>%
+  mutate(
+    readCounts = str_c(sub(".*=", "", allele1_counts), ",", sub(".*=", "", allele2_counts)),
+    sampleID = sub("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/genos_csv/", "", sampleID),
+    sampleID = sub(".csv", "", sampleID),
+    sampleID = gsub("-", "\\.", sampleID)
+    ) %>%
+  select(c("sampleID", "locus", "readCounts")) %>%
+  pivot_wider(names_from = sampleID, values_from = readCounts) %>%
+  column_to_rownames("locus") %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+readCounts_ill_gtseq_l <- readCounts_ill_gtseq %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "readCounts")
+```
+
+Full file
+
+```{r}
+geno.readCounts_ill_gtseq <- genos_ill_gtseq_l %>%
+  merge(., readCounts_ill_gtseq_l, by = c("sampleID", "locus")) %>%
+  separate(readCounts, c("readCounts1", "readCounts2")) %>%
+  merge(., pp_fullSet[, c("Locus", "allele1", "allele2")], by.x = "locus", by.y = "Locus") %>%
+  mutate(
+    readCounts1 = as.numeric(readCounts1),
+    readCounts2 = as.numeric(readCounts2),
+    alleleRatio1 = round(readCounts1/(readCounts1 + readCounts2), 2),
+    alleleRatio2 = round(readCounts2/(readCounts1 + readCounts2), 2)
+  ) %>%
+  mutate(
+    pipeline = "gtseq"
+  ) %>%
+  relocate(pipeline)
+
+geno.readCounts_ill_gtseq_AA <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,A")
+geno.readCounts_ill_gtseq_AC <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,C")
+geno.readCounts_ill_gtseq_AG <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,G")
+geno.readCounts_ill_gtseq_AT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,T")
+
+geno.readCounts_ill_gtseq_CC <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "C,C")
+geno.readCounts_ill_gtseq_CG <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "C,G")
+geno.readCounts_ill_gtseq_CT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "C,T")
+
+geno.readCounts_ill_gtseq_GG <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "G,G")
+geno.readCounts_ill_gtseq_GT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "G,T")
+
+geno.readCounts_ill_gtseq_TT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "T,T")
+```
+
+```{r}
+geno.readCounts_ill_gtseq %>%
+  na.omit() %>%
+ggplot(aes(y = alleleRatio1, group = geno)) +
+  geom_boxplot(aes(col = geno)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.025)) +
+  theme_bw()
+```
+
+### GTscore vs. GTseq
+
+```{r}
+geno.readCounts_ill_gtseqScore <- rbind(geno.readCounts_ill_gtscore, geno.readCounts_ill_gtseq)
+
+# facet plot
+geno.readCounts_ill_gtseqScore %>%
+  na.omit() %>%
+ggplot(aes(x = geno, y = alleleRatio1, fill = pipeline)) +
+     geom_boxplot() +
+     theme(legend.position = "none") +
+  theme_bw() +
+     facet_wrap(~geno, scale = "free_x")
+
+# all together
+geno.readCounts_ill_gtseqScore %>%
+  na.omit() %>%
+ggplot(aes(x = geno, y = alleleRatio1, fill = pipeline)) +
+  geom_boxplot() +
+  scale_y_continuous(breaks = seq(0, 1, 0.025)) +
+  theme_linedraw()
+```
+
+# SCRAPS
+
+```{r, echo=FALSE}
+# Illumina
+ill_genoRateSummary_bySample <- matrix(
+  # blood
+  c(length(ill_sampleSum_blood$sampleFile),
+    sum(ill_sampleSum_blood$GenotypeRate == 0),
+    scales::percent(median(ill_sampleSum_blood$GenotypeRate)),
+    scales::percent(min(ill_sampleSum_blood$GenotypeRate)),
+    scales::percent(max(ill_sampleSum_blood$GenotypeRate)),
+    # fecal
+    length(ill_sampleSum_fecal$sampleFile),
+    sum(ill_sampleSum_fecal$GenotypeRate == 0),
+    scales::percent(median(ill_sampleSum_fecal$GenotypeRate)),
+    scales::percent(min(ill_sampleSum_fecal$GenotypeRate)),
+    scales::percent(max(ill_sampleSum_fecal$GenotypeRate)),
+    # hair
+    length(ill_sampleSum_hair$sampleFile),
+    sum(ill_sampleSum_hair$GenotypeRate == 0),
+    scales::percent(median(ill_sampleSum_hair$GenotypeRate)),
+    scales::percent(min(ill_sampleSum_hair$GenotypeRate)),
+    scales::percent(max(ill_sampleSum_hair$GenotypeRate))),
+  nrow = 5,
+  ncol = 3) %>%
+  `colnames<-`(., c("blood", "fecal", "hair")) %>%
+  `rownames<-`(., c("Total samples", "Samples w/0% geno success", "Median geno success", "Min geno success", "Max geno success")) %>%
+  as.data.frame()
+  
+ill_genoRateSummary_bySample %>%
+  kable(caption = "[Illumina] Overview of genotype success by sample type") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+
+# Nanopore
+ont_genoRateSummary_bySample <- matrix(
+  # blood
+  c(length(ont_sampleSum_blood$sampleFile),
+    sum(ont_sampleSum_blood$GenotypeRate == 0),
+    scales::percent(median(ont_sampleSum_blood$GenotypeRate)),
+    scales::percent(min(ont_sampleSum_blood$GenotypeRate)),
+    scales::percent(max(ont_sampleSum_blood$GenotypeRate)),
+    # fecal
+    length(ont_sampleSum_fecal$sampleFile),
+    sum(ont_sampleSum_fecal$GenotypeRate == 0),
+    scales::percent(median(ont_sampleSum_fecal$GenotypeRate)),
+    scales::percent(min(ont_sampleSum_fecal$GenotypeRate)),
+    scales::percent(max(ont_sampleSum_fecal$GenotypeRate)),
+    # hair
+    length(ont_sampleSum_hair$sampleFile),
+    sum(ont_sampleSum_hair$GenotypeRate == 0),
+    scales::percent(median(ont_sampleSum_hair$GenotypeRate)),
+    scales::percent(min(ont_sampleSum_hair$GenotypeRate)),
+    scales::percent(max(ont_sampleSum_hair$GenotypeRate))),
+  nrow = 5,
+  ncol = 3) %>%
+  `colnames<-`(., c("blood", "fecal", "hair")) %>%
+  `rownames<-`(., c("Total samples", "Samples w/0% geno success", "Median geno success", "Min geno success", "Max geno success")) %>%
+  as.data.frame()
+  
+ont_genoRateSummary_bySample %>%
+  kable(caption = "[Nanopore] Overview of genotype success by sample type") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"))
+```

@@ -1,0 +1,1836 @@
+---
+title: "GTscorePipeline_tamRun4"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Packages
+
+```{r load packages, include=FALSE}
+source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+library(gsubfn)
+library(phylotools)
+library(TidyMultiqc)
+library(tidyverse)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager", version = "3.16")
+BiocManager::install("Biostrings")
+```
+
+GTscore also requires Perl and the packages "Algorithm::Combinatorics" and "Excel-Writer-XLSX". Perform the following in terminal to install on Linux. NOTE -- be sure to install both perl and the modules in root. See how to install perl packages [here](http://www.cpan.org/modules/INSTALL.html).
+
+NOTE - the old way of installing perl through conda (conda install -c conda-forge perl) doesn't play nice anymore; better to install directly from perl:
+
+```{bash, eval = FALSE}
+# Install perl
+curl -L http://xrl.us/installperlnix | bash
+
+# Install cpanminus (makes installing perl modules easier)
+cpan App::cpanminus
+
+# Install necessary perl modules
+sudo cpanm Algorithm::Combinatorics
+sudo cpanm Excel::Writer::XLSX
+## OR
+sudo cpan Algorithm::Combinatorics
+sudo cpan Excel::Writer::XLSX
+```
+
+I also recently had issues with installing perl modules with "cpanm" -- installing with "cpan" instead solved things. Generally speaking, perl continues to be a massive pain in new fun ways every time I open this up to re-run something.
+
+# 2 Overview
+
+## 2.1 About the pipeline
+
+This pipeline is to analyze data from tamRun4 (the 30x3 sample type comparison project) and includes all steps needed to analyze MiSeq data output, including how to 1) download MiSeq sequencing files, 2) do quality checks, 3) create the necessary files for analysis in GTscore, and 4) run the GTscore pipeline itself.
+
+The GTscore pipeline was originally created by Garrett McKinney (see the associated github [here](https://github.com/gjmckinney/GTscore)). Here, I combine the scripts included in his original "GTscore_pipeline.R" as well as his original "README.md" - there's a good bit of overlap between these files, but a few scripts exist in one but not the other. I've also included separate analyses for each species, since not all not all loci are informative for both species.
+
+## 2.2 About the data
+
+The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 fecal samples, 29 hair samples (xxx LWED, xxx SIMP), 30 blood samples (xxx LWED, xxx SIMP), and 6 negative controls.
+
+**NOTE** that of these samples, hair_tx105A_e1 was not added to PCR1; found the second elution too late to be included in the run. Treat as a negative when analysing the data.
+
+### 2.2.1 Metadata
+
+```{r}
+md <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
+```
+
+#### Sample lists
+
+```{r}
+lwedSamples <- filter(md_tamRun4, is.na(species) | !species == "SIMP") %>%
+  select(sampleID) %>%
+  pull()
+
+simpSamples <- filter(md_tamRun4, is.na(species) | !species == "LWED") %>%
+  select(sampleID) %>%
+  pull()
+
+negSamples <- md_tamRun4 %>%
+  filter(str_detect(sampleType, "Neg")) %>%
+  select(sampleID) %>%
+  pull()
+```
+
+# 3 Prep sequencing results
+
+## 3.1 Download sequences from BaseSpace
+
+To download all sample files, it's easiest to use the BaseSpace Command Line Interface (CLI).
+
+To install, follow the scripts provided here: <https://developer.basespace.illumina.com/docs/content/documentation/cli/cli-overview>
+
+Note that even if it's already installed, you may need to re-authenticate via the command below. Running it will give a link; click to open in a browser and complete authentication.
+
+```{bash, eval = F}
+bs auth
+```
+
+Once authentication is complete, you can download the desired files as follows:
+
+```{bash, eval = F}
+# Check Project IDs (outputs Project IDs for tamRun3_L1Raquel and Unindexed Reads)
+bs list projects
+
+# Sample sequences (tamRun3_L1Raquel, tamRun3b_L1)
+bs download project -i 384884910 -o /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/00_run3Seqs --extension=fastq.g]
+
+# Unindexed Reads
+bs download project -i 374582211 -o /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/00_run3Seqs/unindexedReads --extension=fastq.gz
+```
+
+## 3.2 Extract fast.gz files
+
+```{bash Extract sequencing results, eval = FALSE}
+# Navigate to the directory containing the .fastq.gz files from the sequencing run
+cd 00_Run4Seqs
+
+# Move all .gz files out of their individual folders and into the current directory & remove empty folders
+mv */* ./
+
+# Extract all files
+gunzip -r .
+```
+
+## 3.3 Interleave files
+
+To prep for the GTscore pipeline, we need to combine reads 1 & 2 for each sample into a single interleaved file - leave a set of non-interleaved files in the original folder though to keep for fastq quality checks.
+
+Note that we have interleaved files for tamRun3, tamRun3b, and the merged version of the two.
+
+```{bash Interleave fasta seqs, eval = FALSE}
+# Interleave reads 1 & 2 for each sample and place in a new folder
+cd ./../
+
+for i in ./00_Run4Seqs/*_R1_001.fastq; do name=$(basename $i _R1_001.fastq); reformat.sh in=00_Run4Seqs/${name}_R1_001.fastq in2=00_Run4Seqs/${name}_R2_001.fastq out=02_run4Interleaved/${name}_interleaved.fastq; done
+
+# Trim filenames to make them more manageable
+cd ./02_run4Interleaved/
+
+for f in *.fastq; do g="${f%%_S*}.fastq"; mv "${f}" "${g}"; done
+```
+
+# 4 Quality checks
+
+To get sequence quality scores for each sample, we can use 'fastqc' paired with 'MultiQC' -- 'fastp' is better for paired-end reads, but doesn't play nice when it comes to getting quality scores from the MultiQC report. Note that we'll be running quality checks on reads 1 and 2 separately (vs. interleaved).
+
+## 4.1 fastqc + multiqc
+
+*Note*: use "\--interactive" to force plots to tell you which line belongs to which sample, otherwise it will remove this option since there are so many samples in this run
+
+```{bash eval = F}
+# Activate fastqc environment
+cd ../01_Run4QualityChecks
+conda activate fastqc-env
+
+# Run fastqc
+for i in ../00_Run4Seqs/*; do fastqc $i; done
+
+# Move fastqc files to quality checks folder
+mv ../00_Run4Seqs/*fastqc* .
+
+# Activate multiqc environment
+conda activate multiqc-env
+
+# Run MultiQC on all files within the quality checks folder
+multiqc --interactive .
+```
+
+## 4.2 TidyMultiqc
+
+To convert the MultiQC into something more usable in R, we can use the package 'TidyMultiqc', which converts the 'multiqc_data.json' file into tidy data frames.
+
+Load FastQC MultiQC report to R
+
+```{r}
+MultiQCfastQCpath <- file.path("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/01_Run4QualityChecks/multiqc_data", "multiqc_data.json")
+
+MultiQCfastQC <- TidyMultiqc::load_multiqc(MultiQCfastQCpath, sections = c("general", "raw"))
+```
+
+### 4.2.1 Obtain median sequence quality scores
+
+For the analyses in this section, I followed [this vignette](https://cran.r-project.org/web/packages/TidyMultiqc/vignettes/TidyMultiqc.html) provided by the makers of the TidyMultiqc package.
+
+MultiQC reports do not provide a numerical summary statistic for read quality; they only have mapping quality and pass/fails for the per-base sequence quality. We instead need to pull this data from one of the plots -- I'm using the "Per Sequence Quality Scores" plot here:
+
+```{r}
+df <- TidyMultiqc::load_multiqc(
+  MultiQCfastQCpath, 
+  sections = 'plot',
+  plots = "fastqc_per_sequence_quality_scores_plot")
+```
+
+This provides a nested data frame as a set of x, y pairs. As it's a histogram plot, we know that the `x` value is the quality score, and `y` is the number of times that score has been counted.
+
+We can use tidyr to unnest the data, HistDat to create a HistDat object for each group, then purr to map each plot data frame into a row of summary statistics:
+
+```{r}
+df_unNest <- df %>%
+  dplyr::mutate(
+    purrr::map_dfr(plot.fastqc_per_sequence_quality_scores_plot, function(plot_df){
+      hist = HistDat::HistDat(vals=plot_df$x, counts = plot_df$y)
+      list(
+        mean_qc = mean(hist),
+        median_qc = median(hist),
+        max_qc = max(hist)
+      )
+    }),
+    plot.fastqc_per_sequence_quality_scores_plot = NULL
+  )
+```
+
+This dataframe has separate rows for reads 1 & 2; we can rearrange that to make it easier to work with for our purposes. Since we're most interested in median quality, we'll just pull that value for each sample.
+
+```{r}
+seqQC_r1 <- df_unNest %>%
+  select(c("metadata.sample_id", "median_qc")) %>%
+  filter(grepl("R1", metadata.sample_id)) %>%
+  dplyr::rename("medianQC_r1" = "median_qc") %>%
+  mutate(sampleNo = substr(metadata.sample_id, start = 9, stop = 11))
+seqQC_r2 <- df_unNest %>%
+  select(c("metadata.sample_id", "median_qc")) %>%
+  filter(grepl("R2", metadata.sample_id)) %>%
+  dplyr::rename("medianQC_r2" = "median_qc") %>%
+  mutate(sampleNo = substr(metadata.sample_id, start = 9, stop = 11))
+seqQC <- merge(seqQC_r1, seqQC_r2, by = "sampleNo") %>%
+  select(c("sampleNo", "medianQC_r1", "medianQC_r2")) %>%
+  arrange(sampleNo)
+```
+
+Let's just take a peek at the distribution of sequence quality scores for now; we'll use it in our other analyses later on:
+
+```{r}
+ggplot(seqQC, aes(medianQC_r1)) +
+  geom_bar(stat = "count") +
+  theme_bw()
+
+ggplot(seqQC, aes(medianQC_r2)) +
+  geom_bar(stat = "count") +
+  theme_bw()
+```
+
+# 5 Create primer-probe & sample files
+
+Prior to running the GTscore pipeline itself, we need to make a few files, including 1) sample files 2) primer-probe files for each species. I'm separating them out like this so that we have more accurate read counts and genotype rates for each sample and locus.
+
+## 5.1 Sample files
+
+**Quick-load**
+
+```{r}
+sf_fullSet <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_sampleFiles.txt")
+
+sf_pos <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_pos_sampleFiles.txt")
+
+sf_lwed <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_sampleFiles.txt")
+
+sf_simp <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_sampleFiles.txt")
+```
+
+**File creation**
+
+Create file for all samples in bash
+
+```{bash}
+cd ./../02_run4Interleaved
+
+for i in *fastq; do echo $i; done > ./../03_run4GTscore/ill_fullSet_sampleFiles.txt
+```
+
+Load into R
+
+```{r}
+sf_fullSet <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_sampleFiles.txt")
+```
+
+Use md file to create sample file species subsets; ditch negatives from species-specific sets
+
+```{r}
+# Create subsets
+lwed <- filter(md, species == "LWED")
+simp <- filter(md, species == "SIMP")
+
+sf_lwed <- sf_fullSet %>%
+  filter(V1 %in% lwed$sampleFile_ill)
+
+sf_simp <- sf_fullSet %>%
+  filter(V1 %in% simp$sampleFile_ill)
+
+sf_pos <- rbind(sf_lwed, sf_simp) %>%
+  arrange(V1)
+
+# Export sample files
+write.table(sf_lwed, file = "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_simp, file = "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_pos, file = "./04_tamRun4/00_illumina/03_run4GTscore/ill_pos_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+## 5.2 Primer probe files
+
+**Quick-load**
+
+```{r}
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
+
+pp_dual <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt", header = T)
+
+pp_lwed <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt", header = T)
+
+pp_simp <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt", header = T)
+```
+
+**File prep**
+
+Here I'm loading in version 3 primer-probe files (created in GTscorePipeline_tamRun5.Rmd)
+
+```{r}
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
+
+pp_dual <- pp_fullSet %>%
+  filter(!str_detect(Locus, "LWED")) %>%
+  filter(!str_detect(Locus, "SIMP"))
+
+write.table(pp_dual, "./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+```
+
+# 6 Count reads for amplicons
+
+```{r count reads for amplicons, eval=FALSE}
+# all samples, all loci (includes negatives)
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_fullSet_")
+
+# pos samples (no negs), dual loci
+system2("perl",
+        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_pos_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_posDual_")
+
+# lwed samples, lwed + dual loci
+system2("perl",
+        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_lwed_")
+
+# simp samples, simp + dual loci
+system2("perl",
+        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_simp_")
+```
+
+# 7 Genotyping
+
+## 7.1 0x cutoff
+
+### Full set genos
+
+```{r}
+#load locus table and 0x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP_0x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_0x)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+### Species subsets
+
+#### pos samples only (no negs)
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+posDual_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+posDual_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+posDual_polyGenResults_singleSNP_0x <- polyGen(posDual_singleSNP_locusTable, posDual_singleSNP_alleleReads_0x)
+
+#write results
+write.table(posDual_polyGenResults_singleSNP_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+#### LWED
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+LWED_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP_0x <- polyGen(LWED_singleSNP_locusTable, LWED_singleSNP_alleleReads_0x)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+#### SIMP
+
+```{r}
+#load locus table and 10x allele reads file
+SIMP_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP_0x <- polyGen(SIMP_singleSNP_locusTable, SIMP_singleSNP_alleleReads_0x)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+## 7.2 10x cutoff
+
+### Recode loci \<10x coverage
+
+Step 1: Recode loci with \<10x coverage in the full set of allele read counts
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts_original <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt")
+
+# Create read counts copy for 10x coverage
+readCounts10x <- readCounts_original
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum10x <- replace(readCounts10x, TRUE, lapply(readCounts10x, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts10x[readCounts_sum10x < 10] <- "0,0"
+```
+
+Step 2: Create lwed & simp subsets & create new AlleleReads_singleSNPs files
+
+```{r}
+# lwed and simp loci sets
+lwed_loci <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+simp_loci <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+readCounts10x_lwed <- readCounts10x %>%
+  select(lwed$sampleID_ill) %>%
+  filter(rownames(.) %in% lwed_loci$Locus_ID)
+
+readCounts10x_simp <- readCounts10x %>%
+  select(simp$sampleID_ill) %>%
+  filter(rownames(.) %in% simp_loci$Locus_ID)
+
+readCounts10x_posDual <- readCounts10x %>%
+  select(colnames(posDual_singleSNP_alleleReads_0x)) %>%
+  filter(rownames(.) %in% rownames(posDual_singleSNP_alleleReads_0x))
+  
+# Export new 10x AlleleReads_singleSNPs files
+write.table(readCounts10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+
+write.table(readCounts10x_posDual, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+
+write.table(readCounts10x_lwed, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+
+write.table(readCounts10x_simp, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+```
+
+Genotyping is accomplished using the polyGen function. The genotyping algorithm is described in McKinney et al. 2018 and is a maximum likelihood algorithm capable of genotyping any number of alleles and ploidy per locus. This allows genoyping of single SNPs as well as microhaplotypes, and loci with elevated ploidy.
+
+Two arguments are required for polyGen, the locusTable and alleleReads files output by AmpliconReadCounter.
+
+Optional arguments for polyGen are:
+
+-   p_thresh - threshold p-value for likelihood ratio test (default 0.05)
+-   epsilon - error rate for genotyping model (default 0.01)
+
+**NOTE** that only primer probe reads are used in genotyping!
+
+Note also that I'm making three genotype files, one for all loci vs. all samples and two species-specific sets - this allows our genotyping metrics to be more accurate.
+
+### Full set genos
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP_10x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_10x)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+### Subsets
+
+#### pos samples only
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+posDual_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+posDual_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+posDual_polyGenResults_singleSNP_10x <- polyGen(posDual_singleSNP_locusTable, posDual_singleSNP_alleleReads_10x)
+
+#write results
+write.table(posDual_polyGenResults_singleSNP_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+#### LWED
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+LWED_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP_10x <- polyGen(LWED_singleSNP_locusTable, LWED_singleSNP_alleleReads_10x)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+#### SIMP
+
+```{r}
+#load locus table and 10x allele reads file
+SIMP_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP_10x <- polyGen(SIMP_singleSNP_locusTable, SIMP_singleSNP_alleleReads_10x)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP_10x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+
+## 6.2 30x coverage
+
+### Identify loci \<30x coverage
+
+Step 1: Recode loci with \<30x coverage in the full set of allele read counts
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts_original <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt")
+
+# Create read counts copy for 10x coverage
+readCounts_30x <- readCounts_original
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum_30x <- replace(readCounts_30x, TRUE, lapply(readCounts_30x, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <30x loci with "0"
+readCounts_30x[readCounts_sum_30x < 30] <- "0,0"
+```
+
+Step 2: Create lwed & simp subsets & create new AlleleReads_singleSNPs files
+
+```{r}
+# Reformat lists with . vs. -
+lwed_point <- lwed %>%
+#  mutate(sampleID = gsub("-", "\\.", sampleID)) %>%
+  select(sampleID) %>%
+  pull()
+simp_point <- simp %>%
+#  mutate(sampleID = gsub("-", "\\.", sampleID)) %>%
+  select(sampleID) %>%
+  pull()
+
+# Get lists of lwed- and simp-specific loci
+lwed_loci <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+simp_loci <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+
+readCounts_lwed_30x <- readCounts_30x %>%
+  select(any_of(lwed_point)) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% lwed_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+readCounts_simp_30x <- readCounts_30x %>%
+  select(any_of(simp_point)) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% simp_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+  
+# Export new AlleleReads_singleSNPs files
+write.table(readCounts_30x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs_30x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_lwed_30x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs_30x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_simp_30x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs_30x.txt",quote=FALSE,sep="\t")
+```
+
+Genotyping is accomplished using the polyGen function. The genotyping algorithm is described in McKinney et al. 2018 and is a maximum likelihood algorithm capable of genotyping any number of alleles and ploidy per locus. This allows genoyping of single SNPs as well as microhaplotypes, and loci with elevated ploidy.
+
+Two arguments are required for polyGen, the locusTable and alleleReads files output by AmpliconReadCounter.
+
+Optional arguments for polyGen are:
+
+-   p_thresh - threshold p-value for likelihood ratio test (default 0.05)
+-   epsilon - error rate for genotyping model (default 0.01)
+
+**NOTE** that only primer probe reads are used in genotyping!
+
+Note also that I'm making three genotype files, one for all loci vs. all samples and two species-specific sets - this allows our genotyping metrics to be more accurate.
+
+### Full set
+
+```{r}
+#load locus table and 30x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+fullSet_singleSNP_alleleReads_30x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs_30x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP_30x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_30x)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP_30x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_30x.txt", quote = FALSE, sep = "\t")
+```
+
+### Species subsets
+
+#### LWED
+
+```{r Genotyping}
+#load locus table and 30x allele reads file
+LWED_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_LocusTable_singleSNPs.txt", header=TRUE, stringsAsFactors=FALSE)
+LWED_singleSNP_alleleReads_30x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs_30x.txt", header=TRUE, row.names=1, stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP_30x <- polyGen(LWED_singleSNP_locusTable, LWED_singleSNP_alleleReads_30x)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP_30x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_polyGenResults_singleSNP_30x.txt",quote=FALSE,sep="\t")
+```
+
+#### SIMP
+
+```{r}
+#load locus table and 30x allele reads file
+SIMP_singleSNP_locusTable <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+SIMP_singleSNP_alleleReads_30x <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs_30x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP_30x <- polyGen(SIMP_singleSNP_locusTable, SIMP_singleSNP_alleleReads_30x)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP_30x,"./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_polyGenResults_singleSNP_30x.txt",quote=FALSE,sep="\t")
+```
+
+# 8 Data summaries
+
+## 8.1 Locus summaries
+
+### Summarize single SNP results for loci
+
+The summarizeGTscore command generates summary data for each locus in table form. The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele. Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
+
+**gtscore0x**
+
+```{r}
+fullSet_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+posDual_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#summarize single SNP results
+fullSet_singleSNP_summary_0x <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_0x)
+
+posDual_singleSNP_summary_0x <- summarizeGTscore(posDual_singleSNP_alleleReads, posDual_singleSNP_locusTable, posDual_polyGenResults_singleSNP_0x)
+
+LWED_singleSNP_summary_0x <- summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP_0x)
+
+SIMP_singleSNP_summary_0x <- summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP_0x)
+
+#write results
+write.table(fullSet_singleSNP_summary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(posDual_singleSNP_summary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(LWED_singleSNP_summary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(SIMP_singleSNP_summary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+**gtscore10x**
+
+```{r}
+#summarize single SNP results
+fullSet_singleSNP_summary_10x <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_10x)
+
+posDual_singleSNP_summary_10x <- summarizeGTscore(posDual_singleSNP_alleleReads, posDual_singleSNP_locusTable, posDual_polyGenResults_singleSNP_10x)
+
+LWED_singleSNP_summary_10x <- summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP_10x)
+
+SIMP_singleSNP_summary_10x <- summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP_10x)
+
+#write results
+write.table(fullSet_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(posDual_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(LWED_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(SIMP_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+### Master locus summary
+
+Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
+
+```{r}
+# per-locus read summaries
+ls_posDual <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    sampleSet = "posSamples"
+  )
+
+ls_lwed <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    sampleSet = "lwedSamples"
+  )
+
+ls_simp <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    sampleSet = "simpSamples"
+  )
+
+# gtscore0x per-locus depth/geno/etc summaries
+ss_posDual_0x <- posDual_singleSNP_summary_0x %>%
+  mutate(
+    sampleSet = "posSamples"
+  )
+
+ss_lwed_0x <- LWED_singleSNP_summary_0x %>%
+  mutate(
+    sampleSet = "lwedSamples"
+  )
+
+ss_simp_0x <- SIMP_singleSNP_summary_0x %>%
+  mutate(
+    sampleSet = "simpSamples"
+  )
+
+# gtscore10x per-locus depth/geno/etc summaries
+ss_posDual_10x <- posDual_singleSNP_summary_10x %>%
+  mutate(
+    sampleSet = "posSamples"
+  )
+
+ss_lwed_10x <- LWED_singleSNP_summary_10x %>%
+  mutate(
+    sampleSet = "lwedSamples"
+  )
+
+ss_simp_10x <- SIMP_singleSNP_summary_10x %>%
+  mutate(
+    sampleSet = "simpSamples"
+  )
+
+# master summary
+ls_combo <- rbind(ls_posDual, ls_lwed, ls_simp)
+ss_combo_0x <- rbind(ss_posDual_0x, ss_lwed_0x, ss_simp_0x) %>%
+  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
+ss_combo_10x <- rbind(ss_posDual_10x, ss_lwed_10x, ss_simp_10x) %>%
+  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
+
+master_locusSummary <- ls_combo %>%
+  merge(., ss_combo_0x, by.x = c("Locus", "sampleSet"), by.y = c("Locus_ID", "sampleSet")) %>%
+  merge(., ss_combo_10x[, c("Locus_ID", "sampleSet", "GenotypeRate", "minAF", "majAF", "allFreqs", "conScore")], by.x = c("Locus", "sampleSet"), by.y = c("Locus_ID", "sampleSet"), suffixes = c("_0x", "_10x")) %>%
+  mutate(
+    metricUse = case_when(
+      str_detect(Locus, "LWED") & sampleSet == "lwedSamples" ~ "for_panelMetrics",
+      str_detect(Locus, "SIMP") & sampleSet == "simpSamples" ~ "for_panelMetrics",
+      sampleSet == "posSamples" ~ "for_panelMetrics",
+      .default = "for_spMetrics"
+    )
+  )
+
+write.csv(master_locusSummary, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_locusSummary.csv", row.names = F)
+```
+
+### Plots
+
+plot genotype rate
+
+```{r locus genotype rate, warning=FALSE}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_0x), binwidth = 0.03) +
+  xlim(-0.01,1.01) +
+  labs(title = "GTscore 0x: Locus genotype rate",
+       x = "Genotype rate",
+       y="count") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_10x), binwidth = 0.03) +
+  xlim(-0.01,1.01) +
+  labs(title = "GTscore 10x: Locus genotype rate",
+       x = "Genotype rate",
+       y="count") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot average read depth for single SNP data
+
+```{r locus read depth}
+# gtscore0x/10x (avg read depth is sampe for both)
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = AvgReadDepth), binwidth = 1)+
+  labs(title = "Average Read Depth per SNP",
+       x = "Average Read Depth",
+       y = "Count") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle=element_text(hjust = 0.5))
+```
+
+plot genotype rate relative to average depth
+
+```{r locus genotype rate vs read depth}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_point(aes(x = AvgReadDepth,
+                 y = GenotypeRate_0x)) +
+  ylim(0, 1) +
+  labs(title = "0x Genotype Rate vs Average Depth per SNP",
+       x = "Average Depth",
+       y = "Genotype Rate") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_point(aes(x = AvgReadDepth,
+                 y = GenotypeRate_10x)) +
+  ylim(0, 1) +
+  labs(title = "10x Genotype Rate vs Average Depth per SNP",
+       x = "Average Depth",
+       y = "Genotype Rate") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot distribution of minor allele frequency
+
+```{r histogram of MAF, warning=FALSE}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = minAF_0x),
+                 binwidth = 0.01)+
+  labs(title = "0x Minor Allele Frequency Single SNP",
+       x = "Minor Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = minAF_10x),
+                 binwidth = 0.01)+
+  labs(title = "10x Minor Allele Frequency Single SNP",
+       x = "Minor Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot distribution of major allele frequency
+
+```{r histogram of MajAF, warning=FALSE}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = majAF_0x),
+                 binwidth = 0.01)+
+  labs(title = "0x Major Allele Frequency Single SNP",
+       x = "Major Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = majAF_10x),
+                 binwidth = 0.01)+
+  labs(title = "10x Major Allele Frequency Single SNP",
+       x = "Major Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+## 8.2 Sample summaries
+
+### Summarize single SNP summaries for samples
+
+**gtscore 0x**
+
+```{r}
+fullSet_singleSNP_sampleSummary_0x <- summarizeSamples(fullSet_polyGenResults_singleSNP_0x, fullSet_singleSNP_alleleReads_0x)
+
+posDual_singleSNP_sampleSummary_0x <- summarizeSamples(posDual_polyGenResults_singleSNP_0x, posDual_singleSNP_alleleReads_0x)
+
+LWED_singleSNP_sampleSummary_0x <- summarizeSamples(LWED_polyGenResults_singleSNP_0x, LWED_singleSNP_alleleReads_0x)
+
+SIMP_singleSNP_sampleSummary_0x <- summarizeSamples(SIMP_polyGenResults_singleSNP_0x, SIMP_singleSNP_alleleReads_0x)
+
+write.csv(fullSet_singleSNP_sampleSummary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_sampleSummary_0x.csv", row.names = F)
+
+write.csv(posDual_singleSNP_sampleSummary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_singleSNP_sampleSummary_0x.csv", row.names = F)
+
+write.csv(LWED_singleSNP_sampleSummary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_sampleSummary_0x.csv", row.names = F)
+
+write.csv(SIMP_singleSNP_sampleSummary_0x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_sampleSummary_0x.csv", row.names = F)
+```
+
+**gtscore 10x**
+
+```{r}
+fullSet_singleSNP_sampleSummary_10x <- summarizeSamples(fullSet_polyGenResults_singleSNP_10x, fullSet_singleSNP_alleleReads_10x)
+
+posDual_singleSNP_sampleSummary_10x <- summarizeSamples(posDual_polyGenResults_singleSNP_10x, posDual_singleSNP_alleleReads_10x)
+
+LWED_singleSNP_sampleSummary_10x <- summarizeSamples(LWED_polyGenResults_singleSNP_10x, LWED_singleSNP_alleleReads_10x)
+
+SIMP_singleSNP_sampleSummary_10x <- summarizeSamples(SIMP_polyGenResults_singleSNP_10x, SIMP_singleSNP_alleleReads_10x)
+
+write.csv(fullSet_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_sampleSummary_10x.csv", row.names = F)
+
+write.csv(posDual_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_singleSNP_sampleSummary_10x.csv", row.names = F)
+
+write.csv(LWED_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_sampleSummary_10x.csv", row.names = F)
+
+write.csv(SIMP_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_sampleSummary_10x.csv", row.names = F)
+```
+
+### Master sample summary
+
+Sample metrics for genotypes and such are based on species sample/loci sets -
+
+-   LWED sample metrics are based on dual loci + lwed-specific loci
+-   SIMP sample metrics are based on dual loci + simp-specific loci
+-   negCtrl sample metrics are based on all loci
+
+```{r}
+# import individual summaries from AmpliconReadCounter.pl output
+is_neg <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  filter(!Sample %in% lwed$sampleID_ill) %>%
+  filter(!Sample %in% simp$sampleID_ill)
+
+is_lwed <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+is_simp <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+# gtscore0x sample summary (from above)
+sampleSum_fullSet_0x <- fullSet_singleSNP_sampleSummary_0x %>%
+  mutate(lociSet = "fullSet")
+
+sampleSum_neg_0x <- sampleSum_fullSet_0x %>%
+  filter(!sample %in% lwed$sampleID_ill) %>%
+  filter(!sample %in% simp$sampleID_ill)
+
+sampleSum_lwed_0x <- LWED_singleSNP_sampleSummary_0x %>%
+  mutate(lociSet = "lwedSet")
+
+sampleSum_simp_0x <- SIMP_singleSNP_sampleSummary_0x %>%
+  mutate(lociSet = "simpSet")
+
+# gtscore10x sample summary (from above)
+sampleSum_fullSet_10x <- fullSet_singleSNP_sampleSummary_10x %>%
+  mutate(lociSet = "fullSet")
+
+sampleSum_neg_10x <- sampleSum_fullSet_10x %>%
+  filter(!sample %in% lwed$sampleID_ill) %>%
+  filter(!sample %in% simp$sampleID_ill)
+
+sampleSum_lwed_10x <- LWED_singleSNP_sampleSummary_10x %>%
+  mutate(lociSet = "lwedSet")
+
+sampleSum_simp_10x <- SIMP_singleSNP_sampleSummary_10x %>%
+  mutate(lociSet = "simpSet")
+
+# combos
+indSum_combo <- rbind(is_neg, is_lwed, is_simp) %>%
+  arrange(Sample)
+
+sampleSum_combo_0x <- sampleSum_neg_0x %>%
+  rbind(sampleSum_lwed_0x, sampleSum_simp_0x) %>%
+  arrange(sample)
+
+sampleSum_combo_10x <- sampleSum_neg_10x %>%
+  rbind(sampleSum_lwed_10x, sampleSum_simp_10x) %>%
+  arrange(sample) %>%
+  select(-lociSet)
+
+# master summary
+master_sampleSummary <- indSum_combo %>%
+  merge(., sampleSum_combo_0x, by.x = "Sample", by.y = "sample") %>%
+  merge(., sampleSum_combo_10x, by.x = "Sample", by.y = "sample", suffixes = c("_0x", "_10x")) %>%
+  relocate(lociSet, .after = Sample) %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  # add metadata
+  merge(., md[, c("sampleID_ill", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID_unique, .after = sampleID)
+
+write.csv(master_sampleSummary, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_sampleSummary.csv", row.names = F)
+```
+
+### Plots
+
+plot histogram of genotype rate
+
+```{r histogram of genotype rate, warning=FALSE}
+# gtscore0x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_0x), binwidth = 0.01) +
+  xlim(-0.01, 1.01) +
+  labs(title = "0x Sample Genotype Rate",
+       x = "Genotype Rate",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_10x), binwidth = 0.01) +
+  xlim(-0.01, 1.01) +
+  labs(title = "10x Sample Genotype Rate",
+       x = "Genotype Rate",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot histogram of heterozygosity
+
+```{r histogram of heterozygosity, warning=FALSE}
+# gtscore0x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = Heterozygosity_0x), binwidth = 0.03) + 
+  xlim(-0.01, 1.01)+
+  labs(title = "0x Sample Heterozygosity",
+       x = "Heterozygosity",
+       y = "Count")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle=element_text(hjust = 0.5))
+
+# gtscore10x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = Heterozygosity_10x), binwidth = 0.03) + 
+  xlim(-0.01, 1.01)+
+  labs(title = "10x Sample Heterozygosity",
+       x = "Heterozygosity",
+       y = "Count")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle=element_text(hjust = 0.5))
+```
+
+plot genotype rate vs primer probe reads
+
+```{r genotype rate vs primer probe reads}
+#dashed line added at 90% genotype rate, this is not a strict threshold, just a goal to aim for
+
+# gtscore0x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot(aes(x = Primer.Probe.Reads,
+             y = GenotypeRate_0x,
+             color = sampleType)) +
+  geom_point(stat = "identity") +
+  geom_smooth(method = "loess") +
+  labs(title = "0x Genotype Rate vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Genotype Rate")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0.9, lty = "dashed")
+
+# gtscore10x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot(aes(x = Primer.Probe.Reads,
+             y = GenotypeRate_10x,
+             color = sampleType)) +
+  geom_point(stat = "identity") +
+  geom_smooth(method = "loess") +
+  labs(title = "10x Genotype Rate vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Genotype Rate")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0.9, lty = "dashed")
+```
+
+Samples with unusually high heterozygosity may be contaminated or have elevated ploidy. [[Given chimerism, however, this isn't super helpful for blood samples]]
+
+plot heterozygosity vs primer probe reads
+
+```{r heterozygosity vs primer probe reads}
+# gtscore0x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot() +
+  geom_point(aes(x = Primer.Probe.Reads,
+                 y = Heterozygosity_0x,
+                 color = sampleType))+
+  labs(title = "0x Heterozygosity vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Heterozygosity")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))+
+  geom_hline(yintercept = 0.3, lty = "dashed")
+
+# gtscore10x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot() +
+  geom_point(aes(x = Primer.Probe.Reads,
+                 y = Heterozygosity_10x,
+                 color = sampleType))+
+  labs(title = "10x Heterozygosity vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Heterozygosity")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))+
+  geom_hline(yintercept = 0.3, lty = "dashed")
+```
+
+
+# OLD BELOW
+# 7 Data summaries
+
+## 7.1 Locus summaries
+
+### 10x coverage
+
+Locus summary metrics are based on data without filtering for 10x/30x coverage EXCEPT for genotype rates.
+
+#### Summarize single SNP results for loci
+
+The summarizeGTscore command generates summary data for each locus in table form. The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele. Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
+
+```{r}
+# non-filtered singleSNP_alleleReads
+fullSet_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#summarize single SNP results
+fullSet_singleSNP_summary_10x <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_10x)
+
+LWED_singleSNP_summary_10x <- summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP_10x)
+
+SIMP_singleSNP_summary_10x <- summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP_10x)
+
+#write results
+write.table(fullSet_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(LWED_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(SIMP_singleSNP_summary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+#### Master locus summary
+
+Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
+
+I also found it helpful to create a "master" locus summary file - this way, we have a single file for all loci that provides performance metrics that are specific to that locus's species. This file includes data from both the locus summaries and single SNP summaries created earlier.
+
+In doing so, this means that...
+
+-   values for LWED-specific loci reflect performance with LWED individuals only
+-   values for SIMP-specific loci reflect performance with SIMP individuals only
+-   all other loci reflect performance with LWED and SIMP individuals combined
+
+```{r}
+# Load locus summaries (not filtered for coverage)
+ls <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(sampleSet = "full")
+lwed_ls <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(sampleSet = "LWED")
+simp_ls <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(sampleSet = "SIMP")
+
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## Locus summaries
+ls1 <- ls %>%
+  filter(!str_detect(Locus, "LWED|SIMP")) %>%
+  mutate(sampleSet = "full")
+lwed1_ls <- lwed_ls %>%
+  filter(!str_detect(Locus, "SIMP")) %>%
+  mutate(sampleSet = "LWED")
+simp1_ls <- simp_ls %>%
+  filter(!str_detect(Locus, "LWED")) %>%
+  mutate(sampleSet = "SIMP")
+
+## SingleSNP summaries
+ss_10x <- fullSet_singleSNP_summary_10x %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP")) %>%
+  mutate(sampleSet = "full")
+lwed_ss_10x <- LWED_singleSNP_summary_10x %>%
+  filter(!str_detect(Locus_ID, "SIMP")) %>%
+  mutate(sampleSet = "LWED")
+simp_ss_10x <- SIMP_singleSNP_summary_10x %>%
+  filter(!str_detect(Locus_ID, "LWED")) %>%
+  mutate(sampleSet = "SIMP")
+
+# Recombine locus summaries & single snp summary files, then merge the two
+ls_recombine <- rbind(ls1, lwed1_ls, simp1_ls)
+
+ss_recombine_10x <- rbind(ss_10x, lwed_ss_10x, simp_ss_10x) %>%
+  dplyr::rename("Locus" = "Locus_ID") %>%
+  mutate(Locus = sub("_[^_]+$", "\\1", Locus))
+
+ls_ss_10x <- merge(ls_recombine, ss_recombine_10x, by = c("Locus", "sampleSet")) 
+
+# Export
+write.csv(ls_ss_10x, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles_ill/ill_tamRun4_master_locusSummary_10x.csv", row.names = F)
+```
+
+#### Plots
+
+plot genotype rate
+
+```{r locus genotype rate, warning=FALSE}
+ggplot()+geom_histogram(data=ls_ss_10x,aes(x=GenotypeRate),binwidth=0.03)+xlim(-0.01,1.01)+
+  labs(title="Locus Genotype Rate", x="Genotype Rate", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot average read depth for single SNP data
+
+```{r locus read depth}
+ggplot()+geom_histogram(data=ls_ss_10x,aes(x=AvgReadDepth),binwidth=1)+
+  labs(title="Average Read Depth per SNP", x="Average Read Depth", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot genotype rate relative to average depth
+
+```{r locus genotype rate vs read depth}
+ggplot()+geom_point(data=ls_ss_10x,aes(x=AvgReadDepth,y=GenotypeRate))+ylim(0,1)+
+  labs(title="Genotype Rate vs Average Depth per SNP", x="Average Depth", y="Genotype Rate")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot distribution of minor allele frequency
+
+```{r histogram of MAF, warning=FALSE}
+ggplot()+geom_histogram(data=ls_ss_10x,aes(x=minAF),binwidth=0.01)+
+  labs(title="Minor Allele Frequency Single SNP", x="Minor Allele Frequency", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot distribution of major allele frequency
+
+```{r histogram of MajAF, warning=FALSE}
+ggplot()+geom_histogram(data=ls_ss_10x,aes(x=majAF),binwidth=0.01)+
+  labs(title="Major Allele Frequency Single SNP", x="Major Allele Frequency", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+### 30x coverage
+
+Locus summary metrics are based on data without filtering for 10x/30x coverage EXCEPT for genotype rates.
+
+#### Summarize single SNP results for loci
+
+The summarizeGTscore command generates summary data for each locus in table form. The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele. Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
+
+```{r}
+#summarize single SNP results
+fullSet_singleSNP_summary_30x <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_30x)
+
+LWED_singleSNP_summary_30x <- summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP_30x)
+
+SIMP_singleSNP_summary_30x <- summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP_30x)
+
+#write results
+write.table(fullSet_singleSNP_summary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_summary_30x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(LWED_singleSNP_summary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_summary_30x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+write.table(SIMP_singleSNP_summary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_summary_30x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+#### Master locus summary
+
+Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
+
+I also found it helpful to create a "master" locus summary file - this way, we have a single file for all loci that provides performance metrics that are specific to that locus's species. This file includes data from both the locus summaries and single SNP summaries created earlier.
+
+In doing so, this means that...
+
+-   values for LWED-specific loci reflect performance with LWED individuals only
+-   values for SIMP-specific loci reflect performance with SIMP individuals only
+-   all other loci reflect performance with LWED and SIMP individuals combined
+
+```{r}
+# Separate locus summaries and singleSNP summaries into results from shared and species-specific loci analyses
+## SingleSNP summaries (30x)
+ss_30x <- fullSet_singleSNP_summary_30x %>%
+  filter(!str_detect(Locus_ID, "LWED|SIMP")) %>%
+  mutate(sampleSet = "full")
+lwed_ss_30x <- LWED_singleSNP_summary_30x %>%
+  filter(!str_detect(Locus_ID, "SIMP")) %>%
+  mutate(sampleSet = "LWED")
+simp_ss_30x <- SIMP_singleSNP_summary_30x %>%
+  filter(!str_detect(Locus_ID, "LWED")) %>%
+  mutate(sampleSet = "SIMP")
+
+# Recombine 30x single snp summary files, then merge with (unfiltered) locus summaries
+ss_recombine_30x <- rbind(ss_30x, lwed_ss_30x, simp_ss_30x) %>%
+  dplyr::rename("Locus" = "Locus_ID") %>%
+  mutate(Locus = sub("_[^_]+$", "\\1", Locus))
+
+ls_ss_30x <- merge(ls_recombine, ss_recombine_30x, by = c("Locus", "sampleSet")) 
+
+# Export
+write.csv(ls_ss_30x, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles_ill/ill_tamRun4_master_locusSummary_30x.csv", row.names = F)
+```
+
+#### Plots
+
+plot genotype rate
+
+```{r locus genotype rate, warning=FALSE}
+ggplot()+geom_histogram(data=ls_ss_30x,aes(x=GenotypeRate),binwidth=0.03)+xlim(-0.01,1.01)+
+  labs(title="Locus Genotype Rate", x="Genotype Rate", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot average read depth for single SNP data
+
+```{r locus read depth}
+ggplot()+geom_histogram(data=ls_ss_30x,aes(x=AvgReadDepth),binwidth=1)+
+  labs(title="Average Read Depth per SNP", x="Average Read Depth", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot genotype rate relative to average depth
+
+```{r locus genotype rate vs read depth}
+ggplot()+geom_point(data=ls_ss_30x,aes(x=AvgReadDepth,y=GenotypeRate))+ylim(0,1)+
+  labs(title="Genotype Rate vs Average Depth per SNP", x="Average Depth", y="Genotype Rate")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot distribution of minor allele frequency
+
+```{r histogram of MAF, warning=FALSE}
+ggplot()+geom_histogram(data=ls_ss_30x,aes(x=minAF),binwidth=0.01)+
+  labs(title="Minor Allele Frequency Single SNP", x="Minor Allele Frequency", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot distribution of major allele frequency
+
+```{r histogram of MajAF, warning=FALSE}
+ggplot()+geom_histogram(data=ls_ss_30x,aes(x=majAF),binwidth=0.01)+
+  labs(title="Major Allele Frequency Single SNP", x="Major Allele Frequency", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+## 7.2 Sample summaries
+
+Sample summary metrics are based on data without 10x/30x coverage cutoffs for everything EXCEPT genotype rate.
+
+### 10x coverage
+
+#### Load sample summaries
+
+Sample summaries are output from AmpliconReadCounter (not filtered for coverage)
+
+```{r}
+# Full set
+fullSet_GTscore_individualSummary <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+# LWED
+LWED_GTscore_individualSummary <-  read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+# SIMP
+SIMP_GTscore_individualSummary <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))  
+```
+
+#### Summarize single SNP summaries for samples
+
+The summarizeSamples function changes the "-" to a "." -- be sure to change this back.
+
+```{r}
+fullSet_singleSNP_sampleSummary_10x <- summarizeSamples(fullSet_polyGenResults_singleSNP_10x, fullSet_singleSNP_alleleReads_10x)
+
+LWED_singleSNP_sampleSummary_10x <- summarizeSamples(LWED_polyGenResults_singleSNP_10x, LWED_singleSNP_alleleReads_10x)
+
+SIMP_singleSNP_sampleSummary_10x <- summarizeSamples(SIMP_polyGenResults_singleSNP_10x, SIMP_singleSNP_alleleReads_10x)
+
+# Export
+write.csv(fullSet_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_sampleSummary_10x.csv", row.names = F)
+write.csv(LWED_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_sampleSummary_10x.csv", row.names = F)
+write.csv(SIMP_singleSNP_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_sampleSummary_10x.csv", row.names = F)
+```
+
+#### Combine AmpliconReadCounter individual summary with GTscore sample summary data
+
+```{r}
+# make new copies & add column to note which loci-set the values are based on
+fullSet_gtIndivSummary_10x <- fullSet_GTscore_individualSummary %>%
+  merge(., fullSet_singleSNP_sampleSummary_10x, by.x = "Sample", by.y = "sample") %>%
+  filter(Sample %in% negSamples) %>%
+  mutate(lociSet = "full")
+
+LWED_gtIndivSummary_10x <- LWED_GTscore_individualSummary %>%
+  merge(., LWED_singleSNP_sampleSummary_10x, by.x = "Sample", by.y = "sample") %>%
+  mutate(lociSet = "LWED")
+
+SIMP_gtIndivSummary_10x <- SIMP_GTscore_individualSummary %>%
+  merge(., SIMP_singleSNP_sampleSummary_10x, by.x = "Sample", by.y = "sample") %>%
+  mutate(lociSet = "SIMP")
+
+# Combine LWED & SIMP to form one, adjust sample name
+lwedSIMP_gtIndivSummary_10x <- rbind(LWED_gtIndivSummary_10x, SIMP_gtIndivSummary_10x) %>%
+  rbind(., fullSet_gtIndivSummary_10x) %>%
+  mutate(
+    sampleFile = gsub("\\.", "-", Sample),
+    sampleFile = paste0(sampleFile, ".fastq")
+         ) %>%
+  relocate(lociSet, .after = Sample)
+```
+
+#### Master sample summary (+ metadata)
+
+```{r}
+# Merge metadata & fullSet sample summaries
+master_sampleSummary_10x <- merge(lwedSIMP_gtIndivSummary_10x, md_tamRun4, by = "sampleFile") %>%
+  mutate(
+    sampleID_unique = case_when(
+      str_detect(sampleType, "Neg") ~ str_c(sampleID_unique, "_", lociSet),
+      .default = sampleID_unique
+      )) %>%
+  relocate(sampleID_unique)
+
+# Export
+write.csv(master_sampleSummary_10x, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles_ill/ill_tamRun4_master_sampleSummary_10x.csv", row.names = F)
+```
+
+#### Plots
+
+plot histogram of genotype rate
+
+```{r histogram of genotype rate, warning=FALSE}
+ggplot()+geom_histogram(data=master_sampleSummary_10x,aes(x=GenotypeRate),binwidth=0.01)+xlim(-0.01,1.01)+
+  labs(title="Sample Genotype Rate (10x)", x="Genotype Rate", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot histogram of heterozygosity
+
+```{r histogram of heterozygosity, warning=FALSE}
+ggplot()+geom_histogram(data=master_sampleSummary_10x,aes(x=Heterozygosity),binwidth=0.03)+xlim(-0.01,1.01)+
+  labs(title="Sample Heterozygosity", x="Heterozygosity", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot genotype rate vs primer probe reads
+
+```{r genotype rate vs primer probe reads}
+#dashed line added at 90% genotype rate, this is not a strict threshold, just a goal to aim for
+ggplot(data=master_sampleSummary_10x,aes(x=Primer.Probe.Reads,y=GenotypeRate,color=sampleType))+
+  geom_point(stat = "identity")+
+  geom_smooth(method = "loess")+
+  labs(title="Genotype Rate vs Total Reads per Sample", x="Primer Probe Reads", y="Genotype Rate")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))+
+  geom_hline(yintercept=0.5,lty="dashed")
+```
+
+Samples with unusually high heterozygosity may be contaminated or have elevated ploidy. [[Given chimerism, however, this isn't super helpful for blood samples]]
+
+plot heterozygosity vs primer probe reads
+
+```{r heterozygosity vs primer probe reads}
+ggplot()+geom_point(data=master_sampleSummary_10x,aes(x=Primer.Probe.Reads,y=Heterozygosity))+
+  labs(title="Heterozygosity vs Total Reads per Sample", x="Primer Probe Reads", y="Heterozygosity")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))+
+  geom_hline(yintercept=0.3, lty="dashed")
+```
+
+### 30x coverage
+
+#### Summarize single SNP summaries for samples
+
+The summarizeSamples function changes the "-" to a "." -- be sure to change this back.
+
+```{r}
+fullSet_singleSNP_sampleSummary_30x <- summarizeSamples(fullSet_polyGenResults_singleSNP_30x, fullSet_singleSNP_alleleReads_30x)
+
+LWED_singleSNP_sampleSummary_30x <- summarizeSamples(LWED_polyGenResults_singleSNP_30x, LWED_singleSNP_alleleReads_30x)
+
+SIMP_singleSNP_sampleSummary_30x <- summarizeSamples(SIMP_polyGenResults_singleSNP_30x, SIMP_singleSNP_alleleReads_30x)
+
+# Export
+write.csv(fullSet_singleSNP_sampleSummary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_singleSNP_sampleSummary_30x.csv", row.names = F)
+write.csv(LWED_singleSNP_sampleSummary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_singleSNP_sampleSummary_30x.csv", row.names = F)
+write.csv(SIMP_singleSNP_sampleSummary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_singleSNP_sampleSummary_30x.csv", row.names = F)
+```
+
+#### Combine AmpliconReadCounter individual summary with GTscore sample summary data
+
+```{r}
+# make new copies & add column to note which loci-set the values are based on
+fullSet_gtIndivSummary_30x <- fullSet_GTscore_individualSummary %>%
+  merge(., fullSet_singleSNP_sampleSummary_30x, by.x = "Sample", by.y = "sample") %>%
+  filter(Sample %in% negSamples) %>%
+  mutate(lociSet = "full")
+
+LWED_gtIndivSummary_30x <- LWED_GTscore_individualSummary %>%
+  merge(., LWED_singleSNP_sampleSummary_30x, by.x = "Sample", by.y = "sample") %>%
+  mutate(lociSet = "LWED")
+
+SIMP_gtIndivSummary_30x <- SIMP_GTscore_individualSummary %>%
+  merge(., SIMP_singleSNP_sampleSummary_30x, by.x = "Sample", by.y = "sample") %>%
+  mutate(lociSet = "SIMP")
+
+# Combine LWED & SIMP to form one, adjust sample name
+lwedSIMP_gtIndivSummary_30x <- rbind(LWED_gtIndivSummary_30x, SIMP_gtIndivSummary_30x) %>%
+  rbind(., fullSet_gtIndivSummary_30x) %>%
+  mutate(
+    sampleFile = gsub("\\.", "-", Sample),
+    sampleFile = paste0(sampleFile, ".fastq")
+         ) %>%
+  relocate(lociSet, .after = Sample)
+```
+
+#### Master sample summary
+
+```{r}
+# Merge metadata & fullSet sample summaries
+master_sampleSummary_30x <- merge(lwedSIMP_gtIndivSummary_30x, md_tamRun4, by = "sampleFile") %>%
+  mutate(
+    sampleID_unique = case_when(
+      str_detect(sampleType, "Neg") ~ str_c(sampleID_unique, "_", lociSet),
+      .default = sampleID_unique
+      )) %>%
+  relocate(sampleID_unique)
+
+# Export
+write.csv(master_sampleSummary_30x, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles_ill/ill_tamRun4_master_sampleSummary_30x.csv", row.names = F)
+```
+
+#### Plots
+
+plot histogram of genotype rate
+
+```{r histogram of genotype rate, warning=FALSE}
+ggplot()+geom_histogram(data=master_sampleSummary_30x,aes(x=GenotypeRate),binwidth=0.01)+xlim(-0.01,1.01)+
+  labs(title="Sample Genotype Rate (30x)", x="Genotype Rate", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot histogram of heterozygosity
+
+```{r histogram of heterozygosity, warning=FALSE}
+ggplot()+geom_histogram(data=master_sampleSummary_30x,aes(x=Heterozygosity),binwidth=0.03)+xlim(-0.01,1.01)+
+  labs(title="Sample Heterozygosity", x="Heterozygosity", y="Count")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))
+```
+
+plot genotype rate vs primer probe reads
+
+```{r genotype rate vs primer probe reads}
+#dashed line added at 90% genotype rate, this is not a strict threshold, just a goal to aim for
+ggplot(data=master_sampleSummary_30x,aes(x=Primer.Probe.Reads,y=GenotypeRate,color=sampleType))+
+  geom_point(stat = "identity")+
+  geom_smooth(method = "loess")+
+  labs(title="Genotype Rate vs Total Reads per Sample", x="Primer Probe Reads", y="Genotype Rate")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))+
+  geom_hline(yintercept=0.5,lty="dashed")
+```
+
+Samples with unusually high heterozygosity may be contaminated or have elevated ploidy. [[Given chimerism, however, this isn't super helpful for blood samples]]
+
+plot heterozygosity vs primer probe reads
+
+```{r heterozygosity vs primer probe reads}
+ggplot()+geom_point(data=master_sampleSummary_30x,aes(x=Primer.Probe.Reads,y=Heterozygosity))+
+  labs(title="Heterozygosity vs Total Reads per Sample", x="Primer Probe Reads", y="Heterozygosity")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))+
+  geom_hline(yintercept=0.3, lty="dashed")
+```
+
+# 8 Quality control
+
+## 8.1 Identify duplicate samples
+
+The IDduplicateSamples function does all pairwise comparisons of samples and outputs two metrics:
+
+-   proportionCommon - The proportion of loci that had genotypes for both samples in a pair
+-   proportionMatch - The proportion of loci that have identical genotypes in the sample pair
+
+```{r identify duplicate samples,eval=FALSE}
+#convert missing genotypes "0" to NA
+polyGenResults_singleSNP_NA<-fullSet_polyGenResults_singleSNP
+polyGenResults_singleSNP_NA[polyGenResults_singleSNP_NA=="0"]<-NA
+
+#compare all samples, for each comparison get proportion of loci that have genotypes
+#in both samples (proportionCommon) and proportion of shared loci that have identical
+#genotypes (proportionMatch).
+#Samples with a high proportionCommon and high proportionMatch are likely duplicates
+polyGenResults_dupTest<-IDduplicateSamples(polyGenResults_singleSNP_NA)
+
+write.table(polyGenResults_dupTest,"./04_tamRun4/00_illumina/03_run4GTscore/Run4_polyGenResults_dupTest.txt",quote=FALSE,sep="\t",row.names=FALSE)
+```
+
+```{r duplicate sample results}
+polyGenResults_dupTest<-read.delim("./04_tamRun4/00_illumina/03_run4GTscore/Run4_polyGenResults_dupTest.txt",stringsAsFactors=FALSE)
+head(polyGenResults_dupTest)
+```
+
+Plot results of IDduplicateSamples
+
+McKinney says that he generally sets thresholds of proportionMatch \> 0.8 and proportionCommon \> 0.75 to identify duplicate sample pairs, but the appropriate thresholds will depend on the marker set being used and the relatedness among samples. In this plot, he notes that it is possible that individuals at the lower range of identical genotypes (\~0.85) are relatives rather than duplicated samples.
+
+```{r plot IDduplicateSamples results}
+#potential duplicates are proportionMatch>0.8 and proportionCommon>0.75
+#feel free to adjust these thresholds as needed
+matchThresh=0.8
+commonThresh=0.75 #switched to 0, looks like some loci were successfully genotyped for one sample and some for the other
+
+#plot results
+ggplot()+geom_point(data=polyGenResults_dupTest,aes(x=proportionCommon,y=proportionMatch))+
+  geom_segment(aes(x=commonThresh,xend=1,y=matchThresh,yend=matchThresh),lty="dashed")+
+  geom_segment(aes(x=commonThresh,xend=commonThresh,y=matchThresh,yend=1),lty="dashed")
+```
+
+Identify duplicate sample pairs with thresholds set previously
+
+```{r}
+#filter to potentially duplicated samples using thresholds above
+polyGenResults_dupTest %>% filter(proportionMatch>=matchThresh,proportionCommon>=commonThresh)
+```
+
+## 8.2 Identify contaminated samples
+
+Contaminated samples can be identified through elevated heterozygosity. NOTE- this isn't going to be helpful for us given the blood chimerism.
+
+```{r identify contaminated samples (heterozygosity)}
+#plot heterozygosity vs genotype rate per sample
+#samples with unusually high heterozygosity relative to others are candidates for contamination
+#the sample above the dashed line in this example is likely contaminated
+ggplot()+geom_point(data=master_sampleSummary,aes(x=GenotypeRate,y=Heterozygosity))+
+  labs(title="Heterozygosity vs Genotype Rate per Sample", x="Genotype Rate", y="Heterozygosity")+
+  theme_bw()+theme(plot.title=element_text(hjust=0.5),plot.subtitle=element_text(hjust=0.5))+
+  geom_hline(yintercept=0.30, lty="dashed")
+```
+
+Set heterozygosity treshold to identify likely contaminated sample
+
+```{r}
+#identify likely contaminated sample
+contaminatedSample<-master_sampleSummary %>% filter(Heterozygosity>0.30) %>% pull(Sample)
+contaminatedSample
+```
+
+Contaminated samples can also be identified by an elevated contamination score. In this example, samples with a contamination score \> 0.3 are known to be contaminated.
+
+```{r }
+#plot histogram of contamination score
+ggplot()+geom_histogram(data=master_sampleSummary,aes(x=conScore),binwidth=0.02)+geom_vline(xintercept=0.3,lty="dashed")
+
+```
+
+Set contamination score threshold to identify contaminated samples
+
+```{r}
+#identify likely contaminated samples
+contaminatedSamples2<-master_sampleSummary %>% filter(conScore>=0.3) %>% pull(Sample)
+contaminatedSamples2
+```
+
+Plot genotype scatterplots for each sample
+
+```{r}
+#Scatter Plots can show evidence of contamination or elevated ploidy
+plotGenotypes_sample(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads, fullSet_polyGenResults_singleSNP, type='scatter', savePlot="Y", saveDir="./scatterPlots_sample")
+#look at plots for samples, particularly for putatively contaminated samples identified by high heterozygosity
+```
+
+## 8.3 Identify poor quality loci to remove
+
+Flag SNPs with \< 50% genotype rate as candidates for removal. Will need to do this with LWED and SIMP samples separately, then recombine.
+
+```{r}
+poorQualitySNPs <- ls_ss %>% filter(GenotypeRate<0.5) %>% mutate(Locus=as.character(Locus)) %>% pull(Locus)
+
+View(poorQualitySNPs)
+
+pq_lwed <- data.frame(name=poorQualitySNPs_LWED) %>%
+  mutate(species="LWED")
+pq_simp<- data.frame(name=poorQualitySNPs_SIMP) %>%
+  mutate(species="SIMP")
+
+pq_both <- rbind(pq_lwed, pq_simp)
+View(pq_both)
+
+pq_both2 <- pq_both %>%
+  group_by(name) %>%
+  mutate(count=n()) %>%
+  distinct(name, .keep_all = T) %>%
+  within(species[count == '2'] <- "both")
+View(pq_both2)
+
+# Export file
+write.csv(pq_both2, "./summaryFiles/poorQualitySNPs_fullSet.csv", row.names = F)
+```
+
+## 8.4 Plots
+
+Ratio & Scatter Plots can show evidence of systemic issues in read counting (off-target reads, biases) or elevated ploidy
+
+Plot genotype ratio & scatterplots for each locus
+
+```{r}
+#Allele Ratio Plots  
+plotGenotypes(singleSNP_locusTable, singleSNP_alleleReads, polyGenResults_singleSNP, type='ratio', savePlot="Y", saveDir="ratioPlots_loci")
+#Scatter Plots 
+plotGenotypes(singleSNP_locusTable, singleSNP_alleleReads, polyGenResults_singleSNP, type='scatter', savePlot="Y", saveDir="scatterPlots_loci")
+```
+
+Plot histogram of contamination score for loci. An arbitrary score of 0.3 was set to identify problematic loci, but a lower or higher threshold may be more suitable. Visual examination of loci with elevated scores is recommended. In cases where there are very few heterozygous individuals, a high contamination score may be not truly reflect locus performance..
+
+```{r, warning=FALSE}
+#loci with high contamination scores should have scatterplots examined to ensure genotypes look accurate
+fullSet_singleSNP_summary %>% ggplot(data=.) + geom_histogram(aes(x=conScore),binwidth=0.01)+geom_vline(xintercept=0.3)
+```
+
+Plot contamination score vs minor allele frequency. Loci with both a high contamination score and high minor allele frequency are likely to be problematic.
+
+```{r, warning=FALSE}
+fullSet_singleSNP_summary %>% ggplot(data=.) + geom_point(aes(x=conScore,y=minAF))
+```
+
+Get list of loci with high contamination score
+
+```{r}
+singleSNP_summary %>% filter(conScore>0.3)
+```
+
+Look at scatterplots for loci with high contamination score. See orignal GTscore README.Rmd for examples of a paralog, locus w/likely off-target sequence, locus w/high contamination score but may be fine.
+
+# 9 Export genotype files
+
+When exporting files, you can either export the full results and remove any poor quality samples or loci afterwards, or you can use whitelists or blacklists to filter during export. Both the exportGenepop and exportRubias functions have the following options: sampleWhitelist, locusWhitelist, sampleBlacklist, locusBlacklist. The whitelists are a list of samples or loci to retain, the blacklists are lists of samples or loci to discard.
+
+## 9.1 Genepop format
+
+
+
+export genepop format - poor quality loci removed
+
+```{r}
+#example with poor quality loci and contaminated sample removed
+exportGenepop(polyGenResults_singleSNP,singleSNP_locusTable,
+              locusBlacklist=poorQualitySNPs,
+              filename="polyGenResults_singleSNP_genepop_filtered.txt")
+```
+
+## 9.2 Rubias format
+
+export Rubias format with poor quality loci and contaminated sample removed
+
+```{r}
+exportRubias(polyGenResults_singleSNP,singleSNP_locusTable,sampleMetaData,
+             locusBlacklist=poorQualitySNPs,
+             filename="polyGenResults_singleSNP_rubias_filtered.txt")
+exportRubias(polyGenResults_singleSNP_LWED,singleSNP_locusTable_LWED,sampleMetaData,
+             locusBlacklist=poorQualitySNPs_LWED,
+             filename="polyGenResults_singleSNP_rubias_filtered_LWED.txt")
+exportRubias(polyGenResults_singleSNP_SIMP,singleSNP_locusTable_SIMP,sampleMetaData,
+             locusBlacklist=poorQualitySNPs_SIMP,
+             filename="polyGenResults_singleSNP_rubias_filtered_SIMP.txt")
+```

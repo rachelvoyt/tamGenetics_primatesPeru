@@ -1,0 +1,73 @@
+---
+title: "30x3 sample choices"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+# Packages
+```{r}
+library(stringr)
+library(tidyverse)
+```
+
+
+# Data
+
+tamRun2 metadata
+```{r}
+md_tamRun2 <- read.csv("./01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv") %>%
+  filter(included_inRun == "yes")
+```
+
+Original 30x3 samples (note that hair samples for animalID 134 and 168 have duplicates)
+```{r}
+md_fhbSamples <- md_tamRun2 %>%
+  filter(str_detect(pcr1Description, "set"))
+table(samples_original$animalID)
+
+animalID_fhbSamples <- samples_original %>%
+  select(animalID) %>%
+  distinct()
+```
+
+How did the hair and blood samples do in tamRun3?
+```{r}
+sampleSum_tamRun3 <- read.csv("./03_tamRun3/03_run3GTscore/summaryFiles/master_sampleSummary.csv") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
+
+fhbSamples_tamRun3 <- sampleSum_tamRun3 %>%
+  filter(animalID %in% animalID_fhbSamples$animalID) %>%
+  select(c(sampleID, animalID, sampleType, Total.Reads, Off.target.Reads, Primer.Only.Reads,
+           Primer.Probe.Reads, Off.target.Proportion, Primer.Only.Proportion,
+           Primer.Probe.Proportion, GenotypeRate)) %>%
+  relocate(GenotypeRate, .after = sampleType)
+
+median(fhbSamples_tamRun3$GenotypeRate)
+
+fhbSamples_tamRun3_fail <- fhbSamples_tamRun3 %>%
+  filter(GenotypeRate < 0.4)
+```
+
+Visualize
+```{r}
+ggplot(fhbSamples_tamRun3, aes(x = animalID, y = GenotypeRate, fill = sampleType)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  theme_bw()
+```
+
+Are any samples in the 30x3 set among the species/sex mismatch samples?
+
+```{r}
+speciesMismatch <- read.csv("./03_tamRun3/04_genoAnalyses/mismatchSpecies_tamRun3.csv")
+
+fhbSamples_tamRun3 %>%
+  filter(animalID %in% speciesMismatch$animalID)
+```
+

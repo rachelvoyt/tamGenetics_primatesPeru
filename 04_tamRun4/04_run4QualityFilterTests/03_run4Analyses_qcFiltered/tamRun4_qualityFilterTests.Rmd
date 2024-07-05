@@ -1,0 +1,195 @@
+---
+title: "tamRun4_qc13"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+This document contains the scripts used to quality-filter and genotype reads from tamRun4. This includes one quality-filter for Illumina sequencing results to remove reads with an average quality score less than 30 and four quality-filters for Nanopore sequencing results, removing reads with an average quality score less than 11, 13, 15, and 20.
+
+# 2 Packages
+
+**bash packages:**
+
+-   fastp
+-   fastqc
+-   multiqc
+
+**R packages:**
+
+```{r, message=FALSE}
+source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+library(gsubfn)
+library(phylotools)
+library(TidyMultiqc)
+library(tidyverse)
+```
+
+# 3 Filter reads w/fastp
+
+Filtering steps are performed in bash using the package 'fastp'. Note that I'm running fastp within the fastqc-env that I created previously; this contains both 'fastp' and 'fastqc' packages along with their dependencies.
+
+## 3.1 Illumina
+
+```{bash, eval=FALSE}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/
+
+conda activate fastqc-env
+
+# 30
+for i in 00_illumina/00_run4Seqs/*_R1_001.fastq; do name=$(basename $i _R1_001.fastq); fastp -i 00_illumina/00_run4Seqs/${name}_R1_001.fastq -I 00_illumina/00_run4Seqs/${name}_R2_001.fastq -e 30 -o 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/00_illumina/${name}_qc30_r1.fastq -O 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/00_illumina/${name}_qc30_r2.fastq; done
+```
+
+## 3.2 Nanopore
+
+Note that I originally received Nanopore results already interleaved; to stay consistent with the scripts I've been using, I created de-interleaved versions of each file in GTscorePipeline_tamRun4_ont.Rmd. The scripts are also copied below to view.
+
+**De-interleave reads**
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/01_nanopore/
+
+for i in 02_run4Interleaved/*; do name=$(basename $i .all.fastq); reformat.sh in=02_run4Interleaved/${name}.all.fastq out1=00_run4Seqs/${name}_r1.fastq out2=00_run4Seqs/${name}_r2.fastq; done
+```
+
+**Filter reads**
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/
+
+conda activate fastqc-env
+
+# qc11
+for i in 00_run4Seqs/*r1*; do name=$(basename $i _r1.fastq); fastp -i 00_run4Seqs/${name}_r1.fastq -I 00_run4Seqs/${name}_r2.fastq -e 11 -o 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc11_r1.fastq -O 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc11_r2.fastq; done
+
+# qc13
+for i in 00_run4Seqs/*r1*; do name=$(basename $i _r1.fastq); fastp -i 00_run4Seqs/${name}_r1.fastq -I 00_run4Seqs/${name}_r2.fastq -e 13 -o 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc13_r1.fastq -O 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc13_r2.fastq; done
+
+# qc15
+for i in 00_run4Seqs/*r1*; do name=$(basename $i _r1.fastq); fastp -i 00_run4Seqs/${name}_r1.fastq -I 00_run4Seqs/${name}_r2.fastq -e 15 -o 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc15_r1.fastq -O 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc15_r2.fastq; done
+
+# qc20
+for i in 00_run4Seqs/*r1*; do name=$(basename $i _r1.fastq); fastp -i 00_run4Seqs/${name}_r1.fastq -I 00_run4Seqs/${name}_r2.fastq -e 20 -o 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc20_r1.fastq -O 04_run4QualityFilterTests/00_run4Seqs_qcFiltered/01_nanopore/${name}_qc20_r2.fastq; done
+```
+
+# 4 fastqc + multiqc
+
+Now that read filtering is complete, I'm also including a quality-check here with fastqc/multiqc to see how quality metrics for the run changed.
+
+```{bash eval = F}
+# Activate fastqc environment
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/04_run4QualityFilterTests/01_run4QualityChecks_qcFiltered
+
+conda activate fastqc-env
+
+# Run fastqc
+for i in ../00_run4Seqs_qcFiltered/00_illumina/*; do fastqc $i; done
+for i in ../00_run4Seqs_qcFiltered/01_nanopore/*; do fastqc $i; done
+
+# Move fastqc files to quality checks folder
+mv ../00_run4Seqs_qcFiltered/00_illumina/*fastqc* .
+mv ../00_run4Seqs_qcFiltered/01_nanopore/*fastqc* .
+
+# Activate multiqc environment
+conda activate multiqc-env
+
+# Run MultiQC on all files within the quality checks folder
+multiqc --interactive ./*qc11* -n multiqc_report_qc11.html
+multiqc --interactive ./*qc13* -n multiqc_report_qc13.html
+multiqc --interactive ./*qc15* -n multiqc_report_qc15.html
+multiqc --interactive ./*qc20* -n multiqc_report_qc20.html
+multiqc --interactive ./*qc30* -n multiqc_report_qc30.html
+```
+
+# 5 Interleave reads
+
+And finally, before we can genotype we need to re-interleave the filtered reads.
+
+```{bash}
+# illumina
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/04_run4QualityFilterTests/
+
+for i in 00_run4Seqs_qcFiltered/00_illumina/*r1*; do name=$(basename $i _r1.fastq); reformat.sh in=00_run4Seqs_qcFiltered/00_illumina/${name}_r1.fastq in2=00_run4Seqs_qcFiltered/00_illumina/${name}_r2.fastq out=02_run4Interleaved_qcFiltered/${name}_interleaved.fastq; done
+
+## trim illumina names to make them more manageable
+cd 02_run4Interleaved_qcFiltered
+
+for f in tamRun4*; do g="${f%%_S*}_qc30.fastq"; mv "${f}" "${g}"; done
+
+# nanopore
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/04_run4QualityFilterTests/
+
+for i in 00_run4Seqs_qcFiltered/01_nanopore/*r1*; do name=$(basename $i _r1.fastq); reformat.sh in=00_run4Seqs_qcFiltered/01_nanopore/${name}_r1.fastq in2=00_run4Seqs_qcFiltered/01_nanopore/${name}_r2.fastq out=02_run4Interleaved_qcFiltered/${name}_interleaved.fastq; done
+
+cd 02_run4Interleaved_qcFiltered
+
+for f in barcode*; do g="${f%%_interleaved*}.fastq"; mv "${f}" "${g}"; done
+```
+
+# 6 GTscore
+
+I'm using GTscore scripts here for read counts and genotyping along with my addition of the 10x-coverage filter prior to genotyping. Note that I'm running the read counts and genotyping scripts on the Illumina and Nanopore filtered sets all together; as such, sample metrics will be accurate, but locus metrics will not.
+
+## 6.1 Create sample files
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/04_run4QualityFilterTests/02_run4Interleaved_qcFiltered/
+
+for i in *fastq; do echo $i; done > ./../03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_sampleFiles.txt
+```
+
+## 6.2 AmpliconReadCounter
+
+```{r}
+# All samples, all loci
+system2("perl",
+        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_sampleFiles.txt --inDir ./04_tamRun4/04_run4QualityFilterTests/02_run4Interleaved_qcFiltered/ --outDir ./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/ --prefix illONT_qcFiltered_fullSet_")
+```
+
+## 6.3 Genotyping
+
+### 10x coverage
+
+Recode loci with \<10x coverage in the full set of allele read counts
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts_original <- read.table("./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_AlleleReads_singleSNPs.txt")
+
+# Create read counts copy for 10x coverage
+readCounts_10x <- readCounts_original
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum_10x <- replace(readCounts_10x, TRUE, lapply(readCounts_10x, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts_10x[readCounts_sum_10x < 10] <- "0,0"
+
+# Export new AlleleReads_singleSNPs file
+write.table(readCounts_10x,"./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+```
+
+### Genotyping
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP_10x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_10x)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP_10x,"./04_tamRun4/04_run4QualityFilterTests/03_run4Analyses_qcFiltered/illONT_qcFiltered_fullSet_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
+```

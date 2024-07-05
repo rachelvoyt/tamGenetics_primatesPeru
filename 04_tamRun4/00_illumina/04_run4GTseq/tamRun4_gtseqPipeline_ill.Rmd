@@ -1,0 +1,324 @@
+---
+title: "tamRun4_gtseqPipeline_ill"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+## General info
+
+This document outlines data analysis for tamGenetics_run4 ILLUIMINA sequences using the "GTseq pipeline" ([GitHub link](https://github.com/GTseq/GTseq-Pipeline)) created by Nate Campbell.
+
+In using this pipeline, I primarily followed the steps outlined in "GTseq_Pipeline.txt". Note, however, that while the perl scripts are taken directly from the originals, I've added information below on how to run each as a loop to allow analysis of all sample files at once, as this was not included in the original GTseq pipeline. I've also included descriptions of each script taken from various locations on the GTseq GitHub page, with additional information added where needed for further clarification.
+
+## About the data
+
+The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 blood, 30 fecal, 30 hair (15 each of LWED and SIMP) as well as 6 negative controls.
+
+# Step 1: Split raw fastq sequence file into individual fastq files using dual index sequences
+
+No need to complete this step; fastq files were split automatically by MiSeq
+
+# Step 2 (optional): Test plate fastq sequence files for the presence of forward primers and probes using the GTseq_SeqTest.pl script
+
+This script counts the occurrence of each forward primer sequences, in-silico probe sequences, and when both occur within the same sequence read. This can help identify primers that create large numbers of artifact sequences.
+
+While this step is listed as optional, I think it's important to complete it; doing so will also help with comparisons to the GTscore pipeline output.
+
+## 2.1 GTseq_HashSeqs.pl
+
+First use the GTseq_HashSeqs.pl script on plate .fastq files. This script collects and counts unique reads within the fastq file and reduces the compute time for the GTseq_SeqTest.pl script.
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq_ill
+
+for i in ./../02_run4Interleaved_ill/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_HashSeqs.pl $i > ./hashSeqs/$(basename "${i/.fastq/.hash}"); done
+```
+
+## 2.2 GTseq_SeqTest.pl
+
+Next use the GTseq_SeqTest.pl script by supplying a tab delimited text file containing loci name, forward primer sequence, allele 1 probe, and allele 2 probe.
+
+Note: The script checks for both the supplied sequence and the reverse complement of the in-silico probes.
+
+### Create loci info file
+
+I already created the GTseq-formatted version of the primer-probe file in tamRun5_gtseqPipeline.Rmd; I copied it into the 04_run4GTseq_ill directory to make things easier. The file can be viewed below:
+
+```{r, eval = F}
+pp_gtseq_seqTest <- read.table("./04_tamRun4/00_illumina/04_run4GTseq_ill/primerProbe_snpPanel.v3_gtseq.txt", sep = "\t", header = F)
+```
+
+### Run GTseq_SeqTest.pl
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq_ill
+
+for i in ./hashSeqs/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_SeqTest.pl primerProbe_snpPanel.v3_gtseq.txt $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
+```
+
+# Step 3: Genotype individuals
+
+The original GTseq_Pipeline.txt file says that we can use either 1) GTseq_Genotyper.pl script or 2) GTseq_Genotyper_v2.pl script, which allows for count corrections for loci which amplify. However, there's also a GTseq_Genotyper_v3.pl script, which I'm opting to use here.
+
+Version 3 appears to be the same as Version 2, but includes fuzzy matching for detection of possible null alleles. Additional notes provided for Version 3 are as follows:
+
+-   Requires the String::Approx perl extension.
+-   Possible null alleles can be summarized using the GTseq_ErrorReport_v3.pl script. Keep in mind that some loci with flagged null alleles could be the result of co-amplification of a paralogous locus.
+-   In some cases the reported fuzzy match sequence doesn't match either probe sequence at all. This happens when the location of the fuzzy match doesn't match the position of the exact probe match on the amplicon. This probably means that there is amplification of a PSV with these primers.
+
+## 3.1 Create loci info file
+
+The genotyper script requires a slightly different loci info file than for the seqTest script. This loci information file needs to contain locus names, allele names, and in-silico probe sequences in .csv format.
+
+Note that versions 2 and 3 of the genotyper script allow for correction values for each locus; these are optional and will be zero for all loci of not used.
+
+I created this file in tamRun5_gtseqPipline.Rmd as well and copied it into the 04_run4GTseq_ill directory; it can be viewed below:
+
+```{r, eval = F}
+pp_gtseq_genotyper <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/locusInfo_snpPanel.v3_gtseq.csv", sep = ",", header = F)
+```
+
+## 3.2 Run GTseq_Genotyper_v3.pl
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq_ill
+
+for i in ./../02_run4Interleaved_ill/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_Genotyper_v3.pl locusInfo_snpPanel.v3_gtseq.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
+```
+
+Output files contain a header line with summary information followed by locus specific data. Immediately below the header are a set of locus specific metrics, with (unlabeled) columns for the following:
+
+-   LocusName
+-   Allele1_counts
+-   Allele2_counts
+-   A1/A2-ratio
+-   Genotype
+-   Genotype_Class
+-   A1_correction value
+-   A2_correction value
+-   On_target reads
+-   Locus OT_percentage
+-   Locus On-target reads as percentage of total on-target reads
+
+# Step 4: Compile genotypes from individual .genos files to a single .csv file
+
+This script collects genotypes for all individuals at all loci and provides summary statistics for each individual.
+
+Note that the GTseq_GenoCompile version 3 utilizes the expanded output from the GTseq_Genotyper_v3 script to gather summary data and does not require the individual fastq files. Further notes below:
+
+-   Includes IFI score (Individual Fuzziness Index) as an indication of possible contamination of DNA from another individual.
+
+-   For optional output formats use arguments. N for numeric genotypes or C for allele counts. Defaults to SNP genotypes.
+
+-   Optional filtered output requires 2 argument values. Genotype output type and a genotyping threshold [S,N, or C] [90]
+
+    -   example: \$ GTseq_GenoCompile_v3.pl S 90 (outputs SNP genotypes for individual .genos files with 90% or higher genotyping percentage); genotypes for individuals with less than the threshold genotyping percentage are converted to "00".
+
+## 4.1 Run GTseq_GenoCompile_v3.pl
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq_ill/genos
+
+perl ./../../../../GTseq_sourceScripts/GTseq_GenoCompile_v3.pl > ill_tamRun4_compiledGenos_gtseq.csv
+```
+
+# Step 5 (optional): Compile read count data for each sample at each locus
+
+note that the .fastq and .genos files need to be in the same directory for this to work; I also haven't gotten it working 100%, it puts out tamRun5_001 as a column for some reason, but have to check if it affects allele read counts or not
+
+```{bash, eval = F}
+# original
+perl GTseq_GenoCompile_Counts.pl > Library_Counts.csv
+
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/05_tamRun5/05_run5GTseq
+
+# test
+perl GTseq_GenoCompile_Counts.pl > Library_Counts.csv
+
+```
+
+# Step 6 (optional but highly recommended): Generate summary figures for library using the GTseq_SummaryFigures_v3.py script
+
+This generates a .pdf file containing summary figures for the library as well as a text document with summary data.
+
+Both are very useful in troubleshooting optimizing a solid panel of primers for GTseq.
+
+```{bash, eval = F}
+
+```
+
+# 7 Summaries (my scripts)
+
+## 7.1 Allele reads
+
+**Compile read count data for each sample at each locus**
+
+GTseq has scripts that are supposed to do this, but I haven't gotten them to work -- as such, I created the script below to do the same thing (I assume) by extracting this data from the ".genos" files as follows:
+
+1.  Convert .genos files to csv files
+2.  Import as one dataframe
+3.  Subset relevant columns and reformat
+
+**Packages** 
+
+```{r}
+library(tidyverse)
+```
+
+**Convert .genos to .csv in bash**
+
+```{bash, eval = FALSE}
+# first copied all .genos files to genos_csv
+# then cd to genos_csv and run the following:
+
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq/genos/genos_csv
+
+for f in *.genos; do
+    g="${f%.genos}.csv"
+    mv "${f}" "${g}"
+done
+```
+
+**Import all csv files as one dataframe & reformat**
+
+```{r}
+primerList <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+# create list of fastq file names
+fileNames_ill_gtseq <- dir("./04_tamRun4/00_illumina/04_run4GTseq/genos/genos_csv", full.names = T)
+
+# read in all files as a list of dataframes
+readCounts_ill_gtseq.list <- lapply(fileNames_ill_gtseq, function(file.name) {
+  df <- read.csv(file.name, skip = 1, header = F)
+  df$file.name <- file.name
+  return(df)
+  })
+
+# combine dataframes into one, reformat, and subset to read counts only
+readCounts_ill_gtseq <- rlist::list.rbind(readCounts_ill_gtseq.list) %>%
+  dplyr::rename("locus" = "V1",
+         "allele1_counts" = "V2",
+         "allele2_counts" = "V3",
+         "a1.a2_ratio" = "V4",
+         "geno" = "V5",
+         "genoClass" = "V6",
+         "a1_correctionValue" = "V7",
+         "a2_correctionValue" = "V8",
+         "onTargetReads" = "V9",
+         "locus_otProp.readTotal" = "V10",
+         "locus_otProp.otTotal" = "V11",
+         "sampleID" = "file.name") %>%
+  # remove read counts from overhangs
+  filter(locus %in% primerList$locus) %>%
+  mutate(
+    readCounts = str_c(sub(".*=", "", allele1_counts), ",", sub(".*=", "", allele2_counts)),
+    sampleID = sub("./04_tamRun4/00_illumina/04_run4GTseq/genos/genos_csv/", "", sampleID),
+    sampleID = sub(".csv", "", sampleID),
+    sampleID = gsub("-", "\\.", sampleID)
+    ) %>%
+  select(c("sampleID", "locus", "readCounts")) %>%
+  pivot_wider(names_from = sampleID, values_from = readCounts) %>%
+  column_to_rownames("locus") %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+```
+
+**Export**
+
+```{r}
+write.table(readCounts_ill_gtseq, "./04_tamRun4/00_illumina/04_run4GTseq/ill_gtseq_alleleReads.txt", quote = F, sep = "\t")
+```
+
+## 7.2 Read sums
+
+### Prep
+
+```{r}
+readCounts_ill_gtseq <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/ill_gtseq_alleleReads.txt", header = T)
+
+# Sum read counts per sample/locus combo
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+readSums_ill_gtseq <- readCounts_ill_gtseq %>%
+  replace(., TRUE, lapply(., repl)) %>%
+  mutate(across(everything(), as.numeric))
+```
+
+### Per locus
+
+```{r}
+# create sample lists
+md_tamRun4 <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
+
+tamRun4_posSamples <- md_tamRun4 %>%
+  filter(species %in% c("LWED", "SIMP"))
+
+tamRun4_negSamples <- md_tamRun4 %>%
+  filter(str_detect(animalID, "Neg"))
+
+tamRun4_lwedSamples <- md_tamRun4 %>%
+  filter(species == "LWED")
+
+tamRun4_simpSamples <- md_tamRun4 %>%
+  filter(species == "SIMP")
+
+# create df for total reads **per locus** (includes read count subsets w/"all", "samples" (no negs), "lwed", and "simp" samples)
+primerProbeReads_perLocus <- readSums_ill_gtseq %>%
+  mutate(
+    ppReads_allSamples = rowSums(across(everything()), na.rm = T),
+    ppReads_posSamples = rowSums(across(tamRun4_posSamples$sampleID_ill), na.rm = T),
+    ppReads_negSamples = rowSums(across(tamRun4_negSamples$sampleID_ill), na.rm = T),
+    ppReads_lwedSamples = rowSums(across(tamRun4_lwedSamples$sampleID_ill), na.rm = T),
+    ppReads_simpSamples = rowSums(across(tamRun4_simpSamples$sampleID_ill), na.rm = T)
+  ) %>%
+  rownames_to_column("locus") %>%
+  select(c(locus, ppReads_allSamples, ppReads_posSamples, ppReads_negSamples, ppReads_lwedSamples, ppReads_simpSamples))
+```
+
+```{r}
+# export
+write.csv(primerProbeReads_perLocus, "./04_tamRun4/00_illumina/04_run4GTseq/ill_gtseq_primerProbeReads_perLocus.csv", row.names = F)
+```
+
+### Per sample
+
+```{r}
+# create loci lists
+primerProbeFile <- read.table("./tamAnalyses_generalFiles/primerProbeFile_panelv3_fullSet.txt", header = T)
+
+pp_lwed <- primerProbeFile %>%
+  filter(!str_detect(Locus, "SIMP"))
+pp_simp <- primerProbeFile %>%
+  filter(!str_detect(Locus, "LWED"))
+
+# create df w/total reads **per sample**, including read sums for "fullSet" (all loci), "lwedSet" (no simp-specific loci), and "simpSet" (no lwed-specific loci)
+primerProbeReads_perSample <- readSums_ill_gtseq %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    ppReads_lwedLoci = rowSums(across(contains("LWED")), na.rm = T),
+    ppReads_simpLoci = rowSums(across(contains("SIMP")), na.rm = T),
+    ppReads_fullSet = rowSums(across(everything()), na.rm = T),
+    ppReads_lwedSet = rowSums(across(pp_lwed$Locus), na.rm = T),
+    ppReads_simpSet = rowSums(across(pp_simp$Locus), na.rm = T)
+  ) %>%
+  rownames_to_column("sampleID") %>%
+  select(c(sampleID, ppReads_fullSet, ppReads_lwedSet, ppReads_simpSet, ppReads_lwedLoci, ppReads_simpLoci))
+```
+
+```{r}
+# export
+write.csv(primerProbeReads_perSample, "./04_tamRun4/00_illumina/04_run4GTseq/ill_gtseq_primerProbeReads_perSample.csv", row.names = F)
+```
+
