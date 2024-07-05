@@ -9,4 +9,5 @@
 !*.pl
 # apply override to all dirs recursively
 !**/
-my_sourceScripts
+# then go back and ignore any archived
+*archived*
