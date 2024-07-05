@@ -1,0 +1,68 @@
+---
+title: "microhaplotypeTesting"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+This document contains my attempts to find microhaplotypes in the tamRun5 data to see if I can improve genotype success, and with it, relatedness analyses.
+
+# 2 Resources
+
+[Vignette: An introduction to microhaplot data preparation](https://cran.rstudio.com/web/packages/microhaplot/vignettes/microhaplot-data-prep.html)
+
+[Vignette: 'microhaplot' walkthrough](https://cran.r-project.org/web/packages/microhaplot/vignettes/microhaplot-walkthrough.html)
+
+[freebayes Github](https://github.com/freebayes/freebayes?tab=readme-ov-file)
+
+[How to install freebayes](https://bioinformaticschool.com/installing-freebayes-a-quick-guide/)
+
+# 3 Walk through
+
+(following allong with microhaplot data prep vignette)
+
+1)    Create "sandbox" directory with subdirectories "flash", "map", and "rawdata"
+2)    Add a few tamRun5 (non-interleaved) fastq files to rawdata & rename to make it easier to follow along with vignette (e.g., tamRun5_S339_L001_R1_001)
+3)    View rawdata below:
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/sandbox/microhaplot/rawdata
+
+ll | head
+```
+
+4)    Install [FLASH](https://ccb.jhu.edu/software/FLASH/)
+
+Description from FLASH site: **F**ast **L**ength **A**djustment of **SH**ort reads is a very fast and accurate software tool to merge paired-end reads from next-generation sequencing experiments. FLASH is designed to merge pairs of reads when the original DNA fragments are shorter than twice the length of reads. The resulting longer reads can significantly improve genome assemblies. They can also improve transcriptome assembly when FLASH is used to merge RNA-seq data.
+
+4a)   Download source package FLASH-1.2.11.tar.gz, then:
+
+```{bash}
+cd programs
+
+tar xzf FLASH-1.2.11.tar.gz
+cd FLASH-1.2.11
+make
+```
+
+To use, will either need to move it to copy it to a location on your $PATH variable, or else run
+it with a path including a directory, such as "./flash"
+
+5)    FLASH reads together
+
+```{bash}
+for i in {399..344}; do ./flash -m 10 -M 100 -z --output-prefix=S${i} ../rawdata/tamRun5_S${i}_L001_R1_001.fastq.gz ../rawdata/tamRun5_S${i}_L001_R2_001.fastq.gz; done
+```
+
+
+
+# Notes on PE interleavers
+
+[Tools to merge overlapping paired-end reads](https://www.biostars.org/p/225683/) - from Biostars 2012 post
+

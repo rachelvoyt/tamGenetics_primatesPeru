@@ -1,0 +1,1489 @@
+---
+title: "tamRun5_plus_tamRun3"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+This document is to assess whether any of the sequencing results from tamRun3 can be combined with tamRun5 results to increase read counts, and with it, genotyping success. I'm particularly interested in hair samples here, since I need those for relatedness analyses.
+
+# 2 Packages
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager", version = "3.16")
+BiocManager::install("Biostrings")
+
+library(tidyverse)
+source("./GTscore_sourceScripts/GTscore_modified.R")
+```
+
+# 3 Data
+
+## 3.1 md_tamRun5
+
+Import latest updated version of md_tamRun5
+
+```{r}
+md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  # give sampleNames to those missing (but not those extracted by mini)
+  mutate(
+    sampleName = case_when(
+      is.na(sampleName) & !str_detect(xtnLoc, "tx") ~ str_c("env_", animalName),
+      .default = sampleName
+    )
+  )
+```
+
+## 3.2 Error list
+
+```{r}
+errorList_v5 <- read.csv("./metadataReconciliation/master_metadataReconciliation_actionList_v5.csv") %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "sampleType")], by = "sampleID", all.x = T)
+```
+
+## 3.3 Extractions
+
+```{r}
+xtnMaster <- read.csv("./extractions/tamGenetics_xtnsBloodFecalHair_master_updated22Aug2023.csv") %>%
+  dplyr::rename("sampleName" = "sampleID") %>%
+  # give sampleNames to those missing (but not those extracted by mini)
+  mutate(
+    sampleName = case_when(
+      is.na(sampleName) & !str_detect(xtnLoc, "tx") ~ str_c("env_", animalName),
+      .default = sampleName
+    )
+  )
+```
+
+## 3.4 md_tamRun3
+
+### md versions
+
+Import all available versions of md_tamRun3. Relative to v1, v2 and v3 both have different animalIDs for tamRun5.385-432. Relative to v2, v3 has different animalIDs for tamRun5.385-432.
+
+Since I'm most interested in the hair samples anyway, I'll proceed using v3.
+
+```{r}
+# found in "archived"; doesn't have a ton of info
+md_tamRun3_v1 <- read.csv("./03_tamRun3/03_run3GTscore/archived/tamRun3_metadata_OLD.csv") %>%
+  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  mutate(
+    temp = str_c(sampleID, animalID, sep = "_")
+  )
+
+# also in archived; md for sampleIDs tamRun5.385-438 differ from v1
+md_tamRun3_v2 <- read.csv("./03_tamRun3/03_run3GTscore/archived/tamRun3_metadata_12Jan2023.csv", na.strings = c("", "NA")) %>%
+  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  mutate(
+    temp = str_c(sampleID, animalID, sep = "_")
+  )
+
+md_tamRun3_v1$temp == md_tamRun3_v2$temp
+
+# not archived; md for sampleIDs tamRun5.385-432 differ from v2, md for sampleIDs tamRun5.385-438 differ from v1
+md_tamRun3_v3 <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_5June2023.csv") %>%
+  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  mutate(
+    temp = str_c(sampleID, animalID, sep = "_")
+  )
+
+md_tamRun3_v2$temp == md_tamRun3_v3$temp
+md_tamRun3_v1$temp == md_tamRun3_v3$temp
+```
+
+### add sampleNames
+
+None of the md_tamRun3 versions have the sampleName variable, so I'm going to use info from the latest updated version (md_tamRun3_v3) to find the sampleNames using the xtnMaster file
+
+```{r}
+temp1 <- md_tamRun3_v3 %>%
+#  filter(sampleType %in% c("blood", "hair")) %>%
+  select(sampleID, animalID, sampleType, xtnUsed_p12, xtnDate_p12) %>%
+  mutate(
+    xtnType = "p12"
+  ) %>%
+  dplyr::rename("xtnUsed" = "xtnUsed_p12",
+                "xtnDate" = "xtnDate_p12") %>%
+  na.omit()
+
+temp2 <- md_tamRun3_v3 %>%
+#  filter(sampleType %in% c("blood", "hair")) %>%
+  select(sampleID, animalID, sampleType, xtnUsed_p3, xtnDate_p3) %>%
+  mutate(
+    xtnType = "p3"
+  ) %>%
+  dplyr::rename("xtnUsed" = "xtnUsed_p3",
+                "xtnDate" = "xtnDate_p3") %>%
+  na.omit()
+
+md_tamRun3_v3_with_sampleNames <- rbind(temp1, temp2) %>% # (starting 441 rows)
+  select(-xtnType) %>%
+  distinct() %>%
+  # add sample names from xtnMaster where possible
+  merge(., xtnMaster[, c("animalID", "sampleType", "xtnDate", "sampleName")], by = c("animalID", "sampleType", "xtnDate"), all.x = T) %>% # now 875
+  distinct() %>% # and back to 441
+  # manually add sampleName for the handful that provide notes
+  mutate(
+    sampleName = case_when(
+      str_detect(xtnUsed, "env313") ~ "env_313",
+      str_detect(xtnUsed, "envRPBL") ~ "env_RPBL",
+      str_detect(xtnUsed, "env 294") ~ "env_294",
+      str_detect(xtnUsed, "env166") ~ "env_166",
+      str_detect(xtnUsed, "env581") ~ "env_581",
+      str_detect(xtnUsed, "env266") ~ "env_266",
+      str_detect(xtnUsed, "env583") ~ "env_583",
+      
+      # these ones the xtnDate was incorrect
+      xtnUsed == "86" ~ "env_345",
+      xtnUsed == "96" ~ "env_278",
+      xtnUsed == "879" ~ "lm_879",
+      xtnUsed == "882" ~ "lm_882",
+      xtnUsed == "903" ~ "lm_903",
+      xtnUsed == "1231" ~ "lm_1231",
+      
+      .default = sampleName
+    )
+  ) %>%
+  
+  # now flag those that turned up in sampleName troubleshooting
+  merge(., md_tamRun3_v3[, c("sampleID", "captureDate", "species", "sex")], by = "sampleID") %>%
+  mutate(
+    captureDate = case_when(
+      captureDate == "20176-07-18" ~ "07/18/2016",
+      .default = captureDate
+    )
+  ) %>%
+  separate(captureDate, into = c("month", "day", "year"), sep = "/") %>%
+  mutate(
+    captureDate = str_c(year, month, day, sep = "-"),
+    md_original = str_c(animalID, species, sex, sep = "_")
+  ) %>%
+  select(-c(month, day, year, species, sex)) %>%
+  merge(., errorList_v5[, c("md_original", "captureDate", "sampleType", "md_alt", "action_final", "notes_mdReconciliation")], by = c("md_original", "captureDate", "sampleType"), all.x = T) %>%
+  relocate(sampleID) %>%
+  relocate(md_original, .before = md_alt) %>%
+  arrange(sampleID)
+
+# check that no sampleIDs are missing - success
+md_tamRun3_v3 %>% filter(!sampleID %in% md_tamRun3_v3_with_sampleNames$sampleID)
+```
+
+## 3.5 Genotypes
+
+### tamRun3
+
+**0x cutoff**
+
+```{r}
+# locus table
+locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+# allele reads
+## tamRun3_cat; subset to latest loci set only
+alleleReads_tamRun3_fullSet_0x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_cat_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  rownames_to_column("locus") %>%
+  # remove extra loci
+  filter(locus %in% locusTable$Locus_ID) %>%
+  column_to_rownames("locus")
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+tamRun3_polyGenResults_0x <- polyGen(locusTable, alleleReads_tamRun3_fullSet_0x)
+
+write.table(tamRun3_polyGenResults_0x, "./03_tamRun3/03_run3GTscore/fullSet_cat_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+
+# import genos
+genos_tamRun3_0x <- read.table("./03_tamRun3/03_run3GTscore/fullSet_cat_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # remove cat_ from colnames
+  `colnames<-`(gsub("cat_", "", names(.)))
+```
+
+**10x cutoff**
+
+```{r}
+genos_tamRun3_10x <- read.table("./03_tamRun3/03_run3GTscore/fullSet_cat_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # remove cat_ from colnames
+  `colnames<-`(gsub("cat_", "", names(.)))
+```
+
+### tamRun5
+
+**0x cutoff**
+
+```{r}
+genos_tamRun5_0x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+```
+
+**10x cutoff**
+
+```{r}
+genos_tamRun5_10x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+```
+
+# 4 Assign species & sex
+
+Run species and sex assignment checks for tamRun3 and tamRun5 to check against duptest results
+
+## 4.1 Assign species
+
+### Data
+
+scripts & key
+
+```{r}
+source("./my_sourceScripts/assignSpecies.R")
+speciesKey <- read.csv("./03_tamRun3/04_genoAnalyses/speciesSNP_key_14Dec2022.csv")
+```
+
+### Assign species
+
+```{r}
+# 0x
+speciesCheck_tamRun3_0x <- assignSpecies(genos_tamRun3_0x, mdFile = md_tamRun3_v3, speciesKeyFile = speciesKey)
+
+speciesCheck_tamRun5_0x <- assignSpecies(genos_tamRun5_0x, mdFile = md_tamRun5_v5, speciesKeyFile = speciesKey)
+
+# 10x
+speciesCheck_tamRun3_10x <- assignSpecies(genos_tamRun3_10x, mdFile = md_tamRun3_v3, speciesKeyFile = speciesKey)
+
+speciesCheck_tamRun5_10x <- assignSpecies(genos_tamRun5_10x, mdFile = md_tamRun5_v5, speciesKeyFile = speciesKey)
+```
+
+### Species mismatches
+
+              FALSE   TRUE
+tamRun3_0x    22      314
+tamRun3_10x   20      308
+tamRun5_0x    6       352
+tamRun5_10x   4       340
+
+```{r}
+# 0x
+speciesCheck_tamRun3_0x_mismatches <- speciesCheck_tamRun3_0x %>%
+  filter(mdMatch == "FALSE")
+
+speciesCheck_tamRun5_0x_mismatches <- speciesCheck_tamRun5_0x %>%
+  filter(mdMatch == "FALSE")
+
+# 10x
+speciesCheck_tamRun3_10x_mismatches <- speciesCheck_tamRun3_10x %>%
+  filter(mdMatch == "FALSE")
+
+speciesCheck_tamRun5_10x_mismatches <- speciesCheck_tamRun5_10x %>%
+  filter(mdMatch == "FALSE")
+
+# tables
+table(speciesCheck_tamRun3_0x$mdMatch) # false = 22; true = 314
+table(speciesCheck_tamRun3_10x$mdMatch) # false = 20; true = 308
+
+table(speciesCheck_tamRun5_0x$mdMatch) # false = 6; true = 352
+table(speciesCheck_tamRun5_10x$mdMatch) # false = 4; true = 340
+```
+
+## sexAssignments
+
+### Data
+
+```{r}
+source("./my_sourceScripts/assignSex.R")
+
+primerList.v3 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+sexKey <- read.csv("./03_tamRun3/04_genoAnalyses/sexSNP_key_8Dec2022.csv") %>%
+  na.omit() %>%
+  unique() %>%
+  filter(Locus %in% primerList.v3$locus) %>%
+  dplyr::rename("locus" = "Locus")
+```
+
+### Assign sex
+
+```{r}
+# 0x
+sexCheck_tamRun3_0x <- assignSex(genos_tamRun3_0x, md_tamRun3_v3, sexKey)
+
+sexCheck_tamRun5_0x <- assignSex(genos_tamRun5_0x, md_tamRun5_v5, sexKey)
+
+# 10x
+sexCheck_tamRun3_10x <- assignSex(genos_tamRun3_10x, md_tamRun3_v3, sexKey)
+
+sexCheck_tamRun5_10x <- assignSex(genos_tamRun5_10x, md_tamRun5_v5, sexKey)
+```
+
+### Sex mismatches
+
+```{r}
+# 0x
+sexCheck_tamRun3_0x_mismatches <- sexCheck_tamRun3_0x %>%
+  filter(mdMatch == "FALSE")
+
+sexCheck_tamRun5_0x_mismatches <- sexCheck_tamRun5_0x %>%
+  filter(mdMatch == "FALSE")
+
+# 10x
+sexCheck_tamRun3_10x_mismatches <- sexCheck_tamRun3_10x %>%
+  filter(mdMatch == "FALSE")
+
+sexCheck_tamRun5_10x_mismatches <- sexCheck_tamRun5_10x %>%
+  filter(mdMatch == "FALSE")
+
+
+# tables
+table(sexCheck_tamRun3_0x$mdMatch) # false = 98; true = 230
+table(sexCheck_tamRun3_10x$mdMatch) # false = 76; true = 238
+
+table(sexCheck_tamRun5_0x$mdMatch) # false = 80; true = 274
+table(sexCheck_tamRun5_10x$mdMatch) # false = 55; true = 275
+```
+
+# 5 Reevaluate tamRun3
+
+Now I'll be using the GTscore duptest to see which samples from tamRun3 can be confidently used in combination with tamRun5. Here I'm combining the allele reads from tamRun3_cat (contains both sequencing runs of tamRun3) with those from tamRun5, then running them through the duptest to see the tamRun5 samples to which the tamRun3 samples best match.
+
+## 5.1 Duptest run3 vs. run5
+
+### polygen for tamRun3+5
+
+Combine allele reads for tamRun3 and tamRun5; ensure that tamRun3 allele reads only contain loci from primerSet_v3. 
+
+```{r}
+# locus table
+locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+# allele reads
+## tamRun5
+alleleReads_tamRun5_fullSet_0x <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  rownames_to_column("locus")
+
+## tamRun3_cat
+alleleReads_tamRun3_fullSet_0x_v2 <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_cat_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  # remove cat_ from colnames
+  `colnames<-`(gsub("cat_", "", names(.))) %>%
+  rownames_to_column("locus") %>%
+  # remove extra loci
+  filter(locus %in% alleleReads_tamRun5_fullSet_0x$locus)
+
+## tamRun3.5
+alleleReads_tamRun3.5_fullSet_0x <- alleleReads_tamRun3_fullSet_0x_v2 %>%
+  merge(., alleleReads_tamRun5_fullSet_0x, by = "locus") %>%
+  column_to_rownames("locus")
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+tamRun3.5_polyGenResults <- polyGen(locusTable, alleleReads_tamRun3.5_fullSet_0x)
+```
+
+### duptest
+
+```{r identify duplicate samples,eval=FALSE}
+#convert missing genotypes "0" to NA
+tamRun3.5_polyGenResults_0x_NA <- tamRun3.5_polyGenResults
+tamRun3.5_polyGenResults_0x_NA[tamRun3.5_polyGenResults_0x_NA == "0"] <- NA
+
+#compare all samples, for each comparison get proportion of loci that have genotypes
+#in both samples (proportionCommon) and proportion of shared loci that have identical
+#genotypes (proportionMatch).
+#Samples with a high proportionCommon and high proportionMatch are likely duplicates
+tamRun3.5_polyGenResults_0x_dupTest <- IDduplicateSamples(tamRun3.5_polyGenResults_0x_NA)
+
+# export
+write.table(tamRun3.5_polyGenResults_0x_dupTest,"./metadataReconciliation/dupTest_tamRun3.5_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+# add animalIDs
+tamRun3.5_polyGenResults_0x_dupTest_animalIDs <- tamRun3.5_polyGenResults_0x_dupTest %>%
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  mutate(
+    animalID1 = coalesce(animalID.x, animalID.y),
+    .keep = "unused"
+  ) %>%
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  mutate(
+    animalID2 = coalesce(animalID.x, animalID.y),
+    .keep = "unused"
+  ) %>%
+  relocate(Sample1)
+```
+
+### likelyDups
+
+Subset the duptest results so that we have 1) tamRun3 vs. tamRun5 combinations only, and 2) commonGenos >= 50 and proportionMatch >= 0.8
+
+Also add md_original for tamRun5 sample (where applicable) plus sample types for both tamRun3 and tamRun5 samples
+
+```{r}
+tamRun3.5_0x_likelyDups <- tamRun3.5_polyGenResults_0x_dupTest %>%
+  # (dupTest is in alpha order so run3/5 combos will always be sample1/2 order)
+  filter(str_detect(Sample1, "tamRun3") & str_detect(Sample2, "tamRun5")) %>%
+  filter(commonGenotypes >= 50) %>%
+  filter(proportionMatch >= 0.8) %>%
+  # add animalIDs
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID", "sampleType")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("animalID_tamRun3" = "animalID",
+                "sampleType_tamRun3" = "sampleType") %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID", "sampleType", "md_original")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("animalID_tamRun5" = "animalID",
+                "sampleType_tamRun5" = "sampleType") %>%
+  mutate(
+    animalID_match = case_when(
+      animalID_tamRun3 == animalID_tamRun5 ~ "yes",
+      .default = "no"
+    )
+  ) %>%
+  relocate(Sample1) %>%
+  relocate(c(animalID_tamRun3, animalID_tamRun5, animalID_match, md_original), .after = Sample2) %>%
+  arrange(Sample1)
+```
+
+### matchCompare
+
+#### v1
+
+Creating a dataframe here that contains:
+
+1)    duptest results for tamRun3 sample + corresponding tamRun5 sample according to sampleName
+2)    duptest results for tamRun3 sample + the tamRun5 sample w/the highest propMatch (based on likelyDups, so commonGenos >= 50 and propMatc >= 0.8)
+
+This way we can see if tamRun3 has a higher match with a sample other than what is supposed to be its match in tamRun5
+
+```{r}
+# temp df to hold entries w/NA sampleNames (add back in later)
+temp_df <- md_tamRun3_v3_with_sampleNames %>%
+#  filter(sampleType %in% c("blood", "hair")) %>%
+  select(sampleID, animalID, sampleType, sampleName) %>%
+  filter(is.na(sampleName)) %>%
+  merge(., md_tamRun5_v5[c("sampleID", "animalID", "sampleType")], by = c("animalID", "sampleType"), all.x = T) %>%
+  dplyr::rename("sampleID_run3" = "sampleID.x",
+                "sampleID_run5" = "sampleID.y",
+                "animalID_run3" = "animalID") %>%
+  mutate(animalID_run5 = animalID_run3) %>%
+  relocate(c(sampleID_run3, sampleID_run5, sampleType, sampleName, animalID_run3, animalID_run5)) %>%
+  distinct() %>%
+  arrange(sampleID_run3)
+
+# create df of dups w/highest propMatch
+## ensure ordered correctly
+tamRun3.5_0x_likelyDups <- tamRun3.5_0x_likelyDups %>%
+  arrange(Sample1, desc(proportionMatch))
+
+## then extract highest match
+tamRun3.5_0x_likelyDups_highest <- tamRun3.5_0x_likelyDups[match(unique(tamRun3.5_0x_likelyDups$Sample1), tamRun3.5_0x_likelyDups$Sample1),] %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "sampleName")], by.x = "Sample2", by.y = "sampleID") %>%
+  dplyr::rename("sampleName_run5" = "sampleName") %>%
+  relocate(Sample1)
+
+# create comparison dataframe
+matchCompare <- md_tamRun3_v3_with_sampleNames %>%
+#  filter(sampleType %in% c("blood", "hair")) %>%
+  select(sampleID, animalID, sampleType, sampleName) %>%
+  filter(!is.na(sampleName)) %>%
+  mutate(
+    # update animalID 535 to 234
+    animalID = case_when(
+      animalID == "535" ~ "234",
+      .default = animalID
+    )
+  ) %>%
+  merge(., md_tamRun5_v5[c("sampleID", "animalID", "sampleName")], by = "sampleName", all.x = T) %>%
+  dplyr::rename("sampleID_run3" = "sampleID.x",
+                "animalID_run3" = "animalID.x",
+                "sampleID_run5" = "sampleID.y",
+                "animalID_run5" = "animalID.y") %>%
+  relocate(c(sampleID_run3, sampleID_run5, sampleType, sampleName, animalID_run3, animalID_run5)) %>%
+  distinct() %>%
+  mutate(
+    temp = str_c(animalID_run3, animalID_run5, sep = "_")
+  ) %>%
+  # remove false dups (caused by env_301 & env_GBR names)
+  filter(!temp %in% c("54_91", "91_54", "106_100", "100_106")) %>%
+  select(-temp) %>%
+  rbind(., temp_df) %>%
+  arrange(sampleID_run3) %>%
+  mutate(
+    animalID_match = case_when(
+      animalID_run3 == animalID_run5 ~ "yes",
+      .default = "no"
+    )
+  ) %>%
+  
+  # first add base match
+  merge(., tamRun3.5_polyGenResults_0x_dupTest[, c("Sample1", "Sample2", "commonGenotypes", "proportionMatch")], by.x = c("sampleID_run3", "sampleID_run5"), by.y = c("Sample1", "Sample2"), all.x = T) %>%
+  dplyr::rename("common_baseMatch" = "commonGenotypes",
+                "propMatch_baseMatch" = "proportionMatch") %>%
+  
+  # now add highest dup (when available)
+  merge(., tamRun3.5_0x_likelyDups_highest[, c("Sample1", "Sample2", "animalID_tamRun5", "commonGenotypes", "proportionMatch", "sampleType_tamRun3", "sampleType_tamRun5", "sampleName_run5")], by.x = "sampleID_run3", by.y = "Sample1", all.x = T) %>%
+  dplyr::rename("sampleID_topMatch" = "Sample2",
+                "animalID_topMatch" = "animalID_tamRun5",
+                "common_topMatch" = "commonGenotypes",
+                "propMatch_topMatch" = "proportionMatch",
+                "sampleType_run3.5" = "sampleType",
+                "sampleType_topMatch" = "sampleType_tamRun5",
+                "sampleName_run3.5" = "sampleName",
+                "sampleName_topMatch" = "sampleName_run5") %>%
+  mutate(
+    baseTop_match = case_when(
+      is.na(animalID_topMatch) ~ NA,
+      is.na(animalID_run5) ~ NA,
+      animalID_run5 == animalID_topMatch ~ "yes",
+      .default = "no"
+    )
+  ) %>%
+  select(-animalID_match, -sampleType_tamRun3) %>%
+  dplyr::rename("sampleID_baseMatch" = "sampleID_run5") %>%
+  relocate(c("sampleID_run3",
+             "sampleID_baseMatch",
+             "sampleID_topMatch",
+             
+             "sampleType_run3.5",
+             "sampleType_topMatch",
+             
+             "sampleName_run3.5",
+             "sampleName_topMatch",
+             
+             "animalID_run3",
+             "animalID_run5",
+             "animalID_topMatch",
+             "baseTop_match",
+             
+             "propMatch_baseMatch",
+             "propMatch_topMatch",
+             "common_baseMatch",
+             "common_topMatch"))
+```
+
+#### v2
+
+Now adding in the "typeMatch", where if tamRun3 sampleType == "hair" then its typeMatch would be the tamRun5 blood sample of the same animalID (and vice versa)
+
+This way we have another check just in case the baseMatch doesn't have enough commonGenos for comparison
+
+```{r}
+matchCompare_run3_hair <- matchCompare %>%
+  filter(sampleType_run3.5 == "hair")
+
+matchCompare_run3_blood <- matchCompare %>%
+  filter(sampleType_run3.5 == "blood")
+
+temp1 <- md_tamRun5_v5 %>%
+  filter(sampleType == "blood") %>%
+  filter(animalID %in% matchCompare_run3_hair$animalID_run3) %>%
+  select(sampleID, animalID) %>%
+  dplyr::rename("sampleID_run5blood" = "sampleID")
+
+temp2 <- md_tamRun5_v5 %>%
+  filter(sampleType == "hair") %>%
+  filter(animalID %in% matchCompare_run3_blood$animalID_run3) %>%
+  select(sampleID, animalID) %>%
+  dplyr::rename("sampleID_run5hair" = "sampleID") %>%
+  merge(., temp1, by = "animalID", all = T)
+
+# add to matchCompare
+matchCompare_v2 <- matchCompare %>%
+  merge(., temp2, by.x = "animalID_run3", by.y = "animalID", all.x = T) %>%
+  mutate(
+    sampleID_typeMatch = case_when(
+      sampleType_run3.5 == "hair" ~ sampleID_run5blood,
+      sampleType_run3.5 == "blood" ~ sampleID_run5hair,
+      .default = NA
+    )
+  ) %>%
+  
+  # add typeMatch
+  merge(., tamRun3.5_polyGenResults_0x_dupTest[, c("Sample1", "Sample2", "commonGenotypes", "proportionMatch")], by.x = c("sampleID_run3", "sampleID_typeMatch"), by.y = c("Sample1", "Sample2"), all.x = T) %>%
+  dplyr::rename("common_typeMatch" = "commonGenotypes",
+                "propMatch_typeMatch" = "proportionMatch") %>%
+  mutate(
+    sampleType_typeMatch = case_when(
+      sampleType_run3.5 == "hair" ~ "blood",
+      sampleType_run3.5 == "blood" ~ "hair",
+      .default = NA
+    )
+  ) %>%
+  select(-sampleID_run5blood, -sampleID_run5hair) %>%
+  
+  relocate(c("sampleID_run3",
+             "sampleID_baseMatch",
+             "sampleID_typeMatch",
+             "sampleID_topMatch",
+             
+             "sampleType_run3.5",
+             "sampleType_typeMatch",
+             "sampleType_topMatch",
+             
+             "sampleName_run3.5",
+             "sampleName_topMatch",
+             
+             "animalID_run3",
+             "animalID_run5",
+             "animalID_topMatch",
+             "baseTop_match",
+             
+             "propMatch_baseMatch",
+             "propMatch_typeMatch",
+             "propMatch_topMatch",
+             
+             "common_baseMatch",
+             "common_typeMatch",
+             "common_topMatch"))
+```
+
+### idMismatch_hair troubleshooting
+
+Now we can investigate the 18 tamRun3 samples whose topMatch has a different animalID than its baseMatch. In some cases this may just be an issue where the baseMatch didn't have enough commonGenos, in other cases it might be related to a twin pair - good to check through each one just in case though.
+
+```{r}
+matchCompare_idMismatch_hair <- matchCompare_v2 %>%
+  filter(sampleType_run3.5 == "hair") %>%
+  filter(baseTop_match == "no") %>%
+  # add species/sex checks for tamRun3 sample
+  merge(., speciesCheck_tamRun3_0x[, c("sampleID", "mdMatch")], by.x = "sampleID_run3", by.y = "sampleID", all.x = T) %>%
+  merge(., sexCheck_tamRun3_0x[, c("sampleID", "mdMatch")], by.x = "sampleID_run3", by.y = "sampleID", all.x = T, suffixes = c("_run3_sp", "_run3_sex")) %>%
+  # add species/sex checks for topMatch sample
+  merge(., speciesCheck_tamRun5_0x[, c("sampleID", "mdMatch")], by.x = "sampleID_topMatch", by.y = "sampleID", all.x = T) %>%
+  merge(., sexCheck_tamRun5_0x[, c("sampleID", "mdMatch")], by.x = "sampleID_topMatch", by.y = "sampleID", all.x = T, suffixes = c("_run5_sp", "_run5_sex")) %>%
+  
+  # add temp col for copy/pasting into troubleshooting below
+  mutate(
+    temp = str_c(sampleID_run3, " / ", animalID_run3, " ", mdMatch_run3_sp, "_", mdMatch_run3_sex, " vs. ", sampleID_topMatch, " / ", animalID_topMatch, " ", mdMatch_run5_sp, "_", mdMatch_run5_sex)
+  ) %>%
+  relocate(c(sampleID_run3, sampleID_baseMatch, sampleID_typeMatch, sampleID_topMatch)) %>%
+  arrange(sampleID_run3)
+
+# error list for reference
+errorList_v5
+
+# likely twin list for reference
+twinList <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/twinList_tamRun5_6June2024.csv")
+
+# load in tamRun5 duptest for comparison
+tamRun5_duptest <- read.delim("./metadataReconciliation/dupTest_polyGenResults_0x.txt", stringsAsFactors=FALSE) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID", "sampleType")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID", "sampleType")], by.x = "Sample2", by.y = "sampleID", all.x = T, suffixes = c("1", "2"))
+```
+
+```{r}
+matchCompare_idMismatch_hair$temp
+```
+
+**[1] "tamRun3.009 / 182 TRUE_TRUE vs. tamRun5.045 / 183 TRUE_TRUE"** - no action
+
+-   topMatch = blood sample & likely twin based on twin list
+-   no species or sex mismatch for tamRun3 sample, so should be ok
+
+```{r}
+View(matchCompare_idMismatch_hair %>%
+       filter(sampleID_run3 == "tamRun3.009"))
+```
+   
+**[2] "tamRun3.033 / 208 TRUE_FALSE vs. tamRun5.233 / 107 TRUE_TRUE"** - update tamRun3.033 animalID to 107
+
+-   not enough baseMatch commonGenos
+-   typeMatch = blood, topMatch = hair
+-   prop_typeMatch = 0.58 (89 common); prop_topMatch = 0.91 (98 common)
+-   tamRun5.233 present in errorList, but only bc trapSheet didn't list sampleName
+-   looking at full duptest results shows highest propMatch w/tamRun5.233, then tamRun3.041 (animalID 107)
+
+tamRun3.033 appears to be animalID 107 (vs. 208); likely pipetting error either during extractions or somewhere in tamRun3
+
+-   tamRun3.033 = xtnLoc p3_A5; pcr1_p12_redo p2B4
+-   tamRun3.041 = xtnLoc p3_A6; pcr1_p12_redo p2A5
+
+Next question - is this a tamRun3 issue or an extraction issue? If xtn issue, expect that hair sample for animalID 208 in tamRun5 should also appear to match 107
+
+-   208_hair = tamRun5.225
+-   no more than 9 commonGenos; can't say anything from that - sp/sex checks are also NA
+
+So can't really say if it's an xtn issue, HOWEVER - it looks like both tamRun3.033 and tamRun3.041 were subject to pcr1 redos... my best guess is that during redos, the xtn for animalID 107 (p3_A6) was used for both samples
+
+-   sp/sex assignments for sampleID_run3
+    
+    -   tamRun3.033
+    -   expected: 208_SIMP_F
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = FALSE (1/9 sex genos)
+    
+-   sp/sex assignments for sampleID_baseMatch
+
+    -   sampleID_baseMatch = tamRun5.225
+    -   expected: 208_SIMP_F
+    -   spAssignment = NA
+    -   sexAssignment = NA
+    
+-   sp/sexAssignments for sampleID_typeMatch
+
+    -   sampleID_typeMatch = tamRun5.124
+    -   expected: 208_SIMP_F
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = F = TRUE
+    
+-   sp/sex assignments for sampleID_topMatch
+
+    -   expected: 107_SIMP_M
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = TRUE (8/9 sex genos)
+
+-   sample locations for sampleID_run3 vs. sampleID_run3 for animalID_topMatch
+
+    -   animalID_topMatch = 107 = tamRun3.041
+    -   tamRun3.041 xtnLoc = p3_A6; pcr1Loc = p2A5
+    -   tamRun3.033 xtnLoc = p3_A5; pcr1Loc = p2B4
+    
+-   sp/sex assignments for sampleID_run3_topMatch
+
+    -   expected: LWED_SIMP_M
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = T
+
+```{r}
+View(matchCompare_idMismatch_hair %>%
+       filter(sampleID_run3 == "tamRun3.033"))
+
+View(errorList_v5 %>%
+  filter(sampleID == "tamRun5.233"))
+
+View(tamRun3.5_polyGenResults_0x_dupTest %>%
+       filter(Sample1 == "tamRun3.033"))
+
+View(tamRun5_duptest %>%
+       filter(animalID1 == 208 & animalID2 == 107))
+```
+
+**[3] "tamRun3.054 / 183 TRUE_TRUE vs. tamRun5.014 / 182 TRUE_TRUE"** - no action
+
+-   propMatch similar across base, type, and topMatch
+-   likely twins based on twinList
+
+```{r}
+View(matchCompare_idMismatch_hair %>%
+       filter(sampleID_run3 == "tamRun3.054"))
+
+twinList
+```
+
+**[4] "tamRun3.068 / 219 TRUE_TRUE vs. tamRun5.071 / 283 TRUE_TRUE"** - no action
+
+(note that [5] is a duplicate entry)
+
+Also ran into this issue during metadataReonciliation w/tamRun5; notes from that are below:
+
+-   actionFinal_topMatch = keepOriginal; md_alt = 34_SIMP_F; trapSheet for animalID 34 has 283's sampleNames but crossed out + updated sampleNames in red; sexCheck confirmed keepOriginal
+-   common_typeMatch = 0 (unhelpful)
+-   animalID 219_SIMP_M juv on first capture 2018-06-13
+-   animalID 283_SIMP_M subadult on first capture 2019-06-22
+-   perhaps twins? given that 283 was subadult in 2019 and 219 was juv in 2018 (no capture for 283 in 2018)
+
+other notes-
+
+-   sp/sex assignments for sampleID_run3
+    
+    -   tamRun3.068
+    -   expected: 219_SIMP_M
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = TRUE (6/9 sex genos)
+    
+-   sp/sex assignments for sampleID_baseMatch
+
+    -   NA (geno fail)
+    
+-   sp/sexAssignments for sampleID_typeMatch
+
+    -   sampleID_typeMatch = tamRun5.019
+    -   expected: 219_SIMP_M
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = TRUE
+    
+-   sp/sex assignments for sampleID_topMatch
+
+    -   sampleID_topMatch = tamRun5.071
+    -   expected: 283_SIMP_M
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = TRUE (7/9 sex genos)
+
+-   sample locations for sampleID_run3 vs. sampleID_run3 for animalID_topMatch
+
+    -   animalID_topMatch = 283 = tamRun3.047
+    -   tamRun3.047 xtnLoc = 
+    
+-   sp/sex assignments for sampleID_run3 for animalID_topMatch
+
+    -   animalID_topMatch = 283 = tamRun3.047
+    -   NA (geno fail)
+
+```{r}
+View(matchCompare_idMismatch_hair %>%
+       filter(sampleID_run3 == "tamRun3.068"))
+
+View(tamRun3.5_polyGenResults_0x_dupTest %>%
+       filter(Sample1 == "tamRun5.019" & Sample2 == "tamRun5.239"))
+
+errorList_v5
+
+md_tamRun3_v3
+md_tamRun5_v5
+
+capData_byIndiv_v5 <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v5.csv")
+
+View(capData_byIndiv_v5 %>%
+       filter(animalID %in% c(219, 283, 34)))
+```
+
+**[6] "tamRun3.069 / 142 FALSE_TRUE vs. tamRun5.233 / 107 TRUE_TRUE"** - update tamRun3.069 to animalID 107
+
+(note that [7] is a duplicate entry)
+
+-   tamRun3 genotyped as SIMP_M (vs. LWED_M), which matches animalID 107
+-   given that it has high commonGenos for all match-types and propMatch_topMatch is 0.94 relative to ~0.25 for everything else, updating to animalID 107 seems reasonable
+
+Other notes:
+
+tamRun5.261 has md_alt as 107, but ultimately kept md_original...
+
+Used redo xtn for tamRun3.069; maybe grabbed the wrong env_294?
+
+-   sp/sex assignments for sampleID_run3
+    
+    -   tamRun3.069
+    -   expected: 142_LWED_M
+    -   spAssignment = SIMP = FALSE
+    -   sexAssignment = M = TRUE (2/9 sex genos)
+    
+-   sp/sex assignments for sampleID_baseMatch
+
+    -   tamRun5.261
+    -   expected: 142_LWED_M
+    -   spAssignment = LWED = TRUE
+    -   sexAssignment = M = TRUE
+    
+-   sp/sexAssignments for sampleID_typeMatch
+
+    -   sampleID_typeMatch = tamRun5.192
+    -   expected: 142_LWED_M
+    -   spAssignment = LWED = TRUE
+    -   sexAssignment = MIX
+    
+-   sp/sex assignments for sampleID_topMatch
+
+    -   sampleID_topMatch = tamRun5.233
+    -   expected: 107_SIMP_M
+    -   spAssignment = SIMP = TRUE
+    -   sexAssignment = M = TRUE (8/9 sex genos)
+
+```{r}
+View(matchCompare_idMismatch_hair %>%
+       filter(sampleID_run3 == "tamRun3.069"))
+```
+
+**[8] "tamRun3.136 / 167 TRUE_TRUE vs. tamRun5.186 / 168 TRUE_FALSE"** - no action
+
+-   twin match
+
+**[9] "tamRun3.156 / 80 TRUE_FALSE vs. tamRun5.035 / 34 TRUE_TRUE"** - no action
+
+-   twin match
+
+**[10-17] column-swap problem** - swap animalIDs b/t columns 11 & 12
+
+Samples from plates 3 & 4, columns 11 & 12 seem to have been swapped (i.e., tamRun3.177-184 swapped with tamRun3.185-192). All that had enough genotypes to get a match had tamRun5 topMatch with the column 11/12 sample in their same row, *except* for tamRun3.182, which had topMatch for tamRun5 animalID 223_LWED_F (though very closely followed by propMatch for animalID 276)
+
+col11       sp/sexAssign	tamRun5_topMatch    col12	          sp/sexAssign	tamRun5_topMatch
+10_LWED_M	  SIMP_F	      15_SIMP_F (144/154)	15_SIMP_F	      LWED_M	      10_LWED_M (95/112)
+197_LWED_M	LWED_MIX	    NA	                98_LWED_M	      LWED_M	      197 (155/158)
+272_LWED_F	NA_NA	        NA	                76_LWED_F	      LWED_F	      272 (103/128)
+274_LWED_F	LWED_MIX	    7_LWED_M (117/135)	7_LWED_F	      NA_NA	        NA
+138_LWED_M	NA_NA	        NA	                201_LWED_M	    LWED_NA	      NA
+2_SIMP_F    LWED_F	      223_LWED_F (108/133); 276 (101/126)	276_LWED_F	  SIMP_F	NA
+287_SIMP_M	NA_M	        NA	                222_LWED_M	    SIMP_MIX	    287 (131/148)
+230_SIMP_F	NA_NA       	NA	                224_LWED_M	    SIMP_F	        230 (78/93)
+
+
+**[18] "tamRun3.237 / 66 TRUE_TRUE vs. tamRun5.388 / 97 TRUE_TRUE"** - update tamRun3.237 to animalID 97
+
+tamRun3.237 has topMatch (97%) w/tamRun5.388 - 97_hair. In tamRun3, the 97_hair sample is suppoed to be in spot tamRun3.238, suggesting pipetting error.
+
+tamRun3.238 had really low geno success... dunno if this was an issue with half or both of the PCR1 plates (since hair samples were split)
+
+```{r}
+View(matchCompare_idMismatch_hair %>%
+       filter(sampleID_run3 == "tamRun3.237"))
+
+matchCompare_v2
+
+View(md_tamRun5_v5 %>%
+       filter(animalID %in% c(66, 97)))
+
+View(md_tamRun3_v3 %>%
+       filter(animalID %in% c(66, 97)))
+
+View(capData_byIndiv_v5 %>%
+       filter(animalID %in% c(66, 97)))
+
+View(tamRun3.5_polyGenResults_0x_dupTest_animalIDs %>%
+       filter(animalID1 %in% c(66, 97) & animalID2 %in% c(66, 97)))
+
+View(tamRun3.5_polyGenResults_0x_dupTest_animalIDs %>%
+       filter(Sample1 == "tamRun3.238" | Sample2 == "tamRun3.238"))
+```
+
+**tamRun3.219 / PCR1 (-) vs. tamRun5.412 & tamRun5.104**
+
+tamRun3.219 is supposed to be a pcr1Neg, but had decent genotype success + species/sex assignments, suggesting that a sample was added there by mistake. 
+
+While it didn't have high enough matches to get into the "likelyDups" dataframe, its two highest propMatch values are propMatch 0.76 with tamRun5.412 and propMatch 0.71 with tamRun5.104. Both tamRun5 samples have animalID 5 - and in tamRun3, we find that the sample just below tamRun5.219 is supposed to be animalID 5, suggesting that tamRun3.220 was added to tamRun3.219 by mistake.
+
+tamRun3.218 = 59_LWED_M (NA for sp/sex)
+tamRun3.219 = PCR1 (-) = sp/sex LWED_M
+tamRun3.220 = 5_LWED_M
+
+```{r}
+View(tamRun3.5_polyGenResults_0x_dupTest %>%
+       filter(Sample1 == "tamRun3.219"))
+```
+
+**running notes**
+
+Things to update are below:
+
+-   tamRun3.033 - update to animalID 107
+-   tamRun3.069 update to animalID 107
+-   tamRun3 p3/4 cols 11 and 12 seem to be switched - question is, it it a complete switch or a pipetting error?
+-   tamRun3.237 update animalID to 97
+-   tamRun3.219 update animalID to 5
+
+
+```{r}
+View(tamRun3.5_polyGenResults_0x_dupTest %>%
+       filter(Sample1 == "cat_tamRun3.224"))
+       filter(Sample2 == "tamRun5.429"))
+
+md_tamRun3_v1
+md_tamRun3_v2_with_sampleNames
+md_tamRun3_v2
+
+md_tamRun5_v5
+
+speciesCheck_tamRun3_0x
+sexCheck_tamRun3_0x
+
+speciesCheck_tamRun5_0x
+sexCheck_tamRun5_0x
+```
+
+## 5.4 tamRun3_actionList
+
+```{r}
+tamRun3_sampleIDs_toUpdate <- matchCompare_baseTopMismatches %>%
+  filter(sampleType_run3.5 == "hair") %>%
+  
+  mutate(
+    animalID_alt = case_when(
+      sampleID_run3 == "tamRun3.033" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.054" ~ NA,
+      sampleID_run3 == "tamRun3.068" ~ NA,
+      sampleID_run3 == "tamRun3.069" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.136" ~ NA,
+      sampleID_run3 == "tamRun3.156" ~ NA,
+      
+      # swapped w/col12 (below)
+      sampleID_run3 == "tamRun3.177" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.178" ~ "98",
+      sampleID_run3 == "tamRun3.179" ~ "76",
+      sampleID_run3 == "tamRun3.180" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.181" ~ "201",
+      sampleID_run3 == "tamRun3.182" ~ "276",
+      sampleID_run3 == "tamRun3.183" ~ "222",
+      sampleID_run3 == "tamRun3.184" ~ "224",
+      
+      # swapped w/col11 (above)
+      sampleID_run3 == "tamRun3.185" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.186" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.187" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.188" ~ "274",
+      sampleID_run3 == "tamRun3.189" ~ "138",
+      sampleID_run3 == "tamRun3.190" ~ "2",
+      sampleID_run3 == "tamRun3.191" ~ animalID_topMatch,
+      sampleID_run3 == "tamRun3.192" ~ animalID_topMatch,
+      
+      sampleID_run3 == "tamRun3.237" ~ animalID_topMatch,
+      
+      .default = NA
+    )
+  ) %>%
+  select(sampleID_run3, animalID_alt) %>%
+  rbind(c("tamRun3.219", "5")) %>% # pcr1 neg
+  
+  mutate(
+    sampleID_run3 = str_c("cat_", sampleID_run3)
+  )
+```
+
+List of samples to combine w/tamRun5 (just using hair samples):
+
+```{r}
+md_tamRun3_v2_with_sampleNames_cat <- md_tamRun3_v2_with_sampleNames %>%
+  mutate(
+    sampleID = str_c("cat_", sampleID)
+  )
+
+tamRun3_samples_forRun5 <- md_tamRun3_v2_with_sampleNames_cat %>%
+  filter(sampleType == "hair") %>%
+  select(sampleID, animalID) %>%
+  merge(., tamRun3_sampleIDs_toUpdate, by.x = "sampleID", by.y = "sampleID_run3", all.x = T) %>%
+  mutate(
+    animalID = case_when(
+      !is.na(animalID_alt) ~ animalID_alt,
+      .default = animalID
+    )
+  ) %>%
+  select(-animalID_alt) %>%
+  # add pcr1 (-)
+  rbind(c("cat_tamRun3.219", "5")) %>%
+  # and remove sampleID 220 (where 5 was supposed to go originally)
+  filter(sampleID != "cat_tamRun3.220") %>%
+  distinct() %>%
+  arrange(sampleID)
+```
+
+# 6 Retest w/split pools
+
+Since each hair sample in tamRun3 was added to two different PCR1 plates, it's a good idea to whether all loci or just the loci from one pool are being flagged as duplicates for the same/different animalIDs in tamRun5.
+
+## 6.1 Data
+
+### Split pools
+
+```{r}
+splitPool1 <- read.table("./03_tamRun3/04_genoAnalyses/p2_combined_primerProbeFile.txt", header = T) %>%
+  mutate(
+    Locus = str_replace(Locus, "\\..*", "")
+  ) %>%
+  mutate(
+    Locus = case_when(
+      Locus == "SEXID_195" ~ "SEXID_LWED_195",
+      Locus == "SEXID_208" ~ "SEXID_LWED_208",
+      Locus == "SEXID_197" ~ "SEXID_SIMP_197",
+      Locus == "SEXID_198" ~ "SEXID_SIMP_198",
+      Locus == "SEXID_203" ~ "SEXID_SIMP_203",
+      Locus == "SEXID_218" ~ "SEXID_SIMP_218",
+      .default = Locus
+    )
+  ) %>%
+  filter(Locus %in% primerList.v3$locus)
+
+splitPool2 <- read.table("./03_tamRun3/04_genoAnalyses/p3_combined_primerProbeFile.txt", header = T) %>%
+  mutate(
+    Locus = str_replace(Locus, "\\..*", "")
+  ) %>%
+  mutate(
+    Locus = case_when(
+      Locus == "SEXID_195" ~ "SEXID_LWED_195",
+      Locus == "SEXID_208" ~ "SEXID_LWED_208",
+      Locus == "SEXID_197" ~ "SEXID_SIMP_197",
+      Locus == "SEXID_198" ~ "SEXID_SIMP_198",
+      Locus == "SEXID_203" ~ "SEXID_SIMP_203",
+      Locus == "SEXID_218" ~ "SEXID_SIMP_218",
+      .default = Locus
+    )
+  ) %>%
+  filter(Locus %in% primerList.v3$locus)
+```
+
+## 6.2 splitPool polygen
+
+```{r}
+# locus tables
+locusTable_splitPool1 <- locusTable %>%
+  mutate(temp = Locus_ID) %>%
+  mutate(temp = sub('[_][^_]+$', '', temp)) %>%
+  filter(temp %in% splitPool1$Locus) %>%
+  select(-temp)
+
+locusTable_splitPool2 <- locusTable %>%
+  mutate(temp = Locus_ID) %>%
+  mutate(temp = sub('[_][^_]+$', '', temp)) %>%
+  filter(temp %in% splitPool2$Locus) %>%
+  select(-temp)
+
+# allele reads
+alleleReads_tamRun3.5_splitPool1_0x <- alleleReads_tamRun3.5_fullSet_0x %>%
+  filter(rownames(.) %in% locusTable_splitPool1$Locus_ID)
+
+alleleReads_tamRun3.5_splitPool2_0x <- alleleReads_tamRun3.5_fullSet_0x %>%
+  filter(rownames(.) %in% locusTable_splitPool2$Locus_ID)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+tamRun3.5_polyGenResults_splitPool1 <- polyGen(locusTable_splitPool1, alleleReads_tamRun3.5_splitPool1_0x)
+
+tamRun3.5_polyGenResults_splitPool2 <- polyGen(locusTable_splitPool2, alleleReads_tamRun3.5_splitPool2_0x)
+```
+
+## 6.3 splitPool duptest
+
+### splitPool1
+
+```{r identify duplicate samples,eval=FALSE}
+#convert missing genotypes "0" to NA
+tamRun3.5_polyGenResults_splitPool1_0x_NA <- tamRun3.5_polyGenResults_splitPool1
+tamRun3.5_polyGenResults_splitPool1_0x_NA[tamRun3.5_polyGenResults_splitPool1_0x_NA == "0"] <- NA
+
+#compare all samples, for each comparison get proportion of loci that have genotypes
+#in both samples (proportionCommon) and proportion of shared loci that have identical
+#genotypes (proportionMatch).
+#Samples with a high proportionCommon and high proportionMatch are likely duplicates
+tamRun3.5_splitPool1_0x_dupTest <- IDduplicateSamples(tamRun3.5_polyGenResults_splitPool1_0x_NA)
+
+# export
+write.table(tamRun3.5_splitPool1_0x_dupTest,"./metadataReconciliation/dupTest_tamRun3.5_splitPool1_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+# add animalIDs
+tamRun3.5_splitPool1_0x_dupTest_animalIDs <- tamRun3.5_splitPool1_0x_dupTest %>%
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  mutate(
+    animalID1 = coalesce(animalID.x, animalID.y),
+    .keep = "unused"
+  ) %>%
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  mutate(
+    animalID2 = coalesce(animalID.x, animalID.y),
+    .keep = "unused"
+  ) %>%
+  relocate(Sample1)
+```
+
+### splitPool2
+
+```{r identify duplicate samples,eval=FALSE}
+#convert missing genotypes "0" to NA
+tamRun3.5_polyGenResults_splitPool2_0x_NA <- tamRun3.5_polyGenResults_splitPool2
+tamRun3.5_polyGenResults_splitPool2_0x_NA[tamRun3.5_polyGenResults_splitPool2_0x_NA == "0"] <- NA
+
+#compare all samples, for each comparison get proportion of loci that have genotypes
+#in both samples (proportionCommon) and proportion of shared loci that have identical
+#genotypes (proportionMatch).
+#Samples with a high proportionCommon and high proportionMatch are likely duplicates
+tamRun3.5_splitPool2_0x_dupTest <- IDduplicateSamples(tamRun3.5_polyGenResults_splitPool2_0x_NA)
+
+# export
+write.table(tamRun3.5_splitPool2_0x_dupTest,"./metadataReconciliation/dupTest_tamRun3.5_splitPool2_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+# add animalIDs
+tamRun3.5_splitPool2_0x_dupTest_animalIDs <- tamRun3.5_splitPool2_0x_dupTest %>%
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  mutate(
+    animalID1 = coalesce(animalID.x, animalID.y),
+    .keep = "unused"
+  ) %>%
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  mutate(
+    animalID2 = coalesce(animalID.x, animalID.y),
+    .keep = "unused"
+  ) %>%
+  relocate(Sample1)
+```
+
+## 6.4 likelyDups
+
+Subset the duptest results so that we have 1) tamRun3 vs. tamRun5 combinations only, and 2) commonGenos >= 50 and proportionMatch >= 0.8
+
+Also add md_original for tamRun5 sample (where applicable) plus sample types for both tamRun3 and tamRun5 samples
+
+### splitPool1
+
+```{r}
+tamRun3.5_splitPool1_0x_likelyDups <- tamRun3.5_splitPool1_0x_dupTest %>%
+  # (dupTest is in alpha order so run3/5 combos will always be sample1/2 order)
+  filter(str_detect(Sample1, "tamRun3") & str_detect(Sample2, "tamRun5")) %>%
+  filter(commonGenotypes >= 50) %>%
+  filter(proportionMatch >= 0.8) %>%
+  # add animalIDs
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID", "sampleType")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("animalID_tamRun3" = "animalID",
+                "sampleType_tamRun3" = "sampleType") %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID", "sampleType", "md_original")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("animalID_tamRun5" = "animalID",
+                "sampleType_tamRun5" = "sampleType") %>%
+  mutate(
+    animalID_match = case_when(
+      animalID_tamRun3 == animalID_tamRun5 ~ "yes",
+      .default = "no"
+    )
+  ) %>%
+  relocate(Sample1) %>%
+  relocate(c(animalID_tamRun3, animalID_tamRun5, animalID_match, md_original), .after = Sample2) %>%
+  arrange(Sample1)
+```
+
+### splitPool2
+
+```{r}
+tamRun3.5_splitPool2_0x_likelyDups <- tamRun3.5_splitPool2_0x_dupTest %>%
+  # (dupTest is in alpha order so run3/5 combos will always be sample1/2 order)
+  filter(str_detect(Sample1, "tamRun3") & str_detect(Sample2, "tamRun5")) %>%
+  filter(commonGenotypes >= 50) %>%
+  filter(proportionMatch >= 0.8) %>%
+  # add animalIDs
+  merge(., md_tamRun3_v3[, c("sampleID", "animalID", "sampleType")], by.x = "Sample1", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("animalID_tamRun3" = "animalID",
+                "sampleType_tamRun3" = "sampleType") %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID", "sampleType", "md_original")], by.x = "Sample2", by.y = "sampleID", all.x = T) %>%
+  dplyr::rename("animalID_tamRun5" = "animalID",
+                "sampleType_tamRun5" = "sampleType") %>%
+  mutate(
+    animalID_match = case_when(
+      animalID_tamRun3 == animalID_tamRun5 ~ "yes",
+      .default = "no"
+    )
+  ) %>%
+  relocate(Sample1) %>%
+  relocate(c(animalID_tamRun3, animalID_tamRun5, animalID_match, md_original), .after = Sample2) %>%
+  arrange(Sample1)
+```
+
+
+
+# 6 Combine tamRun5+3
+
+## 6.1 Combine allele reads
+
+```{r}
+# locus table
+locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+# allele reads
+## tamRun3_cat
+alleleReads_tamRun3_fullSet_0x <- read.delim("./03_tamRun3/03_run3GTscore/fullSet_cat_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  rownames_to_column("locus") %>%
+  # remove extra loci
+  filter(locus %in% locusTable$Locus_ID) %>%
+  arrange(locus) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  merge(., tamRun3_samples_forRun5, by = "sampleID") %>%
+  mutate(
+    sampleID_new = str_c(animalID, "_hair")
+  ) %>%
+  relocate(sampleID_new) %>%
+  select(-animalID)
+
+## tamRun5
+alleleReads_tamRun3.5_fullSet_0x <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  rownames_to_column("locus") %>%
+  arrange(locus) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  merge(., md_tamRun5_v5[, c("sampleID", "animalID", "sampleType")], by = "sampleID", all.x = T) %>%
+  mutate(
+    sampleID_new = str_c(animalID, sampleType, sep = "_")
+  ) %>%
+  relocate(sampleID_new) %>%
+  select(-animalID, -sampleType) %>%
+  rbind(., alleleReads_tamRun3_fullSet_0x)
+
+# extract dupes
+dupList <- alleleReads_tamRun3.5_fullSet_0x %>%
+  select(sampleID_new) %>%
+  get_dupes(sampleID_new) %>%
+  distinct()
+
+alleleReads_tamRun3.5_dups <- alleleReads_tamRun3.5_fullSet_0x %>%
+  filter(sampleID_new %in% dupList$sampleID_new) %>%
+  arrange(sampleID_new) %>%
+  filter(str_detect(sampleID_new, "hair")) %>%
+  select(-sampleID) %>%
+  group_by(sampleID_new) %>%
+  mutate(
+    temp = as.character(1:n())
+    ) %>%
+  relocate(temp) %>%
+  ungroup() %>%
+  pivot_longer(!c(sampleID_new, temp),
+               names_to = "locus",
+               values_to = "alleleReads") %>%
+  pivot_wider(names_from = temp,
+              values_from = alleleReads) %>%
+  separate("1", into = c("reads.a_1", "reads.b_1"), sep = ",") %>%
+  separate("2", into = c("reads.a_2", "reads.b_2"), sep = ",") %>%
+  separate("3", into = c("reads.a_3", "reads.b_3"), sep = ",") %>%
+  separate("4", into = c("reads.a_4", "reads.b_4"), sep = ",") %>%
+  mutate_at(c(3:10), as.numeric) %>%
+  mutate(
+    readCounts_allele1 = rowSums(select(., contains("reads.a")), na.rm = T),
+    readCounts_allele2 = rowSums(select(., contains("reads.b")), na.rm = T)
+  ) %>%
+  mutate(
+    alleleReads = str_c(readCounts_allele1, readCounts_allele2, sep = ",")
+  ) %>%
+  select(sampleID_new, locus, alleleReads) %>%
+  pivot_wider(names_from = locus,
+              values_from = alleleReads)
+
+# recombine dups w/non-dups
+temp <- md_tamRun5_v5 %>%
+  filter(sampleType == "hair") %>%
+  select(sampleID, animalID, sampleType) %>%
+  mutate(temp = str_c(animalID, sampleType, sep = "_")) %>% 
+  select(-animalID, -sampleType) %>%
+  arrange(temp, sampleID) %>%
+  group_by(temp) %>%
+  mutate(
+    temp2 = as.character(1:n())
+    ) %>%
+  ungroup() %>%
+  filter(temp2 == 1) %>%
+  select(-temp2)
+
+alleleReads_tamRun3.5_hairSamples_combo <- alleleReads_tamRun3.5_fullSet_0x %>%
+  filter(!sampleID_new %in% dupList$sampleID_new) %>%
+  select(-sampleID) %>%
+  rbind(., alleleReads_tamRun3.5_dups) %>%
+  filter(str_detect(sampleID_new, "hair")) %>%
+  merge(., temp, by.x = "sampleID_new", by.y = "temp") %>%
+  relocate(sampleID) %>%
+  arrange(sampleID) %>%
+  select(-sampleID_new) %>%
+  column_to_rownames("sampleID") %>%
+  t() %>%
+  as.data.frame()
+  
+md_tamRun5_v5 %>%
+  filter(sampleType == "hair") %>%
+  select(sampleID) %>%
+  filter(!sampleID %in% alleleReads_tamRun3.5_hairSamples_combo$sampleID)
+```
+
+## 6.2 Genotyping
+
+```{r}
+# locus table
+locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+tamRun3.5_hairCombo_polyGenResults <- polyGen(locusTable, alleleReads_tamRun3.5_hairSamples_combo)
+
+write.table(tamRun3.5_hairCombo_polyGenResults,"./sandbox/tamRun5_plus_tamRun3/fullSet_tamRun5_plus_tamRun3_hair_polyGenResults_0x.txt",quote=FALSE,sep="\t")
+```
+
+```{r}
+genos0x_run5.3_hair <- read.table("./sandbox/tamRun5_plus_tamRun3/fullSet_tamRun5_plus_tamRun3_hair_polyGenResults_0x.txt") %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+```
+
+# 7 Check performance
+
+## 7.1 Geno success
+
+Definitely an increase in genoSuccess, avg. 35 more total genos (range -1 to 189) w/avg increase in propSuccess by 17% (range -0.5% to 91%)
+
+```{r}
+genos0x_tamRun5 <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+genoSuccess0x_bySample_tamRun5 <- genos0x_tamRun5 %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate_all(na_if, "0") %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  ) %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID, totalGenos) %>%
+  mutate(propGenos = totalGenos/208)
+
+genoSuccess0x_bySample_tamRun5.3_hair <- genos0x_run5.3_hair %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate_all(na_if, "0") %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  ) %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID, totalGenos) %>%
+  mutate(propGenos = totalGenos/208)
+
+genoSuccess0x_compare <- genoSuccess0x_bySample_tamRun5.3_hair %>%
+  merge(., genoSuccess0x_bySample_tamRun5, by = "sampleID", all.x = T) %>%
+  dplyr::rename("totalGenos_run5.3" = "totalGenos.x",
+                "propGenos_run5.3" = "propGenos.x",
+                "totalGenos_run5" = "totalGenos.y",
+                "propGenos_run5" = "propGenos.y") %>%
+  mutate(
+    diff_totalGenos = totalGenos_run5.3 - totalGenos_run5,
+    diff_propGenos = propGenos_run5.3 - propGenos_run5
+  ) %>%
+  select(sampleID, totalGenos_run5, totalGenos_run5.3, diff_totalGenos, propGenos_run5, propGenos_run5.3, diff_propGenos)
+
+# effect on total genos
+mean(genoSuccess0x_compare$diff_totalGenos) # 35
+min(genoSuccess0x_compare$diff_totalGenos) # -1
+max(genoSuccess0x_compare$diff_totalGenos) # 189
+
+mean(genoSuccess0x_compare$diff_propGenos) # 0.17
+min(genoSuccess0x_compare$diff_propGenos) # -0.005
+max(genoSuccess0x_compare$diff_propGenos) # 0.91
+```
+
+## 7.1 spChecks
+
+Species and sex checks also show a definite improvement using the tamRun3.5_hairCombo relative to tamRun5 by itself
+
+```{r}
+md_tamRun3.5_hairCombo <- md_tamRun5_v5 %>%
+  filter(sampleID %in% colnames(genos_run3.5_hairCombo_0x))
+
+# tamRun3
+speciesCheck_tamRun3.5_hairCombo_0x <- assignSpecies(genos_run3.5_hairCombo_0x, mdFile = md_tamRun5_v5, speciesKeyFile = speciesKey)
+
+# tamRun5
+speciesCheck_tamRun5_0x <- assignSpecies(genos_tamRun5_0x, mdFile = md_tamRun5_v5, speciesKeyFile = speciesKey) %>%
+  filter(sampleID %in% speciesCheck_tamRun3.5_hairCombo_0x$sampleID)
+
+table(speciesCheck_tamRun3.5_hairCombo_0x$mdMatch) # F = 6; T = 187
+table(speciesCheck_tamRun5_0x$mdMatch) # F = 6; T = 167
+```
+
+## 7.2 sexChecks
+
+```{r}
+sexCheck_tamRun3.5_hairCombo_0x <- assignSex(genos_run3.5_hairCombo_0x, md_tamRun5_v5, sexKey)
+
+sexCheck_tamRun5_0x <- assignSex(genos_tamRun5_0x, md_tamRun5_v5, sexKey) %>%
+  filter(sampleID %in% speciesCheck_tamRun3.5_hairCombo_0x$sampleID)
+
+table(sexCheck_tamRun3.5_hairCombo_0x$mdMatch) # F = 12; T = 151
+table(sexCheck_tamRun5_0x$mdMatch) # F = 27; T = 141
+```
+
+

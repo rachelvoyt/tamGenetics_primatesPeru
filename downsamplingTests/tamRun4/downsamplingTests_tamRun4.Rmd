@@ -1,0 +1,1708 @@
+---
+title: "GTscorePipeline_tamRun4_ill_subsampled"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+# 2 Packages
+
+```{r}
+source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+
+library(tidyverse)
+```
+
+# 3 Data
+
+## 3.1 Metadata
+
+```{r}
+# Metadata w/both Illumina and Nanopore sampleIDs/sampleFiles
+md_illONT_samplesAll_ds <- read.csv("./04_tamRun4/illONT_tamRun4_metadata.csv") %>%
+  mutate(
+    sampleID_ill.ds = str_c(sampleID_ill, "_ds10x"),
+    sampleFile_ill.ds = str_c(sampleID_ill.ds, ".fastq"),
+    sampleFile_ill.ds = gsub("tamRun4.", "tamRun4-", sampleFile_ill.ds),
+    sampleID_ont.ds = str_c(sampleID_ont, "_ds10x"),
+    sampleFile_ont.ds = str_c(sampleID_ont, ".all_ds10x.fastq"))
+
+md_illONT_samplesNegs_ds <- md_illONT_samplesAll_ds %>%
+  filter(str_detect(sampleType, "Neg"))
+```
+
+## 3.3 Loci
+
+```{r}
+primerList.v3 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+primerList.v3_lociDual <- primerList.v3 %>%
+  select(locus) %>%
+  filter(!str_detect(locus, "LWED|SIMP"))
+```
+
+# 4 Downsampling scripts
+
+## 4.1 sandbox
+
+What I'd like to do is edit the GTscore genotyping script to pull a random set of "n" reads per sample per locus and then give the genotype. Seems reasonable??
+
+polyGen function: combines the locus table and read counts into a single file and submits to the second function
+* requires:
+1. locus table
+2. allele reads
+
+So what I want to do is subset the allele reads file
+
+```{r}
+# unfiltered allele reads
+alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus))
+ 
+alleleReads_l <- alleleReads %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "readCounts") %>%
+  relocate(sampleID) %>%
+  arrange(sampleID) %>%
+  separate(readCounts, into = c("readCounts_a1", "readCounts_a2"), sep = ",") %>%
+  mutate(
+    readCounts_a1 = as.numeric(readCounts_a1),
+    readCounts_a2 = as.numeric(readCounts_a2),
+    readCounts_sum = readCounts_a1 + readCounts_a2
+  ) %>%
+  # create character strings based on allele counts & randomize
+  rowwise() %>%
+  mutate(
+    vec_a1 = paste(replicate(readCounts_a1, "a"), collapse = ""),
+    vec_a2 = paste(replicate(readCounts_a2, "b"), collapse = ""),
+    vec_a1a2 = stri_rand_shuffle(str_c(vec_a1, vec_a2))
+  ) %>%
+  # downsample randomized character string
+  mutate(
+    ds_vec_a1a2 = str_sub(vec_a1a2, start = 1, end = 10)
+  ) %>%
+  # count allele reads based on downsampled string
+  mutate(
+    dsCounts_a1 = str_count(ds_vec_a1a2, "a"),
+    dsCounts_a2 = str_count(ds_vec_a1a2, "b")
+  ) %>%
+  # merge new allele counts into one column
+  mutate(
+    ds_readCounts_sum = dsCounts_a1 + dsCounts_a2,
+    ds_readCounts = case_when(
+      ds_readCounts_sum < 10 ~ NA,
+      .default = str_c(dsCounts_a1, dsCounts_a2, sep = ",")
+    )
+  ) %>%
+  select(c(sampleID, locus, ds_readCounts)) %>%
+  pivot_wider(id_cols = locus,
+              names_from = sampleID,
+              values_from = ds_readCounts) %>%
+  column_to_rownames("locus")
+```
+
+## 4.2 write function
+
+Now let's turn this into a function
+
+```{r}
+downsample_alleleReads <- function(alleleReads_file, n_reads) {
+  ds_alleleReads <- alleleReads_file %>%
+    pivot_longer(!locus,
+                 names_to = "sampleID",
+                 values_to = "readCounts") %>%
+    relocate(sampleID) %>%
+    arrange(sampleID) %>%
+    separate(readCounts, into = c("readCounts_a1", "readCounts_a2"), sep = ",") %>%
+    mutate(
+      readCounts_a1 = as.numeric(readCounts_a1),
+      readCounts_a2 = as.numeric(readCounts_a2),
+      readCounts_sum = readCounts_a1 + readCounts_a2
+    ) %>%
+    # create character strings based on allele counts & randomize
+    rowwise() %>%
+    mutate(
+      vec_a1 = paste(replicate(readCounts_a1, "a"), collapse = ""),
+      vec_a2 = paste(replicate(readCounts_a2, "b"), collapse = ""),
+      vec_a1a2 = stri_rand_shuffle(str_c(vec_a1, vec_a2))
+    ) %>%
+    # downsample randomized character string
+    mutate(
+      ds_vec_a1a2 = str_sub(vec_a1a2, start = 1, end = n_reads)
+    ) %>%
+    # count allele reads based on downsampled string
+  mutate(
+    dsCounts_a1 = str_count(ds_vec_a1a2, "a"),
+    dsCounts_a2 = str_count(ds_vec_a1a2, "b")
+  ) %>%
+  # merge new allele counts into one column
+  mutate(
+    ds_readCounts_sum = dsCounts_a1 + dsCounts_a2,
+    ds_readCounts = case_when(
+      ds_readCounts_sum < n_reads ~ NA,
+      .default = str_c(dsCounts_a1, dsCounts_a2, sep = ",")
+    )
+  ) %>%
+  select(c(sampleID, locus, ds_readCounts)) %>%
+  pivot_wider(id_cols = locus,
+              names_from = sampleID,
+              values_from = ds_readCounts) %>%
+  column_to_rownames("locus")
+    
+  return(ds_alleleReads)
+}
+```
+
+## 4.3 test
+
+```{r}
+# unfiltered allele reads
+alleleReads <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus))
+ 
+test <- downsample_alleleReads(alleleReads, 10)
+```
+
+## 4.4 downsample
+
+### Illumina
+
+```{r}
+alleleReads_ill <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus))
+```
+
+
+### Nanopore
+
+
+# ALL BELOW IS OLD [RV: 28March2024]
+
+# 4 Downsampling scripts
+
+## 4.1 By total reads
+
+Might be good to just bring down Illumina total reads to the same as ONT using seqtk to see how they match up
+
+```{bash}
+
+```
+
+## 4.2 By locus
+
+Then we can look at coverage by loci - given the same coverage for a given locus, how do the reads match up?
+
+The following downsampling script randomly samples 10 reads from each locus within
+each fastq file for a given set of primers/probes and fastq files. The
+script only samples reads that contain both the forward-primer AND probe
+sequence (containing the SNP of interest) for each locus.
+
+**NOTE** that this script does not account for IUPAC codes; I realized this after already running it - it's possible to update the script but initial tests show that it takes a LOT longer to run. As such, I'm skipping the update for now and just doing analyses based on loci w/o IPUAC codes - my start to updating the script is in the bottom section of this document.
+
+Input files:
+
+-   **input_directory_path** - path to directory containing all fastq
+    files to be downsampled
+-   **output_directory_path** - path to directory where downsampled
+    fastq files should be placed
+-   **primer_probe_file** - path to GTscore primer-probe file containing
+    names, forward-primer sequence, and probe sequence for each locus
+
+The downsampling script is copied below; also available in
+downsampling_seqio.py.
+
+```{python}
+from Bio import SeqIO
+import random
+import os
+
+def subsample_reads(input_fastq, output_fastq, primer_probe_file, reads_per_locus):
+    # Load primer and probe sequences
+    primers_probes = {}
+    with open(primer_probe_file, 'r') as pp_file:
+        for line in pp_file:
+            if not line.startswith("Locus"):  # Skip header
+                locus, ploidy, snp_pos, allele1, allele2, probe1, probe2, primer = line.strip().split('\t')
+                primers_probes[locus] = (primer, probe1, probe2)
+
+    # Subsample reads for each locus
+    matching_reads = []
+    for locus, (primer_sequence, probe1_sequence, probe2_sequence) in primers_probes.items():
+        locus_reads = []
+        for record in SeqIO.parse(input_fastq, 'fastq'):
+            # Check if the primer sequence and either probe1 or probe2 are present
+            if primer_sequence in str(record.seq) and (probe1_sequence in str(record.seq) or probe2_sequence in str(record.seq)):
+                locus_reads.append(record)
+
+        # Subsample for the current locus
+        if len(locus_reads) > reads_per_locus:
+            locus_reads = random.sample(locus_reads, reads_per_locus)
+
+        matching_reads.extend(locus_reads)
+
+    # Subsample to n reads (if total matching reads exceed n_reads)
+    if len(matching_reads) > reads_per_locus * len(primers_probes):
+        matching_reads = random.sample(matching_reads, reads_per_locus * len(primers_probes))
+
+    # Write subsampled reads to output file
+    with open(output_fastq, 'w') as out_file:
+        SeqIO.write(matching_reads, out_file, 'fastq')
+
+def subsample_all_fastq_files(input_directory, output_directory, primer_probe_file, reads_per_locus):
+    # List all files in the input directory
+    file_list = [f for f in os.listdir(input_directory) if f.endswith('.fastq')]
+
+    # Process each FASTQ file
+    for file_name in file_list:
+        input_fastq_file = os.path.join(input_directory, file_name)
+        output_fastq_file = os.path.join(output_directory, file_name.replace('.fastq', '_downsampled.fastq'))
+        subsample_reads(input_fastq_file, output_fastq_file, primer_probe_file, reads_per_locus)
+
+# Example usage
+input_directory_path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/02_run4Interleaved_ill/"
+output_directory_path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/"
+primer_probe_file = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt"
+n_reads = 10
+
+subsample_all_fastq_files(input_directory_path, output_directory_path, primer_probe_file, n_reads)
+```
+
+# 5 ds10x
+
+## 5.1 GTscore pipeline
+
+### 5.1.1 Illumina
+
+#### Data
+
+##### Sample files
+
+###### Full set
+
+Create file for all samples in bash
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/
+
+for i in *fastq; do echo $i; done > ./../../../01_run4GTscore/ds10x_ill_fullSet_sampleFiles.txt
+```
+
+Load into R
+
+```{r}
+sf_fullSet <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_sampleFiles.txt")
+```
+
+###### Species subsets
+
+Use md file to create sample file species subsets. Note that we're
+including the negative controls in both species subsets
+
+```{r}
+# Create subsets
+lwed <- filter(md_illONT_samplesAll_ds, is.na(species) | !species == "SIMP")
+simp <- filter(md_illONT_samplesAll_ds, is.na(species) | !species == "LWED")
+
+sf_lwed <- sf_fullSet %>%
+  filter(V1 %in% lwed$sampleFile_ill.ds)
+
+sf_simp <- sf_fullSet %>%
+  filter(V1 %in% simp$sampleFile_ill.ds)
+```
+
+```{r}
+# Export sample files
+write.table(sf_lwed, file = "./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_simp, file = "./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+##### Primer-probe file
+
+```{r}
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
+```
+
+#### Read counts
+
+**NOTE** that I've modified the amplicon read counter script slightly so that the matched and unmatched reads will be output to subdirectories within the specified outDir
+
+```{r count reads for amplicons, eval=FALSE}
+# All samples, all loci
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_sampleFiles.txt --inDir ./downsamplingTests/tamRun4/00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/ --outDir ./downsamplingTests/tamRun4/01_run4GTscore/ --printMatched --printDiscarded --prefix ds10x_ill_fullSet_")
+
+# LWED
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_lwed_sampleFiles.txt --inDir ./downsamplingTests/tamRun4/00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/ --outDir ./downsamplingTests/tamRun4/01_run4GTscore/ --printMatched --printDiscarded --prefix ds10x_ill_lwed_")
+
+# SIMP
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_simp_sampleFiles.txt --inDir ./downsamplingTests/tamRun4/00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/ --outDir ./downsamplingTests/tamRun4/01_run4GTscore/ --printMatched --printDiscarded --prefix ds10x_ill_simp_")
+```
+
+#### Genotyping
+
+##### Recode <10x reads
+
+Step 1: Recode loci with \<10x coverage in the full set of allele read counts
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts_original <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_AlleleReads_singleSNPs.txt")
+
+read.delim("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+# Create read counts copy for 10x coverage
+readCounts_10x <- readCounts_original
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum_10x <- replace(readCounts_10x, TRUE, lapply(readCounts_10x, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts_10x[readCounts_sum_10x < 10] <- "0,0"
+```
+
+Step 2: Create lwed & simp subsets & create new AlleleReads_singleSNPs files
+
+```{r}
+# Reformat lists with . vs. -
+lwed_point <- lwed %>%
+#  mutate(sampleID = gsub("-", "\\.", sampleID)) %>%
+  select(sampleID) %>%
+  pull()
+simp_point <- simp %>%
+#  mutate(sampleID = gsub("-", "\\.", sampleID)) %>%
+  select(sampleID) %>%
+  pull()
+
+# Get lists of lwed- and simp-specific loci
+lwed_loci <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_lwed_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+simp_loci <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_simp_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+
+readCounts_lwed_10x <- readCounts_10x %>%
+  select(any_of(lwed_point)) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% lwed_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+readCounts_simp_10x <- readCounts_10x %>%
+  select(any_of(simp_point)) %>%
+  rownames_to_column("Locus") %>%
+  filter(Locus %in% simp_loci$Locus_ID) %>%
+  column_to_rownames("Locus")
+  
+# Export new AlleleReads_singleSNPs files
+write.table(readCounts_10x,"./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_lwed_10x,"./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_lwed_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+write.table(readCounts_simp_10x,"./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_simp_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+```
+
+##### Genotype
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads <- read.delim("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP,"./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+### 5.1.2 Nanopore
+
+#### Data
+
+##### Sample files
+
+###### Full set
+
+Create file for all samples in bash
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/00_downsampledReads/01_nanopore/00_run4Interleaved_ds10x/
+
+for i in *fastq; do echo $i; done > ./../../../01_run4GTscore/ds10x_ont_fullSet_sampleFiles.txt
+```
+
+Load into R
+
+```{r}
+sf_fullSet <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_fullSet_sampleFiles.txt")
+```
+
+###### Species subsets
+
+Use md file to create sample file species subsets. Note that we're
+including the negative controls in both species subsets
+
+```{r}
+# Create subsets
+lwed <- filter(md_illONT_samplesAll_ds, is.na(species) | !species == "SIMP")
+simp <- filter(md_illONT_samplesAll_ds, is.na(species) | !species == "LWED")
+
+sf_lwed <- sf_fullSet %>%
+  filter(V1 %in% lwed$sampleFile_ont.ds)
+
+sf_simp <- sf_fullSet %>%
+  filter(V1 %in% simp$sampleFile_ont.ds)
+```
+
+```{r}
+# Export sample files
+write.table(sf_lwed, file = "./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_simp, file = "./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+##### Primer-probe file
+
+```{r}
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
+```
+
+#### Read counts
+
+```{r count reads for amplicons, eval=FALSE}
+# All samples, all loci
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_fullSet_sampleFiles.txt --inDir ./downsamplingTests/tamRun4/00_downsampledReads/01_nanopore/00_run4Interleaved_ds10x/ --outDir ./downsamplingTests/tamRun4/01_run4GTscore/ --prefix ds10x_ont_fullSet_")
+
+# LWED
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_lwed_sampleFiles.txt --inDir ./downsamplingTests/tamRun4/00_downsampledReads/01_nanopore/00_run4Interleaved_ds10x/ --outDir ./downsamplingTests/tamRun4/01_run4GTscore/ --prefix ds10x_ont_lwed_")
+
+# SIMP
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_simp_sampleFiles.txt --inDir ./downsamplingTests/tamRun4/00_downsampledReads/01_nanopore/00_run4Interleaved_ds10x/ --outDir ./downsamplingTests/tamRun4/01_run4GTscore/ --prefix ds10x_ont_simp_")
+```
+
+#### Genotyping
+
+##### Full set
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads <- read.delim("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP,"./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_fullSet_polyGenResults_singleSNP.txt",quote=FALSE,sep="\t")
+```
+
+## 4.2 GTseq pipeline
+
+### 4.2.1 Illumina
+
+#### Prep
+
+##### GTseq_HashSeqs.pl
+
+First use the GTseq_HashSeqs.pl script on plate .fastq files. This
+script collects and counts unique reads within the fastq file and
+reduces the compute time for the GTseq_SeqTest.pl script.
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/
+
+for i in ./00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/tamRun4*; do perl ./../../GTseq_sourceScripts/GTseq_HashSeqs.pl $i > ./02_run4GTseq/hashSeqs/$(basename "${i/.fastq/.hash}"); done
+```
+
+##### GTseq_SeqTest.pl
+
+Next use the GTseq_SeqTest.pl script by supplying a tab delimited text
+file containing loci name, forward primer sequence, allele 1 probe, and
+allele 2 probe. The script will output a file for each sample with the locus name, count of forward-primer reads, count of probe reads, and count of primer-probe reads.
+
+Note: The script checks for both the supplied sequence and the reverse
+complement of the in-silico probes.
+
+###### Create loci info file
+
+I already created the GTseq-formatted version of the primer-probe file
+in tamRun5_gtseqPipeline.Rmd; I copied it into the 04_run4GTseq_ill
+directory to make things easier. The file can be viewed below:
+
+```{r, eval = F}
+pp_gtseq_seqTest <- read.table("./04_tamRun4/00_illumina/04_run4GTseq_ill/primerProbe_snpPanel.v3_gtseq.txt", sep = "\t", header = F)
+```
+
+###### GTseq_SeqTest.pl
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/02_run4GTseq/
+
+for i in ./hashSeqs/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_SeqTest.pl primerProbe_snpPanel.v3_gtseq.txt $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
+```
+
+#### Genotyping
+
+The original GTseq_Pipeline.txt file says that we can use either 1)
+GTseq_Genotyper.pl script or 2) GTseq_Genotyper_v2.pl script, which
+allows for count corrections for loci which amplify. However, there's
+also a GTseq_Genotyper_v3.pl script, which I'm opting to use here.
+
+Version 3 appears to be the same as Version 2, but includes fuzzy
+matching for detection of possible null alleles. Additional notes
+provided for Version 3 are as follows:
+
+-   Requires the String::Approx perl extension.
+-   Possible null alleles can be summarized using the
+    GTseq_ErrorReport_v3.pl script. Keep in mind that some loci with
+    flagged null alleles could be the result of co-amplification of a
+    paralogous locus.
+-   In some cases the reported fuzzy match sequence doesn't match either
+    probe sequence at all. This happens when the location of the fuzzy
+    match doesn't match the position of the exact probe match on the
+    amplicon. This probably means that there is amplification of a PSV
+    with these primers.
+
+##### Create loci info file
+
+The genotyper script requires a slightly different loci info file than
+for the seqTest script. This loci information file needs to contain
+locus names, allele names, and in-silico probe sequences in .csv format.
+
+Note that versions 2 and 3 of the genotyper script allow for correction
+values for each locus; these are optional and will be zero for all loci
+of not used.
+
+I created this file in tamRun5_gtseqPipline.Rmd as well and copied it
+into the 04_run4GTseq_ill directory; it can be viewed below:
+
+```{r, eval = F}
+pp_gtseq_genotyper <- read.table("./04_tamRun4/00_illumina/04_run4GTseq_ill/locusInfo_snpPanel.v3_gtseq.csv", sep = ",", header = F)
+```
+
+##### GTseq_Genotyper_v3.pl
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/02_run4GTseq/
+
+for i in ./../00_downsampledReads/00_illumina/00_run4Interleaved_ds10x/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_Genotyper_v3.pl locusInfo_snpPanel.v3_gtseq.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
+```
+
+Output files contain a header line with summary information followed by
+locus specific data. Immediately below the header are a set of locus
+specific metrics, with (unlabeled) columns for the following:
+
+-   LocusName
+-   Allele1_counts
+-   Allele2_counts
+-   A1/A2-ratio
+-   Genotype
+-   Genotype_Class
+-   A1_correction value
+-   A2_correction value
+-   On_target reads
+-   Locus OT_percentage
+-   Locus On-target reads as percentage of total on-target reads
+
+##### Compile genos
+
+This script collects genotypes for all individuals at all loci and
+provides summary statistics for each individual.
+
+Note that the GTseq_GenoCompile version 3 utilizes the expanded output
+from the GTseq_Genotyper_v3 script to gather summary data and does not
+require the individual fastq files. Further notes below:
+
+-   Includes IFI score (Individual Fuzziness Index) as an indication of
+    possible contamination of DNA from another individual.
+
+-   For optional output formats use arguments. N for numeric genotypes
+    or C for allele counts. Defaults to SNP genotypes.
+
+-   Optional filtered output requires 2 argument values. Genotype output
+    type and a genotyping threshold [S,N, or C] [90]
+
+    -   example: \$ GTseq_GenoCompile_v3.pl S 90 (outputs SNP genotypes
+        for individual .genos files with 90% or higher genotyping
+        percentage); genotypes for individuals with less than the
+        threshold genotyping percentage are converted to "00".
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/02_run4GTseq/genos/
+
+perl ./../../../../GTseq_sourceScripts/GTseq_GenoCompile_v3.pl > ds10x_ill_tamRun4_compiledGenos_gtseq.csv
+```
+
+### 4.2.2 Nanopore
+
+
+
+# 6 Analyses
+
+## 6.1 Data
+
+### Allele reads
+
+There are 6 primer-only reads (confirmed in both sample & locus read counts) and 46 off-target reads (according to sample read counts; info not available for loci). Given that my downsampling script didn't take the SNP position into account, I assume these 52 reads must have primer/probe sequences that present, but in the wrong order. 
+
+...I think this means I need to update and re-run the downsampling script
+
+```{r}
+max(nchar(pp_fullSet$Probe1))
+```
+
+
+
+
+```{r}
+readCounts_byLocus_ill_gtscore_ds10x <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    Primer.Only.Reads = Primer.Reads - Primer.Probe.Reads
+  )
+
+readCounts_bySample_ill_gtscore_ds10x <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_GTscore_individualSummary.txt", header = T, sep = "\t")
+
+sum(readCounts_bySample_ill_gtscore_ds10x$Off.target.Reads)
+```
+
+### Genos
+
+Negative controls are removed from all genotype results to simplify additional analyses. 
+
+#### Illumina
+
+**allReads**
+
+Original dataframes
+
+```{r}
+# gtscore
+genos_ill_gtscore_allReads <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                )) %>%
+  # remove negs
+  select(!md_illONT_samplesNegs_ds$sampleID_ill)
+
+# gtseq
+genos_ill_gtseq_allReads <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                )) %>%
+  # remove negs
+  select(!md_illONT_samplesNegs_ds$sampleID_ill)
+```
+
+Long dataframes
+
+```{r}
+# gtscore
+genos_ill_gtscore_allReads_l <- genos_ill_gtscore_allReads %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ill.gtscore.allReads") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ill", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  select(c("sampleID_unique", "locus", "geno_ill.gtscore.allReads"))
+
+# gtseq
+genos_ill_gtseq_allReads_l <- genos_ill_gtseq_allReads %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ill.gtseq.allReads") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ill", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  select(c("sampleID_unique", "locus", "geno_ill.gtseq.allReads"))
+```
+
+**ds10x**
+
+Original dataframes
+
+```{r}
+# gtscore
+genos_ill_gtscore_ds10x <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ill_fullSet_polyGenResults_singleSNP.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                )) %>%
+  # remove negs
+  select(!md_illONT_samplesNegs_ds$sampleID_ill.ds)
+
+# gtseq
+genos_ill_gtseq_ds10x <- 
+  # need read_csv vs. read.csv here
+  read_csv("./downsamplingTests/tamRun4/02_run4GTseq/genos/ds10x_ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  column_to_rownames("Sample") %>%
+  select(primerList.v3$locus) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                )) %>%
+  # remove negs
+  select(!md_illONT_samplesNegs_ds$sampleID_ill.ds)
+```
+
+Long dataframes
+
+```{r}
+# gtscore
+genos_ill_gtscore_ds10x_l <- genos_ill_gtscore_ds10x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ill.gtscore.ds10x") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ill.ds", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ill.ds") %>%
+  select(c("sampleID_unique", "locus", "geno_ill.gtscore.ds10x"))
+
+# gtseq
+genos_ill_gtseq_ds10x_l <- genos_ill_gtseq_ds10x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ill.gtseq.ds10x") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ill.ds", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ill.ds") %>%
+  select(c("sampleID_unique", "locus", "geno_ill.gtseq.ds10x"))
+```
+
+#### Nanopore
+
+**allReads**
+
+Original dataframes
+
+```{r}
+# gtscore
+genos_ont_gtscore_allReads <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+# gtseq
+genos_ont_gtseq_allReads <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/01_nanopore/04_run4GTseq_ont/genos/ont_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+```
+
+Long dataframes
+
+```{r}
+# gtscore
+genos_ont_gtscore_allReads_l <- genos_ont_gtscore_allReads %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ont.gtscore.allReads") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ont", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  select(c("sampleID_unique", "locus", "geno_ont.gtscore.allReads"))
+
+# gtseq
+genos_ont_gtseq_allReads_l <- genos_ont_gtseq_allReads %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ont.gtseq.allReads") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ont", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  select(c("sampleID_unique", "locus", "geno_ont.gtseq.allReads"))
+```
+
+**ds10x**
+
+Original dataframes
+
+```{r}
+# gtscore
+genos_ont_gtscore_ds10x <- read.table("./downsamplingTests/tamRun4/01_run4GTscore/ds10x_ont_fullSet_polyGenResults_singleSNP.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+# gtseq
+genos_ont_gtseq_ds10x <- 
+  # need read_csv vs. read.csv here
+  read_csv("./downsamplingTests/tamRun4/02_run4GTseq/genos/ds10x_ont_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  column_to_rownames("Sample") %>%
+  select(primerList.v3$locus) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+```
+
+Long dataframes
+
+```{r}
+# gtscore
+genos_ont_gtscore_ds10x_l <- genos_ont_gtscore_ds10x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ont.gtscore.ds10x") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ont.ds", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ont.ds") %>%
+  select(c("sampleID_unique", "locus", "geno_ont.gtscore.ds10x"))
+
+# gtseq
+genos_ont_gtseq_ds10x_l <- genos_ont_gtseq_ds10x %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno_ont.gtseq.ds10x") %>%
+  merge(., md_illONT_samplesAll_ds[, c("sampleID_ont.ds", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ont.ds") %>%
+  select(c("sampleID_unique", "locus", "geno_ont.gtseq.ds10x"))
+```
+
+## 6.2 Read counts
+
+```{r}
+
+```
+
+## 6.2 Geno success
+
+dual loci only; no negs
+
+```{r}
+genoSuccess_bySample_ds_ill_gtscore_samplesNoNegs_lociDual <- genos_ill_gtscore_ds_samplesAll_lociAll %>%
+  select(!md_ds_illONT_samplesNegs$sampleID_ill) %>%
+  t() %>%
+  as.data.frame() %>%
+  select(primerList.v3_lociDual$locus) %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  ) %>%
+  select(totalGenos) %>%
+  mutate(
+    propSuccess = round(totalGenos/140, 2),
+    seqType = "Illumina"
+  )
+
+genoSuccess_bySample_ill_gtseq_samplesNoNegs_lociDual <- genos_ill_gtseq_ds_samplesAll_lociAll %>%
+  select(!md_ds_illONT_samplesNegs$sampleID_ill) %>%
+  t() %>%
+  as.data.frame() %>%
+  select(primerList.v3_lociDual$locus) %>%
+  mutate(
+    totalGenos = rowSums(!is.na(.))
+  ) %>%
+  select(totalGenos) %>%
+  mutate(
+    propSuccess = round(totalGenos/140, 2),
+    seqType = "Illumina"
+  )
+```
+
+## 5.3 Geno consistency
+
+### Comparison dataframes
+
+**allReads vs. ds10x**
+
+```{r}
+# allReads vs. ds10x
+genoCompare_ill_gtscore_allReads.ds10x <- merge(genos_ill_gtscore_allReads_l, genos_ill_gtscore_ds10x_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(geno_ill.gtscore.allReads) &  !is.na(geno_ill.gtscore.ds10x) ~ "NA_allReads",
+      !is.na(geno_ill.gtscore.allReads) &  is.na(geno_ill.gtscore.ds10x) ~ "NA_ds10x",
+      is.na(geno_ill.gtscore.ds10x) &  is.na(geno_ill.gtscore.allReads) ~ "NA_both",
+      geno_ill.gtscore.allReads == geno_ill.gtscore.ds10x ~ "yes",
+      geno_ill.gtscore.allReads != geno_ill.gtscore.ds10x ~ "no"
+      )
+    )
+
+genoCompare_ill_gtseq_allReads.ds10x <- merge(genos_ill_gtseq_allReads_l, genos_ill_gtseq_ds10x_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(geno_ill.gtseq.allReads) &  !is.na(geno_ill.gtseq.ds10x) ~ "NA_allReads",
+      !is.na(geno_ill.gtseq.allReads) &  is.na(geno_ill.gtseq.ds10x) ~ "NA_ds10x",
+      is.na(geno_ill.gtseq.allReads) &  is.na(geno_ill.gtseq.ds10x) ~ "NA_both",
+      geno_ill.gtseq.allReads == geno_ill.gtseq.ds10x ~ "yes",
+      geno_ill.gtseq.allReads != geno_ill.gtseq.ds10x ~ "no"
+      )
+    )
+```
+
+**gtscore vs. gtseq**
+
+```{r}
+# gtscore vs. gtseq
+genoCompare_ill_gtscore.gtseq_allReads <- merge(genos_ill_gtscore_allReads_l, genos_ill_gtseq_allReads_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(geno_ill.gtscore.allReads) &  !is.na(geno_ill.gtseq.allReads) ~ "NA_gtscore",
+      !is.na(geno_ill.gtscore.allReads) &  is.na(geno_ill.gtseq.allReads) ~ "NA_gtseq",
+      is.na(geno_ill.gtscore.allReads) &  is.na(geno_ill.gtseq.allReads) ~ "NA_both",
+      geno_ill.gtscore.allReads == geno_ill.gtseq.allReads ~ "yes",
+      geno_ill.gtscore.allReads != geno_ill.gtseq.allReads ~ "no"
+      )
+    )
+
+genoCompare_ill_gtscore.gtseq_ds10x <- merge(genos_ill_gtscore_ds10x_l, genos_ill_gtseq_ds10x_l, by = c("sampleID_unique", "locus")) %>%
+  mutate(
+    match = case_when(
+      is.na(geno_ill.gtscore.ds10x) &  !is.na(geno_ill.gtseq.ds10x) ~ "NA_gtscore",
+      !is.na(geno_ill.gtscore.ds10x) &  is.na(geno_ill.gtseq.ds10x) ~ "NA_gtseq",
+      is.na(geno_ill.gtscore.ds10x) &  is.na(geno_ill.gtseq.ds10x) ~ "NA_both",
+      geno_ill.gtscore.ds10x == geno_ill.gtseq.ds10x ~ "yes",
+      geno_ill.gtscore.ds10x != geno_ill.gtseq.ds10x ~ "no"
+      )
+    )
+```
+
+### Summary tables
+
+```{r}
+# allReads vs. ds10x
+table_genoCompare_ill_gtscore_allReads.ds10x <- table(genoCompare_ill_gtscore_allReads.ds10x$match) %>%
+  as.data.frame() %>%
+  dplyr::rename("gtscore" = "Freq") %>%
+  column_to_rownames("Var1") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("pipeline")
+
+table_genoCompare_ill_gtseq_allReads.ds10x <- table(genoCompare_ill_gtseq_allReads.ds10x$match) %>%
+  as.data.frame() %>%
+  dplyr::rename("gtseq" = "Freq") %>%
+  column_to_rownames("Var1") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("pipeline")
+
+# gtscore vs. gtseq
+table_genoCompare_ill_gtscore.gtseq_allReads <- table(genoCompare_ill_gtscore.gtseq_allReads$match) %>%
+  as.data.frame() %>%
+  dplyr::rename("gtscore" = "Freq") %>%
+  column_to_rownames("Var1") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("pipeline")
+
+table_genoCompare_ill_gtscore.gtseq_ds10x <- table(genoCompare_ill_gtscore.gtseq_ds10x$match) %>%
+  as.data.frame() %>%
+  dplyr::rename("gtseq" = "Freq") %>%
+  column_to_rownames("Var1") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("pipeline")
+
+# summary table
+table_genoCompare_ill_gtscore.gtseq_allReads.ds10x <- rbind(table_genoCompare_ill_gtscore_allReads.ds10x, table_genoCompare_ill_gtseq_allReads.ds10x) %>%
+  dplyr::rename("totalMatch" = "yes",
+                "totalMismatch" = "no") %>%
+  mutate(
+    totalCommon = totalMatch + totalMismatch,
+    propMatch = totalMatch/totalCommon
+  ) %>%
+  select(c(pipeline, propMatch, totalCommon, totalMatch, totalMismatch, NA_both, NA_allReads, NA_ds10x))
+```
+
+
+# Seq depth
+
+## Packages
+
+```{r}
+source("http://bioconductor.org/biocLite.R")
+BiocManager::install(c("limma", "edgeR", "DESeq2", "DEXSeq", "pasilla"))
+
+install.packages("devtools")
+library(devtools)
+install_github("jdstorey/qvalue")
+install_github("StoreyLab/subSeq", build_vignettes = TRUE)
+```
+
+```{r}
+library(subSeq)
+vignette("subSeq")
+data(hammer)
+View(hammer)
+
+hammer.counts = Biobase::exprs(hammer)[, 1:4]
+hammer.design = Biobase::pData(hammer)[1:4, ]
+hammer.counts = hammer.counts[rowSums(hammer.counts) >=
+5, ]
+head(hammer.counts)
+
+proportions = 10^seq(-2, 0, 0.5)
+proportions
+
+subsamples = subsample(hammer.counts, proportions,
+method = c("edgeR", "voomLimma"), treatment = hammer.design$protocol)
+```
+
+# Coverage maps
+
+## GTscore.10x Illumina
+
+create long dataframes of genotypes & allele reads create scatterplot of
+number of allele reads for allele1 vs. allele2
+
+### Genotypes
+
+```{r}
+# Primer-probe file
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T) %>%
+  dplyr::rename("allele1" = "Allele1",
+                "allele2" = "Allele2")
+
+# Genotypes
+genos_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # recode 0 as NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                ))
+
+genos_ill_gtscore_l <- genos_ill_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno")
+```
+
+### Allele reads
+
+```{r}
+# Allele reads
+readCounts_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+readCounts_ill_gtscore_l <- readCounts_ill_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "readCounts")
+```
+
+### Full file
+
+```{r}
+geno.readCounts_ill_gtscore <- genos_ill_gtscore_l %>%
+  merge(., readCounts_ill_gtscore_l, by = c("sampleID", "locus")) %>%
+  separate(readCounts, c("readCounts1", "readCounts2")) %>%
+  merge(., pp_fullSet[, c("Locus", "allele1", "allele2")], by.x = "locus", by.y = "Locus") %>%
+  mutate(
+    readCounts1 = as.numeric(readCounts1),
+    readCounts2 = as.numeric(readCounts2),
+    alleleRatio1 = round(readCounts1/(readCounts1 + readCounts2), 2),
+    alleleRatio2 = round(readCounts2/(readCounts1 + readCounts2), 2)
+  ) %>% 
+  mutate(
+    pipeline = "gtscore"
+  ) %>%
+  relocate(pipeline)
+
+geno.readCounts_ill_gtscore_AA <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,A")
+geno.readCounts_ill_gtscore_AC <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,C")
+geno.readCounts_ill_gtscore_AG <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,G")
+geno.readCounts_ill_gtscore_AT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "A,T")
+
+geno.readCounts_ill_gtscore_CC <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "C,C")
+geno.readCounts_ill_gtscore_CG <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "C,G")
+geno.readCounts_ill_gtscore_CT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "C,T")
+
+geno.readCounts_ill_gtscore_GG <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "G,G")
+geno.readCounts_ill_gtscore_GT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "G,T")
+
+geno.readCounts_ill_gtscore_TT <- geno.readCounts_ill_gtscore %>%
+  filter(geno == "T,T")
+```
+
+```{r}
+ggplot(geno.readCounts_ill_gtscore_AA, aes(x = alleleRatio1, y = alleleRatio2)) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(0, 1, 0.025)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.025))
+
+ggplot(geno.readCounts_ill_gtscore_AC, aes(x = alleleRatio1, y = alleleRatio2)) +
+  geom_point()
+
+geno.readCounts_ill_gtscore %>%
+  na.omit() %>%
+ggplot(aes(y = alleleRatio1, group = geno)) +
+  geom_boxplot(aes(col = geno)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.025)) +
+  theme_bw()
+```
+
+## GTseq Illumina
+
+create long dataframes of genotypes & allele reads create scatterplot of
+number of allele reads for allele1 vs. allele2
+
+### Genotypes
+
+```{r}
+# Genotypes
+genos_ill_gtseq <- 
+  # need read_csv vs. read.csv here
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2)))) %>%
+  # recode 0,0 as NA
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+genos_ill_gtseq_l <- genos_ill_gtseq %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "geno")
+```
+
+### Allele reads
+
+GTseq doesn't automatically output allele reads in an easily usable
+format - instead, we need to extract this data from the ".genos" files
+as follows:
+
+1.  Convert .genos files to csv files
+2.  Import as one dataframe
+3.  Subset relevant columns and reformat
+
+**Convert .genos to .csv in bash**
+
+```{bash, eval = FALSE}
+# first copied all .genos files to genos_csv
+# then cd to genos_csv and run the following:
+
+for f in *.genos; do
+    g="${f%.genos}.csv"
+    mv "${f}" "${g}"
+done
+```
+
+**Import all csv files as one dataframe & reformat**
+
+```{r}
+fileNames <- dir("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/genos_csv", full.names = T)
+
+readCounts_gtseq.list <- lapply(fileNames, function(file.name) {
+  df <- read.csv(file.name, skip = 1, header = F)
+  df$file.name <- file.name
+  return(df)
+  })
+
+readCounts_ill_gtseq <- rlist::list.rbind(readCounts_gtseq.list) %>%
+  rename("locus" = "V1",
+         "allele1_counts" = "V2",
+         "allele2_counts" = "V3",
+         "a1.a2_ratio" = "V4",
+         "geno" = "V5",
+         "genoClass" = "V6",
+         "a1_correctionValue" = "V7",
+         "a2_corectionValue" = "V8",
+         "onTargetReads" = "V9",
+         "locus_otProp.readTotal" = "V10",
+         "locus_otProp.otTotal" = "V11",
+         "sampleID" = "file.name") %>%
+  mutate(
+    readCounts = str_c(sub(".*=", "", allele1_counts), ",", sub(".*=", "", allele2_counts)),
+    sampleID = sub("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/genos_csv/", "", sampleID),
+    sampleID = sub(".csv", "", sampleID),
+    sampleID = gsub("-", "\\.", sampleID)
+    ) %>%
+  select(c("sampleID", "locus", "readCounts")) %>%
+  pivot_wider(names_from = sampleID, values_from = readCounts) %>%
+  column_to_rownames("locus") %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+
+readCounts_ill_gtseq_l <- readCounts_ill_gtseq %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "readCounts")
+```
+
+Full file
+
+```{r}
+geno.readCounts_ill_gtseq <- genos_ill_gtseq_l %>%
+  merge(., readCounts_ill_gtseq_l, by = c("sampleID", "locus")) %>%
+  separate(readCounts, c("readCounts1", "readCounts2")) %>%
+  merge(., pp_fullSet[, c("Locus", "allele1", "allele2")], by.x = "locus", by.y = "Locus") %>%
+  mutate(
+    readCounts1 = as.numeric(readCounts1),
+    readCounts2 = as.numeric(readCounts2),
+    alleleRatio1 = round(readCounts1/(readCounts1 + readCounts2), 2),
+    alleleRatio2 = round(readCounts2/(readCounts1 + readCounts2), 2)
+  ) %>%
+  mutate(
+    pipeline = "gtseq"
+  ) %>%
+  relocate(pipeline)
+
+geno.readCounts_ill_gtseq_AA <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,A")
+geno.readCounts_ill_gtseq_AC <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,C")
+geno.readCounts_ill_gtseq_AG <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,G")
+geno.readCounts_ill_gtseq_AT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "A,T")
+
+geno.readCounts_ill_gtseq_CC <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "C,C")
+geno.readCounts_ill_gtseq_CG <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "C,G")
+geno.readCounts_ill_gtseq_CT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "C,T")
+
+geno.readCounts_ill_gtseq_GG <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "G,G")
+geno.readCounts_ill_gtseq_GT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "G,T")
+
+geno.readCounts_ill_gtseq_TT <- geno.readCounts_ill_gtseq %>%
+  filter(geno == "T,T")
+```
+
+```{r}
+geno.readCounts_ill_gtseq %>%
+  na.omit() %>%
+ggplot(aes(y = alleleRatio1, group = geno)) +
+  geom_boxplot(aes(col = geno)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.025)) +
+  theme_bw()
+```
+
+## GTscore vs. GTseq
+
+```{r}
+geno.readCounts_ill_gtseqScore <- rbind(geno.readCounts_ill_gtscore, geno.readCounts_ill_gtseq)
+
+# facet plot
+geno.readCounts_ill_gtseqScore %>%
+  na.omit() %>%
+ggplot(aes(x = geno, y = alleleRatio1, fill = pipeline)) +
+     geom_boxplot() +
+     theme(legend.position = "none") +
+  theme_bw() +
+     facet_wrap(~geno, scale = "free_x")
+
+# all together
+geno.readCounts_ill_gtseqScore %>%
+  na.omit() %>%
+ggplot(aes(x = geno, y = alleleRatio1, fill = pipeline)) +
+  geom_boxplot() +
+  scale_y_continuous(breaks = seq(0, 1, 0.025)) +
+  theme_linedraw()
+```
+
+# Downsampling
+
+```{r}
+
+```
+
+```{r}
+system2("perl",
+        args = "./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./gtscore_vs_gtseq/downsampling/ill_ds_sampleFiles.txt --inDir ./gtscore_vs_gtseq/downsampling/ds_interleaved --outDir ./gtscore_vs_gtseq/downsampling --prefix ill_ds_")
+```
+
+## AmpSeqR
+
+### Install package
+
+```{r}
+# install using devtools packages
+if (!require(AmpSeqR)) {
+  devtools::install_github("bahlolab/AmpSeqR")
+}
+```
+
+### Vignette testing
+
+```{r}
+library(AmpSeqR)
+
+# example data contains marker_info & sampel_manifest
+example_data <- get_ampseqr_example_data()
+head(example_data$marker_info)
+head(example_data$sample_manifest)
+
+# Data pre-processing
+reads_1 <- example_data$reads_1
+reads_2 <- example_data$reads_2
+sample_manifest <- example_data$sample_manifest
+marker_info <- example_data$marker_info
+
+# Create the analysis directory
+dir.create("./runs")
+run_dir <- "runs"
+
+# Demultiplex reads
+demultiplexed <- demultiplex_reads(sample_manifest = sample_manifest,
+                                   marker_info = marker_info,
+                                   reads_1 = reads_1,
+                                   reads_2 = reads_2,
+                                   output_dir = run_dir,
+                                   output_sub_dir = file.path (run_dir, 'demultiplex'))
+
+# Filter and trim reads
+flt_reads <- demultiplexed %>%
+  dada_filter(output_dir = run_dir,
+              output_sub_dir = file.path(run_dir, 'filter'))
+View(flt_reads)
+
+# Downsampling reads
+sub_reads <- flt_reads %>%
+  downsample_reads(output_dir = run_dir,
+                   output_sub_dir = file.path(run_dir, 'downsample'),
+                   count_col = 'n_out',
+                   n_sample = 10)
+View(sub_reads)
+```
+
+### Data
+
+#### Demultiplexed RDS
+
+```{r}
+
+```
+
+#### Sample Files
+
+```{r}
+md_illONT_samplesAll <- read.csv("./04_tamRun4/illONT_tamRun4_metadata.csv")
+
+sampleSheet <- read.csv("./04_tamRun4/00_illumina/ill_tamRun4_30x3_sampleSheet.csv", skip = 17) %>%
+  dplyr::rename("sample_id" = "Sample_ID",
+                "barcode_fwd" = "index",
+                "barcode_rev" = "index2") %>%
+  mutate(sample_id = gsub("_", "\\.", sample_id)) %>%
+  select(c(sample_id, barcode_fwd, barcode_rev))
+
+sf_ampSeq <- sampleSheet %>%
+  merge(., md_illONT_samplesAll[, c("sampleID_ill", "sampleID_unique", "sampleType")], by.x = "sample_id", by.y = "sampleID_ill") %>%
+  dplyr::rename("sample" = "sampleID_unique",
+                "info" = "sampleType") %>%
+  select(c(sample_id, barcode_fwd, barcode_rev, sample, info)) %>%
+  as_tibble()
+
+write.table(sf_fullSet_ampSeq, file = "./downsampling/ampSeq/tamRun4_ill_fullSet_sampleFiles_ampSeq.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+#### Primer-probe files
+
+```{r}
+primerSet_v3_dualSpecies <- read.csv("./primers/03_lociChoices/primerSet_v3.csv") %>%
+  filter(!str_detect(primerName3, "LWED|SIMP"))
+
+primerSet_v3_dualSpecies_f <- primerSet_v3_dualSpecies %>%
+  filter(fwdRev == "fwd")
+
+primerSet_v3_dualSpecies_r <- primerSet_v3_dualSpecies %>%
+  filter(fwdRev == "rev")
+
+primerProbe_v3 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+tamRun4_marker_info <- primerSet_v3_dualSpecies_f %>%
+  select(c(primerName3, seqPrimer, chrom_name, start, stop)) %>%
+  merge(., primerSet_v3_dualSpecies_r[, c("primerName3", "seqPrimer")], by = "primerName3") %>%
+  mutate(seq = "tbd") %>%
+  dplyr::rename("marker_id" = "primerName3",
+                "primer_fwd" = "seqPrimer.x",
+                "primer_rev" = "seqPrimer.y",
+                "chrom" = "chrom_name",
+                "start" = "start",
+                "end" = "stop") %>%
+  select(c(marker_id, primer_fwd, primer_rev, seq, chrom, start, end))
+
+write.table(pp_dualSpecies_ampSeq, "./downsampling/ampSeq/primerProbeFile.v3_dualSpecies_ampSeq.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+### Downsample
+
+```{r}
+sub_reads <- flt_reads %>% 
+  downsample_reads(output_dir = run_dir,
+                   output_sub_dir = file.path(run_dir, 'downsample'),
+                   min_read_count = 1000,
+                   n_sample = 10000,
+                   count_col = 'n_out') 
+sub_reads
+```
+
+# COPY OF ORIGINAL PYTHON SEQIO CODE
+
+output_fastq_file = os.path.join(output_directory, file_name.replace('.fastq', f'_ds{reads_per_locus}x.fastq'))
+
+```{r}
+from Bio import SeqIO
+import random
+import os
+
+def subsample_reads(input_fastq, output_fastq, primer_probe_file, reads_per_locus):
+    # Load primer and probe sequences
+    primers_probes = {}
+    with open(primer_probe_file, 'r') as pp_file:
+        for line in pp_file:
+            if not line.startswith("Locus"):  # Skip header
+                locus, ploidy, snp_pos, allele1, allele2, probe1, probe2, primer = line.strip().split('\t')
+                primers_probes[locus] = (primer, probe1, probe2)
+
+    # Subsample reads for each locus
+    matching_reads = []
+    for locus, (primer_sequence, probe1_sequence, probe2_sequence) in primers_probes.items():
+        locus_reads = []
+        for record in SeqIO.parse(input_fastq, 'fastq'):
+            # Check if the primer sequence and either probe1 or probe2 are present
+            if primer_sequence in str(record.seq) and (probe1_sequence in str(record.seq) or probe2_sequence in str(record.seq)):
+                locus_reads.append(record)
+
+        # Subsample for the current locus
+        if len(locus_reads) > reads_per_locus:
+            locus_reads = random.sample(locus_reads, reads_per_locus)
+
+        matching_reads.extend(locus_reads)
+
+    # Subsample to n reads (if total matching reads exceed n_reads)
+    if len(matching_reads) > reads_per_locus * len(primers_probes):
+        matching_reads = random.sample(matching_reads, reads_per_locus * len(primers_probes))
+
+    # Write subsampled reads to output file
+    with open(output_fastq, 'w') as out_file:
+        SeqIO.write(matching_reads, out_file, 'fastq')
+
+def subsample_all_fastq_files(input_directory, output_directory, primer_probe_file, reads_per_locus):
+    # List all files in the input directory
+    file_list = [f for f in os.listdir(input_directory) if f.endswith('.fastq')]
+
+    # Process each FASTQ file
+    for file_name in file_list:
+        input_fastq_file = os.path.join(input_directory, file_name)
+        output_fastq_file = os.path.join(output_directory, file_name.replace('.fastq', '_ds10x.fastq'))
+        subsample_reads(input_fastq_file, output_fastq_file, primer_probe_file, reads_per_locus)
+
+# Example usage
+input_directory_path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/01_nanopore/02_run4Interleaved_ont/"
+output_directory_path = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/downsamplingTests/tamRun4/00_downsampledReads/01_nanopore/00_run4Interleaved_ds10x/"
+primer_probe_file = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt"
+n_reads = 10
+
+subsample_all_fastq_files(input_directory_path, output_directory_path, primer_probe_file, n_reads)
+
+```
+
+# IUPAC update (in progress)
+
+Started to update code to incorporate loci w/IUPAC codes, but I've been spending too much time on this and need to move on. Just in case I want to come back to it though, what I started on is below:
+
+## packages
+
+```{r}
+# Install and load necessary packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("Biostrings")
+BiocManager::install("ShortRead")
+
+library(Biostrings)
+library(ShortRead)
+```
+
+## data
+
+```{r}
+pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
+
+pp_noIUPAC <- pp_fullSet %>%
+  filter(!str_detect(Probe1, "\\["))
+
+pp_iupac <- pp_fullSet %>%
+  mutate_at(vars(Probe1, Probe2, Primer),
+            ~ str_replace_all(., c("\\[AG\\]"="R",
+                                   "\\[CT\\]"="Y",
+                                   "\\[GC\\]"="S",
+                                   "\\[AT\\]"="W",
+                                   "\\[GT\\]"="K",
+                                   "\\[AC\\]"="M",
+                                   "\\[ATGC\\]"="N")))
+
+write.table(pp_iupac, "./downsamplingTests/primerProbeFile.v3_iupac.txt", sep = "\t", row.names = F, quote = F)
+```
+
+## functions
+
+```{r}
+# Function to subsample reads
+subsample_reads <- function(input_fastq, output_fastq, primers_probes, reads_per_locus) {
+  matching_reads <- DNAStringSet()
+  
+  for (locus_row in primers_probes) {
+    locus <- locus_row$Locus
+    primer <- DNAString(locus_row$Primer)
+    probe1 <- DNAString(locus_row$Probe1)
+    probe2 <- DNAString(locus_row$Probe2)
+    
+    reads <- readDNAStringSet(input_fastq)
+    
+    # Check if the primer sequence and either probe1 or probe2 are present
+    matching_indices <- sapply(reads, function(read) {
+      read_seq <- toString(read)
+      primer_match <- any(grepl(primer, read_seq))
+      probe_match <- any(grepl(probe1, read_seq) | grepl(probe2, read_seq))
+      primer_match && probe_match
+    })
+    
+    matching_reads <- append(matching_reads, reads[matching_indices])
+  }
+  
+  # Subsample for the current locus
+  if (length(matching_reads) > reads_per_locus) {
+    matching_reads <- sample(matching_reads, reads_per_locus)
+  }
+  
+  writeXStringSet(matching_reads, output_fastq, format = "fastq")
+}
+```
+
+```{r}
+# Example usage
+input_directory <- "/path/to/your/input/directory/"
+output_directory <- "/path/to/your/output/directory/"
+primer_probe_file <- "/path/to/your/primerProbeFile.txt"
+reads_per_locus <- 10
+
+# Load primer and probe sequences
+primers_probes <- load_primers_probes(primer_probe_file)
+
+# Process each FastQ file
+file_list <- list.files(input_directory, pattern = "\\.fastq$", full.names = TRUE)
+for (input_fastq in file_list) {
+  output_fastq <- file.path(output_directory, paste0(gsub(".fastq$", "", basename(input_fastq)), "_ds", reads_per_locus, "x.fastq"))
+  subsample_reads(input_fastq, output_fastq, primers_probes, reads_per_locus)
+}
+```
+

@@ -1,0 +1,238 @@
+---
+title: "NGmerge"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+Trying out NGmerge for interleaving instead
+
+# 2 Packages
+
+## 2.1 NGmerge
+
+**NOTE** I haven't figured out how to make program executable from all locations so I did everything below and then just copied the "NGmerge" file into the NGmerge directory for now
+
+Download from GitHub [releases](https://github.com/harvardinformatics/NGmerge/releases), then do the following:
+
+```{bash}
+cd programs
+
+tar xzf NGmerge-0.3.tar.gz
+cd NGmerge-0.3.tar.gz
+make
+```
+
+## 2.2 R packages
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager", version = "3.16")
+BiocManager::install("Biostrings")
+
+source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+```
+
+# 3 Try it out
+
+## 3.1 Small test
+
+Usage: ./NGmerge {-1 <file> -2 <file> -o <file>}  [optional arguments]
+
+Required arguments:
+
+  -1  <file>       Input FASTQ file with reads from forward direction
+  -2  <file>       Input FASTQ file with reads from reverse direction
+  -o  <file>       Output FASTQ file(s):
+                   - in 'stitch' mode (def.), the file of merged reads
+                   - in 'adapter-removal' mode (-a), the output files
+                     will be <file>_1.fastq and <file>_2.fastq
+                     
+Alignment parameters:
+
+  -m  <int>        Minimum overlap of the paired-end reads (def. 20)
+  -p  <float>      Mismatches to allow in the overlapped region
+                     (a fraction of the overlap length; def. 0.10)
+  -a               Use 'adapter-removal' mode (also sets -d option)
+  -d               Option to check for dovetailing (with 3' overhangs)
+  -e  <int>        Minimum overlap of dovetailed alignments (def. 50)
+  -s               Option to produce shortest stitched read
+  
+I/O options:
+
+  -l  <file>       Log file for stitching results of each read pair
+  -f  <file>       FASTQ files for reads that failed stitching
+                     (output as <file>_1.fastq and <file>_2.fastq)
+  -c  <file>       Log file for dovetailed reads (adapter sequences)
+  -j  <file>       Log file for formatted alignments of merged reads
+  -z/-y            Option to gzip (-z) or not (-y) FASTQ output(s)
+  -i               Option to produce interleaved FASTQ output(s)
+  -w  <file>       Use given error profile for merged qual scores
+  -g               Use 'fastq-join' method for merged qual scores
+  -q  <int>        FASTQ quality offset (def. 33)
+  -u  <int>        Maximum input quality score (0-based; def. 40)
+  -n  <int>        Number of threads to use (def. 1)
+  -v               Option to print status updates/counts to stderr
+
+```{bash}
+# a little name-prep first
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/sandbox/NGmerge/00_run5Seqs
+
+# Trim filenames to make them more manageable
+for f in *R1_001.fastq.gz; do g="${f%%_S*}_R1.fastq.gz"; mv "${f}" "${g}"; done
+for f in *R2_001.fastq.gz; do g="${f%%_S*}_R2.fastq.gz"; mv "${f}" "${g}"; done
+```
+
+```{bash}
+# now run w/tamRun5-001
+cd ../
+
+./NGmerge  -1 ./00_run5Seqs/tamRun5-001_R1.fastq.gz  -2 ./00_run5Seqs/tamRun5-001_R2.fastq.gz  -o ./01_NGmergeOutput/00_seqs_stitched/tamRun5-001_stitched.fastq.gz -d -f ./01_NGmergeOutput/01_seqs_failed/tamRun5-001_fail -l ./01_NGmergeOutput/02_logs_stitchResults/tamRun5-001_log_stitchResults.txt -c ./01_NGmergeOutput/03_logs_dovetailedReads/tamRun5-001_log_dovetailedReads.txt -j ./01_NGmergeOutput/04_logs_stitchAlignments/tamRun5-001_log_stitchAlignments.txt
+```
+
+## 3.2 Make a loop
+
+(run in NGmerge directory)
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/sandbox/NGmerge
+
+for i in ./00_run5Seqs/*_R1.fastq.gz; do name=$(basename $i _R1.fastq.gz); ./NGmerge -1 00_run5Seqs/${name}_R1.fastq.gz -2 00_run5Seqs/${name}_R2.fastq.gz -o 01_NGmergeOutput/00_seqs_stitched/${name}_stitched.fastq.gz -d -f 01_NGmergeOutput/01_seqs_failed/${name}_fail -l 01_NGmergeOutput/02_logs_stitchResults/${name}_log_stitchResults.txt -c 01_NGmergeOutput/03_logs_dovetailedReads/${name}_log_dovetailedReads.txt -j 01_NGmergeOutput/04_logs_stitchAlignments/${name}_log_stitchAlignments.txt; done
+```
+
+NGmerge has an option for output to be fastq vs. fastq.gz but I didn't feel like experimenting w/it so just going to do gunzip
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/sandbox/NGmerge/01_NGmergeOutput/00_seqs_stitched
+
+# Extract all files
+gunzip -r .
+```
+
+# 4 GTscore test
+
+## 4.1 Sample files
+
+```{bash}
+for i in *fastq; do echo $i; done > ./../../02_run5GTscore/sampleFiles_fullSet.txt
+```
+
+## 4.2 AmpliconReadCounter.pl
+
+```{r}
+# All samples, all loci
+system2("perl",
+        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./sandbox/NGmerge/02_run5GTscore/sampleFiles_fullSet.txt --inDir ./sandbox/NGmerge/01_NGmergeOutput/00_seqs_stitched/ --outDir ./sandbox/NGmerge/02_run5GTscore/ --prefix fullSet_")
+```
+
+## 4.3 Genotyping
+
+```{r}
+#load locus table and 0x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./sandbox/NGmerge/02_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads_0x <- read.delim("./sandbox/NGmerge/02_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP_0x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_0x)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP_0x, "./sandbox/NGmerge/02_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+## 4.4 Locus summaries
+
+### singleSNP_summary
+
+```{r}
+#summarize single SNP results
+fullSet_singleSNP_summary_0x <- summarizeGTscore(fullSet_singleSNP_alleleReads_0x, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_0x)
+
+#write results
+write.table(fullSet_singleSNP_summary_0x, "./sandbox/NGmerge/02_run5GTscore/fullSet_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+### master_locusSummary
+
+```{r}
+fullSet_GTscore_locusSummary <- read.table("./sandbox/NGmerge/02_run5GTscore/fullSet_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+master_locusSum <- fullSet_singleSNP_summary_0x %>%
+  mutate(
+    Locus_ID = sub("_[^_]+$", "\\1", Locus_ID)
+  ) %>%
+  merge(., fullSet_GTscore_locusSummary, by.x = "Locus_ID", by.y = "Locus")
+
+write.csv(master_locusSum, "./sandbox/NGmerge/02_run5GTscore/summaryFiles/master_locusSummary_0x.txt")
+```
+
+## 4.5 Sample summaries
+
+### singleSNP_summary
+
+```{r}
+fullSet_singleSNP_sampleSummary_0x <- summarizeSamples(fullSet_polyGenResults_singleSNP_0x, fullSet_singleSNP_alleleReads_0x)
+
+write.csv(fullSet_singleSNP_sampleSummary_0x, "./sandbox/NGmerge/02_run5GTscore/fullSet_singleSNP_sampleSummary_0x.csv", row.names = F)
+```
+
+### master_sampleSummary
+
+```{r}
+fullSet_GTscore_sampleSummary_0x <- read.table("./sandbox/NGmerge/02_run5GTscore/fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    Sample = gsub("-", "\\.", Sample)
+  )
+
+master_sampleSum <- fullSet_singleSNP_sampleSummary_0x %>%
+  merge(., fullSet_GTscore_sampleSummary_0x, by.x = "sample", by.y = "Sample")
+
+write.csv(master_sampleSum, "./sandbox/NGmerge/02_run5GTscore/summaryFiles/master_sampleSummary.txt")
+```
+
+# 5 Compare GTscore results
+
+## 5.1 Locus performance
+
+quick reformat tamRun5 base results
+
+```{r}
+base_locusSum_singleSNP <- read.table("./05_tamRun5/03_run5GTscore/fullSet_singleSNP_summary_0x.txt", header = T, sep = "\t")
+
+base_locusSum_gtscore <- read.table("./05_tamRun5/03_run5GTscore/fullSet_GTscore_locusSummary.txt", header = T, sep = "\t")
+
+locusSum_0x_base <- base_locusSum_singleSNP %>%
+  mutate(
+    Locus_ID = sub("_[^_]+$", "\\1", Locus_ID)
+  ) %>%
+  merge(., base_locusSum_gtscore, by.x = "Locus_ID", by.y = "Locus")
+```
+
+Looks like NGmerge didn't make much of a difference... locus diff_genoSuccess (stitch - base) was -0.00412 and diff_ppProp (stitch - base) was 0.0145
+
+```{r}
+locusSum_0x_stitch <- master_locusSum
+
+locusCompare <- locusSum_0x_base %>%
+  select(Locus_ID, GenotypeRate, Primer.Probe.Proportion) %>%
+  dplyr::rename("genoSuccess_base" = "GenotypeRate",
+                "primerProbeProp_base" = "Primer.Probe.Proportion") %>%
+  merge(., locusSum_0x_stitch[, c("Locus_ID", "GenotypeRate", "Primer.Probe.Proportion")], by = "Locus_ID") %>%
+  dplyr::rename("genoSuccess_stitch" = "GenotypeRate",
+                "primerProbeProp_stitch" = "Primer.Probe.Proportion") %>%
+  mutate(
+    diff_genoSuccess = genoSuccess_stitch - genoSuccess_base,
+    diff_ppProp = primerProbeProp_stitch - primerProbeProp_base
+  )
+
+mean(locusCompare$diff_genoSuccess) # -0.004119318
+mean(locusCompare$diff_ppProp) # 0.01451923
+```
+
+## 5.2 Sample performance
