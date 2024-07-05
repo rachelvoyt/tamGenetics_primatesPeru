@@ -1,0 +1,196 @@
+---
+title: "run3Analyses"
+author: "Rachel Voyt"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+library(tidyverse)
+library(TidyMultiqc)
+library(HistDat)
+library(matrixStats)
+library(gsubfn)
+library(scales)
+library(kableExtra)
+```
+
+# Overview
+
+The purpose of this report is to delve into some of the more concerning results from tamRun3, specifically the two negative controls that have a lot of reads and genotypes.
+
+# Metadata
+
+Add metadata to duptest results
+
+```{r}
+# Set up metadata files for sample1 and sample2
+md <- read.csv("tamRun3_metadata.csv") %>%
+  mutate(species = str_replace(species, "SFUS", "LWED")) %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
+  unite(pcr1, pcr1Plate, pcr1Row, sep = "-", remove = T) %>%
+  unite(pcr1, pcr1, pcr1Col, sep = "", remove = T)
+
+md1 <- md %>%
+  setNames(paste0(names(.), '1'))
+
+md2 <- md %>%
+  setNames(paste0(names(.), '2'))
+
+# Append metadata
+duptest <- read.table("run3_polyGenResults_dupTest.txt", header = T) 
+duptest_md <- merge(duptest, md1, by.x = "Sample1", by.y = "sampleID1") %>%
+  merge(., md2, by.x = "Sample2", by.y = "sampleID2") %>%
+  select(c(Sample1, Sample2, 
+           index_combo1, index_combo2,
+           pcr11, pcr12,
+           animalID1, animalID2,
+           sampleType1, sampleType2,
+           species1, species2,
+           sex1, sex2,
+           captureDate1, captureDate2,
+           groupName1, groupName2,
+           matchedGenotypes, commonGenotypes, proportionMatch, proportionCommon))
+
+colnames(duptest_md)
+```
+
+
+# tamRun3_219 (Plate 5-C4; PCR1 (-))
+
+*   44% LWED genotype rate
+*   45% SIMP genotype rate
+*   bands for both pool 2 & 3 (score 3)
+
+Notes from Plate 5 PCR1:
+* made mastermix for Primer Pool 3 (MM P5B) first and transferred to columns 1-6; did this first bc we’re running really low on oPools and wanted to be sure I had enough for the full plate
+    * had enough opools to do 30 wells of fresh mastermix (columns 1-3, then first 6 wells of 5 ((missed column 4))); then used remaining mastermix from Plate 4 (stored in -20) + the 5 ul Primer Pool 3 (+ 50ul mastermix) for the other wells
+* then added 8 ul samples to columns 7-12
+* then transferred 4 ul sample from 7-12 to 1-6 with multichannel
+* and then transferred 6 ul mastermix P5A to 7-12
+
+This plate was entirely made up of manually extracted samples, which means I added them one by one. Note also that I had to trade out tamRun3_220 for it's second elution.
+
+Note that hair samples stop at #240; blood samples are 241 onward
+
+If 219 only matches blood samples, this suggests that instead of cross-contamination, I most likely loaded an actual sample in this well vs. a negative. To see if this is the case, I'm going to do the following:
+
+1. Subset duptest resutls from GTscore pipeline to matches with 219 only
+2. #219 has genotype success of 45% at the highest (LWED loci subset) - this is about 100 loci; so I'm going to keep only potential matches with at least 50 commonGenotypes 
+3. And from there, subset proportionMatched to everything above 50%
+
+```{r}
+duptest_219 <- duptest_md %>%
+  filter(Sample1 %in% "tamRun3.219") %>%
+  filter(commonGenotypes >= 50) %>%
+  filter(proportionMatch >= 0.5)
+```
+
+The only hair sample potential matches after filtering are #224, 237, 240
+*   237 (LWED F) & 240 (LWED M) are both from group CL3 sampled one year apart; makes sense that if 219 matches one it would match the other as well
+*   224 (LWED F) is trickier - sampled in 2013, group Royals
+
+Which loci have genotypes for 219?
+
+```{r}
+genos_fullSet <- read.table("fullSet_polyGenResults_singleSNP.txt", header = T)
+
+genos_219 <- genos_fullSet %>%
+  select(tamRun3.219) %>%
+  filter(!tamRun3.219 == "0")
+```
+
+We have 100 genotypes for 219 - note that for the 7 SPECIESID loci, all match with LWED loci. We got genotypes for 3 SEXID_SIMP loci, but none were informative - for the 3 genotyped general SEXID loci, all pointed to male. 
+
+Note that this sample is P5-C4 -- P5-B4 and D4 are both LWED males, and might be the most likely culprits here. C3 = LWED F, C5 = SIMP F
+
+What we can do next is look at their animalIDs and check their blood sample counterparts -- b/c of chimerism, this might not be completely helpful, though might be if we have homozygous genotypes.
+*   P5-B4 = 59 tamRun3_218 > blood = tamRun3_438
+*   P5-D4 = 5 tamRun3_220 > blood = tamRun3_344
+
+We have no blood genotypes for animalID 59, and 42% genotypes for animalID 5 - 0 genotypes for either hair sample. We can compare their genotypes manually to better understand what's happening:
+
+```{r}
+genos_219v344 <- genos_fullSet %>%
+  select(c(tamRun3.219, tamRun3.344)) %>%
+  filter(!tamRun3.219 == "0") %>%
+  filter(!tamRun3.344 == "0")
+
+write.csv(genos_219v344, "genos_219v344.csv")
+
+genos_219v264 <- genos_fullSet %>%
+  select(c(tamRun3.219, tamRun3.264)) %>%
+  filter(!tamRun3.219 == "0") %>%
+  filter(!tamRun3.264 == "0") %>%
+  filter(tamRun3.219 %in% c("A,A", "T,T", "C,C", "G,G")) %>%
+  filter(tamRun3.264 %in% c("A,A", "T,T", "C,C", "G,G"))
+```
+
+Surprise! These two samples share 71 common genotyped loci. Of these, their genotypes match at 50 loci. Of the 21 remaining that do NOT match, ALL are homozygous for the hair sample and heterozygous for the blood sample. 
+
+Next issue though -- 344 isn't the only sample with a high proportionMatch. All but three of these samples are blood though, and blood samples are expected to all be quite similar, so perhaps it's not that surprising that if it matches up well with one blood sample, it'll match up with a lot more. 
+
+
+# tamRun3_406
+
+* 67% genotypes SIMP
+* 68% genotypes LWED
+* no bands
+* part of plate 7, with indices added one by one
+
+```{r}
+genos_406 <- genos_fullSet %>%
+  select(tamRun3.406) %>%
+  filter(!tamRun3.406 == "0") # 157 genotypes
+```
+
+All SPECIESID = LWED
+All SEXID = MALE - but doesn't tell us a whole lot since blood is chimeric
+
+```{r}
+duptest_406 <- duptest_md %>%
+  filter(Sample1 %in% "tamRun3.406") %>%
+  filter(commonGenotypes >= 50) %>%
+  filter(proportionMatch >= 0.5)
+
+duptest_406$Sample2
+```
+
+```{r}
+genos_406others <- genos_fullSet %>%
+  select(c(tamRun3.406, tamRun3.407, tamRun3.408, tamRun3.409, tamRun3.412, tamRun3.414, tamRun3.415, tamRun3.420, tamRun3.422, tamRun3.423, tamRun3.428)) %>%
+  filter(!tamRun3.406 == "0")
+```
+
+
+# Function-making
+What we need then is a script to help sort this out, specifically...
+if geno1 = geno2, paste "MATCH"
+elseif geno1 is homozygous and geno2 is heterozygous paste "HET"
+else paste "NA"
+
+could make a function...
+inputs:
+* df with genotypes
+* df with sampleID and sampleType
+output:
+* each pair
+
+
+```{r}
+library(allelematch)
+
+data <- read.table("fullSet_polyGenResults_singleSNP_rubias.txt", header = T) %>%
+  select(!c(sample_type, repunit, collection))
+
+am <- amDataset(data, indexColumn = "indiv")
+amUniqueProfile(am, doPlot = T, guessOptimum = T)
+data("amExample1")
+View(amExample1)
+```
+

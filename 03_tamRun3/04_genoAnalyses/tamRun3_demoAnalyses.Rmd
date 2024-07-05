@@ -1,0 +1,137 @@
+---
+title: "tamRun3_demoAnalyses"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(allelematch)
+library(janitor)
+library(related) # (install from tar.gz file); pairwise relatedness
+```
+
+# 1 Overview
+
+This pipeline is for the analysis of demography in the tamarin populations from Los Amigos, Peru, using the genotypes acquired via GTscorePipeline_tamRun3.Rmd. 
+
+# 2 Data
+
+To avoid issues related to chimerism in blood samples, demographic analyses will use genotypes from hair samples only.
+
+## 2.1 Metadata
+
+```{r}
+md_tamRun3 <- read.csv("./../03_run3GTscore/tamRun3_metadata_12Jan2022.csv") %>%
+  mutate(sampleID = gsub("_","\\.", sampleID)) %>%
+  #mutate(sampleFile = paste0(sampleID, ".fastq")) %>%
+  #unite(pcr1, pcr1Plate, pcr1Row, sep = "-", remove = T) %>%
+  #unite(pcr1, pcr1, pcr1Col, sep = "", remove = T) %>%
+  merge(., md_tamRun1, by = c("animalID", "sampleType"), all.x = T) %>%
+  merge(., md_tamRun2, by = c("animalID", "sampleType"), all.x = T)
+```
+
+## Genotypes
+Note that genotypes were only called for loci with at least 10x coverage.
+
+```{r}
+genos_fullSet <- read.table("./03_tamRun3/03_run3GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T)
+```
+
+Note that I'm recoding all species-specific primer-probe reads as NA for species-specific loci that do not match the sample species.
+
+```{r}
+genos_lwed <- genos_fullSet %>%
+  
+```
+
+
+## 2.2 Subset to hair genotypes only
+
+```{r}
+samples_hair <- md_tamRun3 %>%
+  filter(sampleType == "hair") %>%
+  select(sampleID)
+
+genos_hair <- genos_fullSet %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  filter(sampleID %in% samples_hair$sampleID)
+```
+
+
+# 3 Identify duplicates
+
+We can identify duplicates using the package 'allelematch', which includes functions that help determine how how many alleles should differ before assigning samples as "unique" or "duplicates".
+
+## 3.1 Create an amDataset object
+
+```{r}
+am <- amDataset(genos_hair, indexColumn = "sampleID")
+```
+
+## 3.2 Find optimal criterion of dissimilarity to find unique individuals
+
+The optimal criterion of dissimilarity, also known as "m-hat", implies that samples can differ by up to "m-hat" mismatching alleles, or the equivalent in missing alleles, to be declared the same unique individual. We can estimate the value of this criterion using the function 'amUniqueProfile' and setting 'guessOptimum' to TRUE.
+
+```{r}
+amUniqueProfile(am, doPlot = T, guessOptimum = T)
+
+data(amExample5)
+myDataset <- amDataset(amExample5, missingCode="-99", indexColumn=1,
+metaDataColumn=2, ignoreColumn="gender")
+```
+
+'allelematch' suggests an alleleMismatch criterion of 4 (matchThreshold = 0.82). However, this is based on a "NoSecondMinimum" profile, meaning that allelematch cannot make a confident assessment of the unique genotypes within the range of the alleleMismatch criterion examined (by default this is 0% to 40% of allele columns mismatching). We can therefore disregard the optimal alleleMismatch criterion.
+
+'allelematch' documentation suggests that in these cases, removing samples with more than a threshold amount of missing data may help reduce ambiguity - since we've already done this, the next recommended step is simply to set a high alleleMismatch criterion. However, this biases the data toward those who are unrelated, which we don't want given that identifying relatedness between individuals is a primary objective of the present study.
+
+As such, at this point I'm opting to move forward with a alleleMismatch criterion of 3, chosen because this is where the number of unique individuals first levels out in the plot above.
+
+NOTE - running amUniqueProfile returns "Warning: 'length(x) = 2 \> 1' in coercion to 'logical(1)'" -- this is likely a package issue related to incompatibility with R update 4.2.0. Unsure how this affects the amUniqueProfile function. (see <https://stackoverflow.com/questions/72848442/r-warning-lengthx-2-1-in-coercion-to-logical1>)
+
+## 3.3 Find potential duplicate individuals
+
+To find potential duplicates in our dataset, we first need to write up the 'allelematch' results, which we can do as both html and csv files:
+
+```{r}
+uniqueIndiv <- amUnique(am, alleleMismatch = 3)
+summary(uniqueIndiv, html = "../results_R/alleleMatch_results_7Nov2022.html")
+amCSV.amUnique(uniqueIndiv, "../results_R/alleleMatch_results_7Nov2022.csv", uniqueOnly = F)
+```
+
+We can then view the pairs that were assigned a similarity score (i.e., those identified as potential duplicates):
+
+```{r}
+amResults <- read.csv("../results_R/alleleMatch_results_7Nov2022.csv")
+
+amResults_dups <- amResults %>%
+  filter(!is.na(score))
+
+amResults_dups
+```
+
+We can use the assigned similarity scores alongside the html file to easily view which alleles differ between the potential matches (mismatches are highlighted in red in the html file), and find the following:
+
+-   MO-R-MP/VO-R-JU1 - 100% similarity score; no mismatched alleles
+-   MO-R-CR/VO-R-JU2 - 95% similarity score; differ at only one allele (at locus D8s260), where the former is homozygous and the latter is heterozygous - likely a product of allelic dropout
+-   LV-B-MO/LV-B-N1A - 91% similarity score; differ at two alleles (at loci D13s160 and Leon15), where LV-B-N1A was homozygous and LV-B-MO was heterozygous (with a common allele) - likely also the product of allelic dropout
+-   AP-B-AO/AP-X-JU1 - 86% similarity score; differ at three alleles (at loci D13s160, Leon21, and Leon26) - the first two loci could be allelic dropout, but Leon21 is a different heterozygous combination for each sample ID
+
+Available field records (e.g., sample collection dates, observations of individual presence/absence) support the assignment of all but AP-B-AO/AP-X-JU1 as duplicates.
+
+## 3.4 Create clean copy of dataset
+
+We can now remove duplicate individuals that are homozygous at the mismatched-loci - this yields a dataset of 45 unique multilocus genotypes assumed to represent 45 unique individuals.
+
+```{r}
+data_clean <- data %>%
+  filter(!sampleID %in% c("LV-B-N1A", "MO-R-CR", "MO-R-MP"))
+```
+
