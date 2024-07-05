@@ -364,7 +364,7 @@ mfeOutput_2 %>%
 **Quick-load**
 
 ```{r}
-bp3errorTracking <- read.csv("./00_tamRun1_optimization/bp3error_investigation/bp3error_master_1July2024.csv")
+bp3errorTracking <- read.csv("./00_tamRun1/bp3error_investigation/bp3error_master_1July2024.csv")
 ```
 
 ```{r}
@@ -396,14 +396,14 @@ According to my own investigations, we have:
 
 ```{r}
 # 99 loci w/bp3 error
-bp3error_99Loci <- read.csv("./00_tamRun1_optimization/bp3error_investigation/failing_snps1.csv", header = F) %>%
+bp3error_99Loci <- read.csv("./00_tamRun1/bp3error_investigation/failing_snps1.csv", header = F) %>%
   merge(., seqNames_to_shortNames[, c("seqID1", "primerName2")], by.x = "V1", by.y = "seqID1", all.x = T) %>%
   dplyr::rename("seqID" = "V1",
                 "locus" = "primerName2") %>%
   mutate(locus = sub('\\..*', '', locus))
 
 # 226 loci, including some number of bp3error loci that were part of rescue1 (Sam found other informative variant in amplicon)
-pp_bp3clean <- read.table("./00_tamRun1_optimization/03_run1GTscore/primerProbeFile.txt", header = T) %>%
+pp_bp3clean <- read.table("./00_tamRun1/03_run1GTscore/primerProbeFile.txt", header = T) %>%
   mutate(
     Locus = case_when(
       Locus == "SEXID_195.3" ~ "SEXID_LWED_195.3",
@@ -424,7 +424,7 @@ pp_bp3clean <- read.table("./00_tamRun1_optimization/03_run1GTscore/primerProbeF
   )
 
 # 76 loci w/bp3 error that couldn't be "rescued" immediately; but Sam apparently used MSA sequences to identify other variants for some number of them
-pp_bp3error <- read.table("./00_tamRun1_optimization/03_run1GTscore/bp3error_primerProbeFile.txt", header = T) %>%
+pp_bp3error <- read.table("./00_tamRun1/03_run1GTscore/bp3error_primerProbeFile.txt", header = T) %>%
   mutate(
     Locus = case_when(
       Locus == "SEXID_195.3" ~ "SEXID_LWED_195.3",
@@ -447,7 +447,7 @@ pp_bp3error <- read.table("./00_tamRun1_optimization/03_run1GTscore/bp3error_pri
 
 ```{r}
 # 35 loci w/bp3 error that could be rescued
-bp3error_rescued <- read.csv("./00_tamRun1_optimization/bp3error_investigation/failing_snps_that_have_other_variants.csv", header = F) %>%
+bp3error_rescued <- read.csv("./00_tamRun1/bp3error_investigation/failing_snps_that_have_other_variants.csv", header = F) %>%
   merge(., seqNames_to_shortNames[, c("seqID1", "primerName3")], by.x = "V1", by.y = "seqID1", all.x = T) %>%
   select(-V2) %>%
   dplyr::rename("seqName" = "V1",
@@ -570,14 +570,12 @@ export bp3error loci tracking
 bp3errorTracking <- snpTracking %>%
   filter(!is.na(bp3error))
 
-write.csv(bp3errorTracking, "./00_tamRun1_optimization/bp3error_investigation/bp3error_master_1July2024.csv", row.names = F)
+write.csv(bp3errorTracking, "./00_tamRun1/bp3error_investigation/bp3error_master_1July2024.csv", row.names = F)
 ```
 
-## 4.3 Panels
+## 4.3 Summary
 
-
-
-
+asdfasdf
 
 # 5 tamRun1
 
@@ -593,7 +591,7 @@ write.csv(bp3errorTracking, "./00_tamRun1_optimization/bp3error_investigation/bp
 **Data**
 
 ```{r}
-tamRun1_md <- read.csv("./00_tamRun1_optimization/03_run1GTscore/tamRun1_metadata_v2.csv")
+tamRun1_md <- read.csv("./00_tamRun1/03_run1GTscore/tamRun1_metadata_v2.csv")
 ```
 
 **Metrics**
@@ -672,7 +670,7 @@ I've imported the primer-probe file that contains ALL loci originally in the tam
 **Data**
 
 ```{r}
-tamRun1_primerProbeFile <- read.table("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_fullSet.txt", header = T)
+tamRun1_primerProbeFile <- read.table("./00_tamRun1/04_run1GTscore_bp3errorRemoved/primerProbeFile_fullSet.txt", header = T)
 ```
 
 **Metrics**
@@ -738,13 +736,13 @@ tamRun1_simpLoci <- tamRun1_primerProbeFile %>%
 ### Genos
 
 ```{r}
-tamRun1_gtscore0x_genos <- read.table("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+tamRun1_gtscore0x_genos <- read.table("./00_tamRun1/04_run1GTscore_bp3errorRemoved/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
   rownames_to_column("locus") %>%
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   mutate(locus = sub('\\..*', '', locus)) %>%
   column_to_rownames("locus")
 
-tamRun1_gtscore10x_genos <- read.table("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+tamRun1_gtscore10x_genos <- read.table("./00_tamRun1/04_run1GTscore_bp3errorRemoved/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
   rownames_to_column("locus") %>%
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   mutate(locus = sub('\\..*', '', locus)) %>%
@@ -756,23 +754,23 @@ tamRun1_gtscore10x_genos <- read.table("./00_tamRun1_optimization/04_run1GTscore
 Metrics reflect non-negative, target-species only
 
 ```{r}
-tamRun1_gtscore_locusSum <- read.csv("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/summaryFiles/master_locusSummary.csv")
+tamRun1_gtscore_locusSum <- read.csv("./00_tamRun1/04_run1GTscore_bp3errorRemoved/summaryFiles/master_locusSummary.csv")
 
-tamRun1_gtscore_sampleSum <- read.csv("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/summaryFiles/master_sampleSummary.csv")
+tamRun1_gtscore_sampleSum <- read.csv("./00_tamRun1/04_run1GTscore_bp3errorRemoved/summaryFiles/master_sampleSummary.csv")
 ```
 
 other metrics - fullset samples/loci, etc.
 
 ```{r}
-tamRun1_gtscore_locusSum_lwed_simpSpec <- read.csv("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/LWED_simpSpec_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+tamRun1_gtscore_locusSum_lwed_simpSpec <- read.csv("./00_tamRun1/04_run1GTscore_bp3errorRemoved/LWED_simpSpec_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
   mutate(sampleSet = "lwedSamples") %>%
   relocate(sampleSet, .after = Locus)
 
-tamRun1_gtscore_locusSum_simp_lwedSpec <- read.csv("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/SIMP_lwedSpec_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+tamRun1_gtscore_locusSum_simp_lwedSpec <- read.csv("./00_tamRun1/04_run1GTscore_bp3errorRemoved/SIMP_lwedSpec_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
   mutate(sampleSet = "simpSamples") %>%
   relocate(sampleSet, .after = Locus)
 
-tamRun1_gtscore_sampleSum_lociAll <- read.csv("./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
+tamRun1_gtscore_sampleSum_lociAll <- read.csv("./00_tamRun1/04_run1GTscore_bp3errorRemoved/fullSet_GTscore_individualSummary.txt", header = T, sep = "\t") %>%
   mutate(Sample = gsub("-", "\\.", Sample)) %>%
   merge(., tamRun1_md[, c("sampleID", "species")], by.x = "Sample", by.y = "sampleID") %>%
   relocate(species, .after = Sample)
@@ -781,6 +779,8 @@ tamRun1_gtscore_sampleSum_lociAll <- read.csv("./00_tamRun1_optimization/04_run1
 ## 5.3 Read metrics
 
 ### bySample
+
+**all samples + sp-specific loci sets**
 
 ```{r}
 tamRun1_gtscore_sampleSum %>%
@@ -799,11 +799,13 @@ tamRun1_gtscore_sampleSum %>%
   ) %>%
   relocate(lociSet, otProp, otReads, primerProp, primerReads, totalReads)
 ```
+**pos only (no negs) + sp-specific loci sets**
 
 ```{r}
-tamRun1_gtscore_sampleSum_lociAll %>%
+tamRun1_gtscore_sampleSum %>%
+  filter(!str_detect(sampleID_md, "Neg")) %>%
   #filter(GenotypeRate_0x >= 0.5) %>%
-  group_by(species) %>%
+  group_by(lociSet) %>%
   summarise(
     totalReads = sum(Total.Reads),
     primerReads = sum(Primer.Only.Reads) + sum(Primer.Probe.Reads),
@@ -815,8 +817,27 @@ tamRun1_gtscore_sampleSum_lociAll %>%
     otProp = round(otReads/primerReads, 2),
     primerProp = round(primerReads/totalReads, 2)
   ) %>%
-  relocate(species, otProp, otReads, primerProp, primerReads, totalReads)
+  relocate(lociSet, otProp, otReads, primerProp, primerReads, totalReads)
 ```
+**pos only (no negs) + all loci**
+
+```{r}
+tamRun1_gtscore_sampleSum_lociAll %>%
+  filter(!str_detect(species, "Neg")) %>%
+  #filter(GenotypeRate_0x >= 0.5) %>%
+  summarise(
+    totalReads = sum(Total.Reads),
+    primerReads = sum(Primer.Only.Reads) + sum(Primer.Probe.Reads),
+    otReads = sum(Primer.Probe.Reads)
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    otProp = round(otReads/primerReads, 2),
+    primerProp = round(primerReads/totalReads, 2)
+  ) %>%
+  relocate(otProp, otReads, primerProp, primerReads, totalReads)
+```
+
 ### byLocus
 
 #### Overview
@@ -834,7 +855,15 @@ tamRun1_gtscore_locusSum %>%
   mutate(
     otProp = round(otReads/primerReads, 2)
   ) %>%
-  relocate(sampleSet, otProp, otReads, primerReads)
+  mutate(
+    lociSet = case_when(
+      sampleSet == "lwedSamples" ~ "lwedSpec",
+      sampleSet == "simpSamples" ~ "simpSpec",
+      sampleSet == "posSamples" ~ "dual",
+      .default = sampleSet
+    )
+  ) %>%
+  relocate(sampleSet, lociSet, otProp, otReads, primerReads)
 ```
 
 #### dualLoci
@@ -1097,7 +1126,7 @@ temp <- tamRun1_gtscore_locusSum %>%
   merge(., lociRemoved, by = "locus", all.x = T)
 ```
 
-# 6 tamRun3 metrics
+# 6 library_2 - tamRun3 metrics
 
 ## 6.1 Overview
 
@@ -2047,7 +2076,7 @@ primerSet_v1_updated2
 #### samTable
 
 ```{r}
-tamRun1_pp_fullSet <- read.table("./00_tamRun1_optimization/03_run1GTscore/primerProbeFile.txt", header = T) %>%
+tamRun1_pp_fullSet <- read.table("./00_tamRun1/03_run1GTscore/primerProbeFile.txt", header = T) %>%
   mutate(
     Locus = case_when(
       Locus == "SEXID_195.3" ~ "SEXID_LWED_195.3",
@@ -2063,9 +2092,9 @@ tamRun1_pp_fullSet <- read.table("./00_tamRun1_optimization/03_run1GTscore/prime
     )
   )
   
-tamRun1_pp_bp3error <- read.table("./00_tamRun1_optimization/03_run1GTscore/bp3error_primerProbeFile.txt", header = T)
+tamRun1_pp_bp3error <- read.table("./00_tamRun1/03_run1GTscore/bp3error_primerProbeFile.txt", header = T)
 
-samTable <- read.csv("./00_tamRun1_optimization/03_run1GTscore/snpPanel_samTable.csv", na.strings = "") %>%
+samTable <- read.csv("./00_tamRun1/03_run1GTscore/snpPanel_samTable.csv", na.strings = "") %>%
   dplyr::rename("primerF" = "Forward.primer",
                 "primerR" = "Reverse.primer") %>%
   mutate(
