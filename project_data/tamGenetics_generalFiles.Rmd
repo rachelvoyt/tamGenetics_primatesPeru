@@ -19,9 +19,49 @@ Meant to create a central holding place for files used across tamGenetics sequen
 library(tidyverse)
 ```
 
-# 3 Primer-probe file
+# 3 Primers/probes
 
-## 3.1 SNP panel v3
+## 3.1 seqNames_to_shortNames
+
+typo in some seqID2 names? where seqID1 has "_final_rm400s_", seqID2 has "_finalm400s_" and I'm not sure this is correct? dunno where I originally got seqID2 names
+
+species-specific sexid names based on Sam's thesis p. 20
+
+```{r}
+seqNames_to_shortNames <- read.csv("./primers/primers_seqName_to_shortName.csv") %>%
+  mutate(
+    primerName2 = case_when(
+      primerName2 == "SEXID_195.3" ~ "SEXID_LWED_195.3",
+      primerName2 == "SEXID_208.3" ~ "SEXID_LWED_208.3",
+      primerName2 == "SEXID_211.3" ~ "SEXID_LWED_211.3",
+      
+      primerName2 == "SEXID_197.1" ~ "SEXID_SIMP_197.1",
+      primerName2 == "SEXID_198.3" ~ "SEXID_SIMP_198.3",
+      primerName2 == "SEXID_203.2" ~ "SEXID_SIMP_203.2",
+      primerName2 == "SEXID_218.1" ~ "SEXID_SIMP_218.1",
+      
+      .default = primerName2
+    )
+  ) %>%
+  mutate(primerName3 = sub('\\..*', '', primerName2)) %>%
+  relocate(primerName3, .after = primerName2) %>%
+  mutate(
+    seqID3 = sub('[_][^_]+$', '', seqID1)
+  ) %>%
+  dplyr::rename("lociSet" = "type") %>%
+  mutate(
+    lociSet = case_when(
+      str_detect(primerName2, "SEXID_LWED") ~ "SEXID_LWED",
+      str_detect(primerName2, "SEXID_SIMP") ~ "SEXID_SIMP",
+      .default = lociSet
+    )
+  )
+
+write.csv(seqNames_to_shortNames, "./project_data/seqNames_to_shortNames.csv", row.names = F)
+```
+
+
+## 3.2 Panel v3
 
 ### gtscore
 
