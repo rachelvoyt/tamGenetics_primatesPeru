@@ -1,0 +1,542 @@
+---
+title: "Nanopore validation paper: Tamarin pipeline, downsampled to 100x (ds100x)"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(echo = TRUE, root.dir = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/paper1_nanoporeValidation/paper1_nanoporeValidation_ds100x_toShare/")
+```
+
+# 1 Overview
+
+This document outlines the analysis pipeline used for the tamarin subset
+of the the Nanopore validation paper. Here, we're comparing **Illumina
+vs. Nanopore** genotype results for **10 tamarin blood samples** at **54
+SNP loci (540 genotypes total)**. This document also includes a comparison of genotype results when allele reads are downsampled to 100x coverage per locus per sample for both Illumina and Nanopore datasets.
+
+The scripts included here include those created by myself (R. Voyt) in
+addition to those created by McKinney, Pascal, and Seeb (2020) as part
+of their GTscore pipeline for the analysis of Genotyping-in-Thousands
+sequencing data. I've included details on the GTscore scripts that I've
+included here; information on the full GTscore pipeline be found on the
+[GTscore GitHub page](https://github.com/gjmckinney/GTscore).
+
+# 2 Packages
+
+```{r, message=FALSE}
+library(kableExtra, quietly = T)
+library(tidyverse, quietly = T)
+```
+
+# 3 Data
+
+## 3.1 Sample metadata
+
+Our sample dataset is composed of **10 tamarin blood samples**,
+including five saddleback tamarins (*Leontocebus weddelli*; n = 3
+females, n = 2 males) and five emperor tamarins (*Saguinus imperator*; n
+= 3 females, n = 2 males).
+
+```{r, echo=FALSE}
+md <- read.csv("metadata_paper1_nanoporeValidation_ds100x.csv")
+```
+
+```{r, echo=FALSE}
+# For html
+md %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+## 3.2 Loci
+
+Our loci dataset is composed of **54 dual-species SNPs**, including SNPs
+used for the identification of individuals (INDID; n = 47), sex (SEXID;
+n = 3), and species (SPECIESID; n = 4). All 54 loci are informative for
+both tamarin species.
+
+```{r, echo=FALSE}
+loci <- read.table("primerProbeFile_ds100x.txt", header = T)
+
+loci_bySet <- data.frame(
+  lociSet = c("INDID", "SEXID", "SPECIESID", "TOTAL"),
+  count = c(
+    sum(str_detect(loci$Locus, "INDID")),
+    sum(str_detect(loci$Locus, "SEXID")),
+    sum(str_detect(loci$Locus, "SPECIESID")),
+    nrow(loci)
+  )
+)
+```
+
+```{r, echo=FALSE}
+# For html
+loci_bySet %>%
+  kbl() %>%
+  kable_styling(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato")
+```
+
+# 4 GTscore: Count allele reads
+
+The first step in our analyses is to obtain allele read counts for each
+sample at each locus for both Illumina and Nanopore datasets. Here I'm
+using the AmpliconReadCounter.pl script from the GTscore pipeline, which can be found in the /scripts folder. An
+explanation of the script is in Section 4.1 below - I've pulled most of
+the explanatory text directly from the original GTscore documentation,
+with some modifications for clarity.
+
+## 4.1 Info on AmpliconReadCounter.pl
+
+The read counter is written in perl (AmpliconReadCounter.pl), but can be
+called from R. Running it does the following:
+
+1.  Identifies each unique sequence, then counts the number of times
+    each unique sequence occurs within an individual
+2.  Aligns each unique sequence with forward primer and probe sequences
+    (the "probe" here is a 16-nt sequence overlapping the SNP); if the
+    sequence doesn't align, then it is excluded as an off-target
+    sequence and reports by individual and by locus are given.
+
+**Note:** By default, all primers are trimmed to the length of the
+shortest primer to increase speed. Optionally the full length primer can
+be used for the primer but this may significantly increase run time
+depending on variation in primer lengths across loci.
+
+**Input flags for this script are:**
+
+-   --p a tab delimited file containing primer/probe information for
+    each locus
+-   --files a text file containing a list of .fastq sequence files to
+    count reads from
+
+**Optional flags:**
+
+-   \--prefix optional prefix for output file names
+
+-   \--inDir option to specify directory containing sequence data
+
+-   \--outDir option to specify output directory (**Note:** This option
+    is not listed in the original AmpliconReadCounter documentation, but
+    is an option in the script itself)
+
+-   \--inputType; options are fq or fastqgz (defaults to fastqgz)
+
+-   \--useFullPrimer uses the full primer for counting reads rather than
+    the trimmed primer
+
+-   \--alleleOrder order of alleles output in locusTable file; options
+    are original (matches primer-probe file order) or alphabetical
+    (default)
+
+-   \--printMatched outputs matched reads for each individual (**Note:**
+    RV modified lines 325-329 to automatically create a "matchedReads"
+    subdirectory within the specified "outDir" if this option is chosen)
+
+-   \--printDiscarded outputs discarded reads for each individual
+    (**Note:** RV modified lines 310-314 to automatically create an
+    "unmatchedReads" subdirectory within the specified "outDir" if this
+    option is chosen)
+
+## 4.2 Run AmpliconReadCounter.pl
+
+```{r, eval=FALSE}
+# illumina dataset
+system2("perl",
+        args="./scripts/AmpliconReadCounter_modified.pl -p primerProbeFile_ds100x.txt --files sampleFiles_ill_ds100x.txt --inDir ./fastqFiles_ill/ --outDir . --prefix ill_")
+
+# nanopore dataset
+system2("perl",
+        args="./scripts/AmpliconReadCounter_modified.pl -p primerProbeFile_ds100x.txt --files sampleFiles_ont_ds100x.txt --inDir ./fastqFiles_ont/ --outDir . --prefix ont_")
+```
+
+# 5 Downsample
+
+The next step is to downsample the read counts obtained in Section 4.2.
+Downsampling ensures that the total read counts for each sample at each
+locus are consistent and allows us to eliminate coverage as a potential
+variable when assessing genotype consistency between Illumina and
+Nanopore datasets.
+
+## 5.1 Import downsampling function
+
+I created the function below to downsample sequencing results using the
+allele read counts file from the GTscore pipeline as the input. In doing
+so, we can take advantage of the mapping and read counting functions
+already built into the GTscore pipeline and avoid more time-intensive
+downsampling methods that require going back into the fastq files.
+
+```{r}
+source("./scripts/downsample_alleleReads.R")
+```
+
+This function works as follows:
+
+1.  Using the original allele read counts file, the function generates a
+    list of elements of length $n\_iterations$ (specified by the user),
+    where each element is a randomized string of a's and b's for each
+    sample at each locus.
+    1.  The number of times that each letter occurs in each string
+        corresponds to the read counts for that sample at that allele
+        (e.g., read counts of "3,2" would be transformed to abbaa, or
+        some other random combination of 3 a's and 2 b's).
+2.  Next, the function selects the first $n\_reads$ characters from each
+    element in the list, where $n\_reads$ (specified by the user) is the
+    desired downsampled coverage per locus for each sample.
+3.  The function then re-counts the allele reads based on the number of
+    a's (allele 1 read counts) and b's (allele 2 read counts) selected
+    in each element and averages them (rounded to the nearest integer)
+    to provide the final downsampled read counts. Any allele reads whose
+    sum is below the desired coverage are recoded to "0,0".
+4.  Finally, the function returns the downsampled reads as a new allele
+    reads text file, which can then be input back into GTscore for
+    genotyping.
+
+**Note:** Because this function randomly selects reads to include in the
+downsampled result, results may not be consistent across downsampling
+attempts. I recommend conducting additional tests to determine the
+number of iterations that provide consistent results across multiple
+downsampling attempts for the dataset being analysed.
+
+## 5.2 Import original allele reads
+
+Below I'm importing the original allele reads files obtained from
+AmpliconReadCounter in Section 4.2. I'm also reformatting the files
+slightly to 1) revert loci names back to their originals (GTscore
+appends the SNP position to the locus name), and 2) assign a common
+sampleID to corresponding samples between Illumina and Nanopore
+datasets.
+
+```{r, echo=FALSE}
+# illumina
+alleleReads_ill <- read.delim("ill_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  # reformat loci names
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  # update sampleID
+  rownames_to_column("sampleID") %>%
+  merge(., md[, c("sampleID_unique", "sampleID_ill")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  select(-sampleID) %>%
+  arrange(sampleID_unique) %>%
+  column_to_rownames("sampleID_unique") %>%
+  t() %>%
+  as.data.frame()
+
+# nanopore
+alleleReads_ont <- read.delim("ont_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  # reformat loci names
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  # update sampleID
+  rownames_to_column("sampleID") %>%
+  merge(., md[, c("sampleID_unique", "sampleID_ont")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  select(-sampleID) %>%
+  arrange(sampleID_unique) %>%
+  column_to_rownames("sampleID_unique") %>%
+  t() %>%
+  as.data.frame()
+```
+
+We can view the first few lines of the original allele reads files
+below:
+
+```{r, echo=FALSE}
+# For html
+head(alleleReads_ill) %>%
+  kbl(caption = "Illumina reads (pre-downsampling)") %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+
+head(alleleReads_ont) %>%
+  kbl(caption = "Nanopore reads (pre-downsampling") %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+## 5.3 Downsample allele reads
+
+Using the downsampling function from Section 5.1 and the reformatted
+allele read counts from Section 5.2, we can now downsample each sample
+at each locus to 100 reads with 100 iterations of downsampling:
+
+```{r}
+# illumina
+alleleReads_ill_ds100x <- downsample_alleleReads(alleleReads_ill, 100, 100)
+
+# nanopore
+alleleReads_ont_ds100x <- downsample_alleleReads(alleleReads_ont, 100, 100)
+```
+
+```{r, echo=FALSE}
+# export downsampled allele reads
+write.table(alleleReads_ill_ds100x, "ill_alleleReads_ds100x.txt", quote = FALSE, sep = "\t")
+
+write.table(alleleReads_ont_ds100x, "ont_alleleReads_ds100x.txt", quote = FALSE, sep = "\t")
+```
+
+```{r, echo=FALSE}
+# quick-load downsampled allele reads
+## add check.names = F so "X" won't be added to colnames
+alleleReads_ill_ds100x <- read.table("ill_alleleReads_ds100x.txt", header = T, check.names = F)
+
+alleleReads_ont_ds100x <- read.table("ont_alleleReads_ds100x.txt", sep = "\t", header = T, check.names = F)
+```
+
+We can view the first few lines of the downsampled allele reads files
+below:
+
+```{r, echo=FALSE}
+# For html
+head(alleleReads_ill_ds100x) %>%
+  kbl(caption = "Downsampled Illumina reads") %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+
+head(alleleReads_ont_ds100x) %>%
+  kbl(caption = "Downsampled Nanopore reads") %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+# 6 GTscore: Genotyping
+
+Now that we have the downsampled allele reads for Illumina and Nanopore
+datasets, we can plug them into the GTscore *PolyGen* genotyping
+function, which is included in the GTscore R scripts (imported in
+Section 6.2 below). I've included an explanation of the function (pulled
+from [McKinney et al.,
+2018](https://onlinelibrary.wiley.com/doi/10.1111/1755-0998.12763)) in
+Section 6.1.
+
+## 6.1 Info on PolyGen genotyper
+
+The *PolyGen* genotyper (originally described in [McKinney et al.,
+2018](https://onlinelibrary.wiley.com/doi/10.1111/1755-0998.12763)) can
+be used for both diploid and polyploid loci. It works by calling
+genotypes based on allele dosage, which is inferred using a
+maximum-likelihood algorithm that performs equations in the following
+steps:
+
+1.  Calculates relative dosage for each possible genotype
+2.  Calculates the chance that a read will be sampled from a given
+    allele $p(a)$ given a particular underlying genotype as a function
+    of the relative dosage of the allele in the genotype as well as the
+    sequencing error rate:
+    -   $$
+        p(a) = d_{r}(a) \times (1 - \varepsilon) + (1 - d_{r}(a)) \times \varepsilon
+        $$
+
+    -   Where $d_{r}(a)$ is the relative dosage of allele a and
+        $\varepsilon$ is the sequencing error rate
+3.  Calculates the overall log-likelihood of genotype $L(g)$ by summing
+    the relative dosage log-likelihoods for each allele:
+    -   $$
+        L(g) = \sum_{a}^n ln(p(a)) \times c_{a}
+        $$
+    -   Where $p(a)$ is the chance that a read will be sampled from
+        allele a, $c_{a}$ is the count of observations of allele a, and
+        there are $n$ alleles
+4.  Compares the two most likely genotypes via a likelihood ratio test
+    with one degree of freedom; the most likely genotype is assigned if
+    the likelihood ratio test is significant at $\alpha = 0.05$;
+    otherwise no genotype is assigned
+
+## 6.2 Import GTscore scripts
+
+```{r, message=FALSE, warning=FALSE}
+source("./scripts/GTscore_modified.R") # NOTE- I added an option for "\\[ATGC\\]"="N" (lines 616 and 617) to replace brackets in probe
+```
+
+The *PolyGen* R function takes the following as inputs:
+
+-   locusTable - a text file containing a table of all loci names,
+    ploidy, and alleles; this file is automatically created through the
+    AmpliconReadCounter.pl script
+
+-   readCounts - a text file containing a table of allele reads for all
+    samples at all loci; this file is also automatically created via the
+    AmpliconReadCounter.pl script
+
+-   p_thresh - corresponds to significance level $\alpha$ in the
+    equations above; default is 0.05
+
+-   epsilon - corresponds to sequencing error rate $\varepsilon$ in the
+    equations above; default is 0.01
+
+## 6.3 Genotype samples
+
+Below I'm using the *PolyGen* function to call genotypes for both
+Illumina and Nanopore datasets. Note that the default sequencing error
+rate is 0.01, which I've chosen not to alter here. Note also that
+*PolyGen* requires both the downsampled allele read counts from Section
+5.3 as well as the locus table output by AmpliconReadCounter in Section
+4.2.
+
+```{r}
+# load locus table
+locusTable <- read.delim("ill_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
+
+# genotype: no coverage cutoff
+polyGenResults_ill_ds0x <- polyGen(locusTable, alleleReads_ill)
+polyGenResults_ont_ds0x <- polyGen(locusTable, alleleReads_ont)
+
+# genotype: dowsampled to 100x per locus per sample
+polyGenResults_ill_ds100x <- polyGen(locusTable, alleleReads_ill_ds100x)
+polyGenResults_ont_ds100x <- polyGen(locusTable, alleleReads_ont_ds100x)
+```
+
+```{r, echo=FALSE}
+# export genotypes: no coverage cutoff
+write.table(polyGenResults_ill_ds0x, "ill_polyGenResults_ds0x.txt", quote = FALSE, sep = "\t")
+
+write.table(polyGenResults_ont_ds0x, "ont_polyGenResults_ds0x.txt", quote = FALSE, sep = "\t")
+
+# export genotypes: downsampled to 100x per locus per sample
+write.table(polyGenResults_ill_ds100x, "ill_polyGenResults_ds100x.txt", quote = FALSE, sep = "\t")
+
+write.table(polyGenResults_ont_ds100x, "ont_polyGenResults_ds100x.txt", quote = FALSE, sep = "\t")
+```
+
+# 7 Genotype consistency
+
+Now that we have our genotypes called from our downsampled allele reads,
+we can compare the genotypes called for each sample at each locus
+between Illumina and Nanopore datasets.
+
+## 7.1 Import genotypes
+
+First a bit of data reformatting to make comparisons easier -- we can
+see the first few lines of the genotypes from the ds100x allele reads here:
+
+```{r, echo=FALSE}
+# ds0x
+## illumina
+genos_ill_ds0x <- read.table("ill_polyGenResults_ds0x.txt", header = T, check.names = F)
+
+genos_ill_ds0x_l <- genos_ill_ds0x %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genos_ill")
+  
+## nanopore
+genos_ont_ds0x <- read.table("ont_polyGenResults_ds0x.txt", header = T, check.names = F)
+
+genos_ont_ds0x_l <- genos_ont_ds0x %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genos_ont")
+
+## compare
+compareGenos_ds0x <- genos_ill_ds0x_l %>%
+  merge(., genos_ont_ds0x_l, by = c("sampleID", "locus")) %>%
+  mutate(
+    match = case_when(
+      genos_ill == "0" | genos_ont == "0" ~ NA,
+      genos_ill == genos_ont ~ "yes",
+      .default = "no"
+    )
+  )
+
+# ds100x
+## illumina
+genos_ill_ds100x <- read.table("ill_polyGenResults_ds100x.txt", header = T, check.names = F)
+
+genos_ill_ds100x_l <- genos_ill_ds100x %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genos_ill")
+  
+## nanopore
+genos_ont_ds100x <- read.table("ont_polyGenResults_ds100x.txt", header = T, check.names = F)
+
+genos_ont_ds100x_l <- genos_ont_ds100x %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genos_ont")
+
+## compare
+compareGenos_ds100x <- genos_ill_ds100x_l %>%
+  merge(., genos_ont_ds100x_l, by = c("sampleID", "locus")) %>%
+  mutate(
+    match = case_when(
+      genos_ill == "0" | genos_ont == "0" ~ NA,
+      genos_ill == genos_ont ~ "yes",
+      .default = "no"
+    )
+  )
+```
+
+```{r, echo=FALSE}
+# For html
+head(compareGenos_ds100x) %>%
+  kbl() %>%
+  kable_material(full_width = F) %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  scroll_box(width = "100%", height = "200px", fixed_thead = list(enabled = T))
+```
+
+## 7.2 Compare genotypes
+
+Comparisons show that for both 100x downsampled and non-downsampled datasets, **98% of genotypes match** for the 10 sample and 54 loci between Illumina and Nanopore datasets.
+
+```{r, echo=FALSE}
+compareGenos_ds0x_table <- data.frame(
+  set = "ds0x",
+  genosMismatch = sum(compareGenos_ds0x$match == "no", na.rm = T),
+  genosNA = sum(is.na(compareGenos_ds0x$match)),
+  genosMatch = sum(compareGenos_ds0x$match == "yes", na.rm = T),
+  totalGenos = nrow(compareGenos_ds0x)
+) %>%
+  mutate(
+    propMismatch = round(genosMismatch/totalGenos, 2)
+  ) %>%
+  relocate(propMismatch, .after = set)
+
+compareGenos_ds100x_table <- data.frame(
+  set = "ds100x",
+  genosMismatch = sum(compareGenos_ds100x$match == "no", na.rm = T),
+  genosNA = sum(is.na(compareGenos_ds100x$match)),
+  genosMatch = sum(compareGenos_ds100x$match == "yes", na.rm = T),
+  totalGenos = nrow(compareGenos_ds100x)
+) %>%
+  mutate(
+    propMismatch = round(genosMismatch/totalGenos, 2)
+  ) %>%
+  relocate(propMismatch, .after = set)
+
+compareGenos_table <- rbind(compareGenos_ds0x_table, compareGenos_ds100x_table)
+```
+
+```{r, echo=FALSE}
+# For html
+compareGenos_table %>%
+  kbl() %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(0, color = "black", background = "tomato") %>%
+  row_spec(0:1, align = "r")
+```
