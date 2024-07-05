@@ -1,0 +1,142 @@
+---
+title: "gtscore_vs_gtseq_tamRun4"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 1 Overview
+
+# 2 Packages
+
+```{r}
+library(tidyverse)
+```
+
+# 3 Data
+
+```{r}
+alleleReads_ill_gtscore <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+alleleReads_ill_gtseq <- read.delim("./04_tamRun4/00_illumina/04_run4GTseq_ill/ill_gtseq_alleleReads.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  # replace NA with 0,0 to match gtscore
+  mutate_all(~replace(., is.na(.), "0,0"))
+```
+
+# 4 Compare allele reads
+
+## 4.1 Reformat data
+
+```{r}
+alleleReads_ill_gtscore_l <- alleleReads_ill_gtscore %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "alleleReads") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  separate(., alleleReads, c("a1_gtscore", "a2_gtscore"), sep = ",")
+
+alleleReads_ill_gtseq_l <- alleleReads_ill_gtseq %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  pivot_longer(!sampleID, names_to = "locus", values_to = "alleleReads") %>%
+  separate(., alleleReads, c("a1_gtseq", "a2_gtseq"), sep = ",")
+```
+
+## 4.2 Comparison
+
+### Read counts per sample per locus
+
+```{r}
+alleleReads_ill_gtscore.gtseq <- merge(alleleReads_ill_gtscore_l, alleleReads_ill_gtseq_l, by = c("sampleID", "locus")) %>%
+  mutate_at(c("a1_gtscore", "a2_gtscore", "a1_gtseq", "a2_gtseq"), as.numeric) %>%
+  mutate(
+    a1_diff = a1_gtscore - a1_gtseq,
+    a2_diff = a2_gtscore - a2_gtseq
+  )
+```
+
+### Summary tables
+
+```{r}
+alleleReads_ill_gtscore.gtseq_a1Sum <- alleleReads_ill_gtscore.gtseq %>%
+  select(c(locus, a1_diff)) %>%
+  group_by(locus) %>%
+  summarise(.,
+            a1_count = sum(a1_diff != 0),
+            a1_minDiff = min(a1_diff),
+            a1_meanDiff = round(mean(a1_diff), 2),
+            a1_maxDiff = max(a1_diff)) %>%
+  as.data.frame()
+
+alleleReads_ill_gtscore.gtseq_a2Sum <- alleleReads_ill_gtscore.gtseq %>%
+  select(c(locus, a2_diff)) %>%
+  group_by(locus) %>%
+  summarise(.,
+            a2_count = sum(a2_diff != 0),
+            a2_minDiff = min(a2_diff),
+            a2_meanDiff = round(mean(a2_diff), 2),
+            a2_maxDiff = max(a2_diff)) %>%
+  as.data.frame()
+
+alleleReads_ill_gtscore.gtseq_a1a2Sum <- merge(alleleReads_ill_gtscore.gtseq_a1Sum, alleleReads_ill_gtscore.gtseq_a2Sum, by = "locus")
+```
+
+### Plots
+
+```{r}
+# allele1 read differences
+alleleReads_ill_gtscore.gtseq %>%
+  drop_na() %>%
+  ggplot(aes(x = a1_diff, y = reorder(locus, a1_diff, mean))) +
+  geom_boxplot() +
+  theme_bw()
+
+# allele2 read differences
+alleleReads_ill_gtscore.gtseq %>%
+  drop_na() %>%
+  ggplot(aes(x = a2_diff, y = reorder(locus, a2_diff, mean))) +
+  geom_boxplot() +
+  theme_bw()
+```
+
+### Genotype test
+
+use gtscore and gtseq derived allele ratios to get genos using a 10x cutoff + the gtseq allele ratio cutoffs for homo/het
+
+```{r}
+alleleReads.genos_ill_gtscore.gtseq <- alleleReads_ill_gtscore.gtseq %>%
+  mutate(
+    readSum_gtscore = a1_gtscore + a2_gtscore,
+    readSum_gtseq = a1_gtseq + a2_gtseq,
+    readSum_diff = readSum_gtscore - readSum_gtseq
+  ) %>%
+  mutate(
+    a1_gtscore = 
+      case_when(
+        a1_gtscore == 0 ~ 0.1,
+        .default = a1_gtscore
+        ),
+    a2_gtscore = 
+      case_when(
+        a2_gtscore == 0 ~ 0.1,
+        .default = a2_gtscore
+        ),
+    a1_gtseq = 
+      case_when(
+        a1_gtseq == 0 ~ 0.1,
+        .default = a1_gtseq
+        ),
+    a2_gtseq = 
+      case_when(
+        a2_gtscore == 0 ~ 0.1,
+        .default = a2_gtseq
+        )
+  ) %>%
+  mutate(
+    a1.a2_gtscore = a1_gtscore/a2_gtscore,
+    a1.a2_gtseq = a1_gtseq/a2_gtseq
+  )
+```
+
