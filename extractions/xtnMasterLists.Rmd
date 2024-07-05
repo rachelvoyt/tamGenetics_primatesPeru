@@ -1,0 +1,946 @@
+---
+title: "xtnMasterLists"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+This document is to reformat the tamGenetics extraction master lists, with the output used to update the current extraction master lists for blood, fecal, and hair samples on Quip.
+
+Final column headings:
+
+-   sampleLocated
+-   animalID
+-   sampleRemaining
+-   sampleType
+    -   blood
+    -   fecal
+    -   hair
+    -   xtnNeg
+-   sampleStorage
+    -   longmire
+    -   rnaLater
+    -   envelope
+-   sampleID
+    -   longmire tube \#
+    -   rnaLater tube \#
+    -   env \#
+-   sampleNotes
+-   lysateRemaining
+-   lysisDate
+-   lysisType
+    -   tube
+    -   plate
+-   lysisLoc
+-   lysisRow
+-   lysisCol
+-   lysisVol_ul
+-   lysis_prokProp
+-   lysisDuration
+-   lysisProtocol
+-   xtnRemaining
+-   xtnDate
+-   xtnYear
+-   xtnType
+-   xtnID
+-   xtnLoc
+-   eltn
+-   xtnRow
+-   xtnCol
+-   xtnProtocol
+-   xtnNotes
+-   qubit_ng.ul
+-   qubitDate
+-   pico_ng.ul
+-   picoDate
+-   purity_260.280
+-   purity_260.230
+-   purityDate
+-   fieldNotes
+-   captureDate
+-   captureYear
+-   group
+-   animalName
+-   species
+-   sex
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(stringr)
+```
+
+# Xtns 27 July 2023
+
+## Blood samples
+
+```{r}
+xtnMaster_blood <- read.csv("./extractions/tamGenetics_extractionsBlood_master_21July2023.csv", na.strings = c("", "NA"))
+
+xtnMaster_blood_e1 <- xtnMaster_blood %>%
+  mutate(
+    sampleLocated = case_when(
+      animalID == "BLANK" ~ NA,
+      .default = "yes"
+      ),
+    animalID = case_when(
+      animalID == "BLANK" ~ str_c("xtnNeg_p", xtnPlate, ".", xtnRow, xtnCol),
+      .default = animalID
+      ),
+    sampleRemaining = "yes",
+    sampleType = case_when(
+      str_detect(animalID, "xtnNeg") ~ "xtnNeg",
+      .default = "blood"
+      ),
+    sampleStorage = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = "longmire"
+      ),
+    sampleID = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = str_c("lm_", sampleTube)
+      ),
+    sampleNotes = 
+      case_when(
+        !is.na(generalNotes) ~ str_c(sampleColor, "; ", generalNotes),
+        is.na(generalNotes) ~ sampleColor,
+        .default = sampleColor
+      ),
+    lysateRemaining = "no",
+    lysisDate = lysisDate,
+    lysisType = case_when(
+      str_detect(lysisPlate, "tube") ~ "tube",
+      .default = "plate"
+      ),
+    lysisLoc = case_when(
+      str_detect(lysisPlate, "tube") ~ str_c("t", gsub("\\s*\\([^\\)]+\\)", "", lysisPlate)),
+      .default = str_c("p", lysisPlate)
+      ),
+    lysisRow = lysisRow,
+    lysisCol = lysisCol,
+    lysisVol_ul = 400 + lysisProk_ul,
+    lysis_prokProp = round(lysisProk_percent/100, 2),
+    lysisDuration = case_when(
+      str_detect(lysisDuration, "'") ~ gsub("'", "", lysisDuration),
+      str_detect(lysisDuration, "‘") ~ gsub("‘", "", lysisDuration)
+    ),
+    lysisProtocol = 
+      case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        .default = "laLab_prok"
+        ),
+    lysisNotes = 
+      case_when(
+        lysisProtocol == "laLab_prok" ~ "Used protocol for longmire-stored blood sample ProK lysis from 2018-09-15-2018-10-25 Barcoding extractions SEPTEMBER",
+        .default = NA
+      ),
+    xtnRemaining = "yes",
+    xtnDate = xtnDate,
+    xtnYear = str_sub(xtnDate, start = -4, end = length(xtnDate)),
+    xtnType = case_when(
+      !is.na(xtnTube) ~ "tube",
+      .default = "plate"
+      ),
+    xtnLoc = case_when(
+      !is.na(xtnTube) ~ str_c("t", xtnTube),
+      .default = str_c("p", xtnPlate)
+      ),
+    eltn = "e1",
+    xtnRow = xtnRow,
+    xtnCol = xtnCol,
+    xtnID = case_when(
+      xtnType == "plate" ~ str_c(sampleType, "_", xtnLoc, ".", xtnRow, xtnCol, "_", eltn),
+      .default = str_c(sampleType, "_", xtnLoc, "_", eltn)
+      ),
+    xtnProtocol = 
+      case_when(
+        xtnProtocol == "OT2" ~ "zymoViralMagbead_ot2",
+        str_detect(xtnProtocol, "manual") ~ "zymoViralMagbead_manual",
+        .default = xtnProtocol
+        ),
+    xtnNotes = NA,
+    qubit_ng.ul = case_when(
+      yieldType == "qubit" ~ ng.ul_E1,
+      .default = NA
+      ),
+    qubitDate = case_when(
+      !is.na(qubit_ng.ul) ~ yieldDate,
+      .default = NA
+      ),
+    pico_ng.ul = case_when(
+      yieldType == "picogreen" ~ ng.ul_E1,
+      .default = NA
+      ),
+    picoDate = case_when(
+      !is.na(pico_ng.ul) ~ yieldDate,
+      .default = NA
+      ),
+    purity_260.280 = NA,
+    purity_260.230 = NA,
+    purityDate = NA,
+    fieldNotes = case_when(
+      notesField == "NULL" ~ NA,
+      notesField == "BLANK" ~ NA,
+      .default = notesField
+      ),
+    captureDate = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = captureDate
+      ),
+    captureYear = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = str_sub(captureDate, start = -4, end = -1)
+    ),
+    group = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = groupName
+      ),
+    animalName = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = animalName
+      ),
+    species = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      species == "SFUS" ~ "LWED",
+      species == "SIMP" ~ "SIMP"
+      ),
+    sex = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = sex
+      )) %>%
+  mutate("animalLog_microchip" = NA,
+         "animalLog_group" = NA,
+         "animalLog_name" = NA) %>%
+  select(c("sampleLocated", "animalID", "sampleRemaining", "sampleType", "sampleStorage", "sampleID", "sampleNotes", "lysateRemaining", "lysisDate", "lysisType", "lysisLoc", "lysisRow", "lysisCol", "lysisVol_ul", "lysisDuration", "lysis_prokProp", "lysisProtocol", "lysisNotes", "xtnRemaining", "xtnDate", "xtnYear", "xtnType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnProtocol", "xtnNotes", "qubit_ng.ul", "qubitDate", "pico_ng.ul", "picoDate", "purity_260.280", "purity_260.230", "purityDate", "fieldNotes", "captureDate", "captureYear", "group", "animalName", "species", "sex", "animalLog_microchip", "animalLog_group", "animalLog_name"))
+
+xtnMaster_blood_e2 <- xtnMaster_blood %>%
+  mutate(
+    sampleLocated = case_when(
+      animalID == "BLANK" ~ NA,
+      .default = "yes"
+      ),
+    animalID = case_when(
+      animalID == "BLANK" ~ str_c("xtnNeg_p", xtnPlate, ".", xtnRow, xtnCol),
+      .default = animalID
+      ),
+    sampleRemaining = "yes",
+    sampleType = case_when(
+      str_detect(animalID, "xtnNeg") ~ "xtnNeg",
+      .default = "blood"
+      ),
+    sampleStorage = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = "longmire"
+      ),
+    sampleID = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = str_c("lm_", sampleTube)
+      ),
+    sampleNotes = 
+      case_when(
+        !is.na(generalNotes) ~ str_c(sampleColor, "; ", generalNotes),
+        is.na(generalNotes) ~ sampleColor,
+        .default = sampleColor
+      ),
+    lysateRemaining = "no",
+    lysisDate = lysisDate,
+    lysisType = case_when(
+      str_detect(lysisPlate, "tube") ~ "tube",
+      .default = "plate"
+      ),
+    lysisLoc = case_when(
+      str_detect(lysisPlate, "tube") ~ str_c("t", gsub("\\s*\\([^\\)]+\\)", "", lysisPlate)),
+      .default = str_c("p", lysisPlate)
+      ),
+    lysisRow = lysisRow,
+    lysisCol = lysisCol,
+    lysisVol_ul = 400 + lysisProk_ul,
+    lysis_prokProp = round(lysisProk_percent/100, 2),
+    lysisDuration = case_when(
+      str_detect(lysisDuration, "'") ~ gsub("'", "", lysisDuration),
+      str_detect(lysisDuration, "‘") ~ gsub("‘", "", lysisDuration)
+    ),
+    lysisProtocol = 
+      case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        .default = "laLab_prok"
+        ),
+    lysisNotes = 
+      case_when(
+        lysisProtocol == "laLab_prok" ~ "Used protocol for longmire-stored blood sample ProK lysis from 2018-09-15-2018-10-25 Barcoding extractions SEPTEMBER",
+        .default = NA
+      ),
+    xtnRemaining = "yes",
+    xtnDate = xtnDate,
+    xtnYear = str_sub(xtnDate, start = -4, end = length(xtnDate)),
+    xtnType = case_when(
+      !is.na(xtnTube) ~ "tube",
+      .default = "plate"
+      ),
+    xtnLoc = case_when(
+      !is.na(xtnTube) ~ str_c("t", xtnTube),
+      .default = str_c("p", xtnPlate)),
+    eltn = "e2",
+    xtnRow = xtnRow,
+    xtnCol = xtnCol,
+    xtnID = case_when(
+      xtnType == "plate" ~ str_c(sampleType, "_", xtnLoc, ".", xtnRow, xtnCol, "_", eltn),
+      .default = str_c(sampleType, "_", xtnLoc, "_", eltn)
+      ),
+    xtnProtocol = 
+      case_when(
+        xtnProtocol == "OT2" ~ "zymoViralMagbead_ot2",
+        str_detect(xtnProtocol, "manual") ~ "zymoViralMagbead_manual",
+        .default = xtnProtocol
+        ),
+    xtnNotes = NA,
+    qubit_ng.ul = case_when(
+      yieldType == "qubit" ~ ng.ul_E2,
+      .default = NA
+      ),
+    qubitDate = case_when(
+      !is.na(qubit_ng.ul) ~ yieldDate,
+      .default = NA
+      ),
+    pico_ng.ul = case_when(
+      yieldType == "picogreen" ~ ng.ul_E2,
+      .default = NA
+      ),
+    picoDate = case_when(
+      !is.na(pico_ng.ul) ~ yieldDate,
+      .default = NA
+      ),
+    purity_260.280 = NA,
+    purity_260.230 = NA,
+    purityDate = NA,
+    fieldNotes = case_when(
+      notesField == "NULL" ~ NA,
+      notesField == "BLANK" ~ NA,
+      .default = notesField
+      ),
+    captureDate = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = captureDate
+      ),
+    captureYear = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = str_sub(captureDate, start = -4, end = -1)
+    ),
+    group = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = groupName
+      ),
+    animalName = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = animalName
+      ),
+    species = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      species == "SFUS" ~ "LWED",
+      species == "SIMP" ~ "SIMP"
+      ),
+    sex = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = sex
+      )) %>%
+  mutate("animalLog_microchip" = NA,
+         "animalLog_group" = NA,
+         "animalLog_name" = NA) %>%
+  select(c("sampleLocated", "animalID", "sampleRemaining", "sampleType", "sampleStorage", "sampleID", "sampleNotes", "lysateRemaining", "lysisDate", "lysisType", "lysisLoc", "lysisRow", "lysisCol", "lysisVol_ul", "lysisDuration", "lysis_prokProp", "lysisProtocol", "lysisNotes", "xtnRemaining", "xtnDate", "xtnYear", "xtnType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnProtocol", "xtnNotes", "qubit_ng.ul", "qubitDate", "pico_ng.ul", "picoDate", "purity_260.280", "purity_260.230", "purityDate", "fieldNotes", "captureDate", "captureYear", "group", "animalName", "species", "sex", "animalLog_microchip", "animalLog_group", "animalLog_name"))
+
+xtnMaster_blood_updated27July2023 <- rbind(xtnMaster_blood_e1, xtnMaster_blood_e2)
+```
+
+Export
+
+```{r}
+write.csv(xtnMaster_blood_updated27July2023, "./extractions/tamGenetics_xtnsBlood_master_updated27July2023.csv", row.names = F)
+```
+
+## Fecal samples
+
+```{r}
+xtnMaster_fecal <- read.csv("./extractions/tamGenetics_extractionsFecal_master_21July2023.csv", na.strings = c("", "NA"))
+
+xtnMaster_fecal_updated27July2023 <- xtnMaster_fecal %>%
+  mutate(
+    sampleLocated = "yes",
+    animalID = animalID,
+    sampleRemaining = "yes",
+    sampleType = "fecal",
+    sampleStorage = "rnaLater",
+    sampleID = str_c("rnaL_", sampleTube),
+    sampleNotes = generalNotes,
+    lysateRemaining = "unk",
+    lysisDate = lysisDate,
+    lysisType = "tube",
+    lysisLoc = str_c("t", lysisTube),
+    lysisRow = NA,
+    lysisCol = NA,
+    lysisVol_ul = 950+20,
+    lysis_prokProp = 20/lysisVol_ul,
+    lysisDuration = case_when(
+      lysisDuration_h == "3" ~ "03:00",
+      lysisDuration_h == "20.5" ~ "20:30"
+    ),
+    lysisProtocol = 
+      case_when(
+        lysisDate == "07/08/2022" ~ "zymoFecalSoil_a_manual",
+        lysisDate == "07/12/2022" ~ "zymoFecalSoil_a_manual",
+        lysisDate == "08/10/2022" ~ "zymoFecalSoil_a_manual",
+        lysisDate == "03/21/2023" ~ "zymoFecalSoil_b_manual"
+        ),
+    lysisNotes = NA,
+    xtnRemaining = "yes",
+    xtnDate = xtnDate,
+    xtnYear = str_sub(xtnDate, start = -4, end = length(xtnDate)), xtnType = "tube",
+    xtnLoc = str_c("t", xtnTube),
+    eltn = tolower(elution),
+    xtnRow = NA,
+    xtnCol = NA,
+    xtnID = case_when(
+      xtnType == "plate" ~ str_c(sampleType, "_", xtnLoc, ".", xtnRow, xtnCol, "_", eltn),
+      .default = str_c(sampleType, "_", xtnLoc, "_", eltn)
+      ),
+    xtnProtocol = 
+      case_when(
+        lysisDate == "07/08/2022" ~ "zymoFecalSoil_a",
+        lysisDate == "07/12/2022" ~ "zymoFecalSoil_a",
+        lysisDate == "08/10/2022" ~ "zymoFecalSoil_a",
+        lysisDate == "03/21/2023" ~ "zymoFecalSoil_b"
+        ),
+    xtnNotes = NA,
+    qubit_ng.ul = case_when(
+      yieldType == "qubit" & eltn == "e1" ~ ng.ul_E1,
+      .default = NA
+      ),
+    qubitDate = case_when(
+      !is.na(qubit_ng.ul) ~ yieldDate,
+      .default = NA
+      ),
+    pico_ng.ul = case_when(
+      yieldType == "qubit" & eltn == "e1" ~ ng.ul_E1,
+      .default = NA
+      ),
+    picoDate = case_when(
+      !is.na(pico_ng.ul) ~ yieldDate,
+      .default = NA
+      ),
+    purity_260.280 = A260.A280,
+    purity_260.230 = A260.A230,
+    purityDate = purityDate,
+    fieldNotes = NA,
+    captureDate = "unk",
+    captureYear = "unk",
+    group = groupName,
+    animalName = animalName,
+    species = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      species == "SFUS" ~ "LWED",
+      species == "SIMP" ~ "SIMP"
+      ),
+    sex = sex) %>%
+  mutate("animalLog_microchip" = NA,
+         "animalLog_group" = NA,
+         "animalLog_name" = NA) %>%
+  select(c("sampleLocated", "animalID", "sampleRemaining", "sampleType", "sampleStorage", "sampleID", "sampleNotes", "lysateRemaining", "lysisDate", "lysisType", "lysisLoc", "lysisRow", "lysisCol", "lysisVol_ul", "lysisDuration", "lysis_prokProp", "lysisProtocol", "lysisNotes", "xtnRemaining", "xtnDate", "xtnYear", "xtnType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnProtocol", "xtnNotes", "qubit_ng.ul", "qubitDate", "pico_ng.ul", "picoDate", "purity_260.280", "purity_260.230", "purityDate", "fieldNotes", "captureDate", "captureYear", "group", "animalName", "species", "sex", "animalLog_microchip", "animalLog_group", "animalLog_name"))
+```
+
+Export
+
+```{r}
+write.csv(xtnMaster_fecal_updated27July2023, "./extractions/tamGenetics_xtnsFecal_master_updated27July2023.csv", row.names = F)
+```
+
+## Hair samples
+
+NOTE - the format for one of the capture dates was messed up; looked up capture date in capture files and adjusted below
+
+```{r}
+xtnMaster_hair <- read.csv("./extractions/tamGenetics_extractionsHair_master_21July2023.csv", na.strings = c("", "NA")) %>%
+  mutate(xtnTube = gsub("\\s+", "", xtnTube))
+
+xtnMaster_hair_e1 <- xtnMaster_hair %>%
+  filter(is.na(elution)|elution != "E2") %>%
+  mutate(
+    hairType = case_when(
+      hairType == "NULL" ~ "unk; assume plucked",
+      hairType == "UNK" ~ "unk; assume plucked",
+      .default = hairType
+      )
+    ) %>%
+  mutate(
+    sampleLocated = case_when(
+      animalID == "BLANK" ~ NA,
+      .default = located.
+      ),
+    animalID = case_when(
+      animalID == "BLANK" ~ str_c("xtnNeg_p", xtnPlate, ".", xtnRow, xtnCol),
+      .default = animalID
+      ),
+    sampleRemaining = case_when(
+      hairDepleted. == "yes" ~ "no",
+      hairDepleted. == "no" ~ "yes",
+      .default = NA
+    ),
+    sampleType = case_when(
+      str_detect(animalID, "xtnNeg") ~ "xtnNeg",
+      .default = "hair"
+    ),
+    sampleStorage = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = "envelope"
+    ),
+    sampleID = str_c("env_", envelope.),
+    sampleNotes = case_when(
+      str_detect(hairType, "unk") ~ generalNotes,
+      !str_detect(hairType, "unk") ~ str_c(hairType, "; ", generalNotes)
+      ),
+    lysateRemaining = NA,
+    lysisDate = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = lysisDate
+      ),
+    lysisType = case_when(
+      is.na(lysisDate) ~ NA,
+      .default = "tube"
+    ),
+    lysisLoc = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      str_detect(xtnTube, "A,B") ~ NA,
+      .default = str_c("t", lysisTube)
+      ),
+    lysisRow = NA,
+    lysisCol = NA,
+    lysisVol_ul = 
+      case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        lysisProtocol == "A" ~ "200",
+        lysisProtocol == "B" ~ "200",
+        lysisProtocol == "C" ~ "250",
+        lysisProtocol == "D" ~ "250",
+        lysisProtocol == "E" ~ "130",
+        lysisProtocol == "E*" ~ "130",
+        .default = NA
+        ),
+    lysis_prokProp = 
+      case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        lysisProtocol == "A" ~ as.character(20/200),
+        lysisProtocol == "B" ~ as.character(10/200),
+        lysisProtocol == "C" ~ as.character(12.5/250),
+        lysisProtocol == "D" ~ as.character(20/250),
+        lysisProtocol == "E" ~ as.character(20/130),
+        lysisProtocol == "E*" ~ as.character(20/130),
+        .default = NA
+      ),
+    lysisDuration = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      str_detect(xtnTube, "A,B") ~ NA,
+      str_detect(lysisDuration, "'") ~ gsub("'", "", lysisDuration),
+      str_detect(lysisDuration, "‘") ~ gsub("‘", "", lysisDuration),
+      .default = NA
+    ),
+    lysisProtocol = 
+      case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        lysisProtocol == "A" ~ "zymoSTB_a",
+        lysisProtocol == "B" ~ "zymoSTB_b",
+        lysisProtocol == "C" ~ "zymoSTB_c",
+        lysisProtocol == "D" ~ "zymoSTB_d",
+        lysisProtocol == "E" ~ "omegaTL_a",
+        lysisProtocol == "E*" ~ "omegaTL_b",
+        .default = lysisProtocol
+        ),
+    lysisNotes = case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        lysisProtocol == "zymoSTB_a" ~ "~4-6 hairs; 80 ul water, 90 ul Solid Tissue Buffer, 10 ul 1M DTT, 20 ul ProK",
+        lysisProtocol == "zymoSTB_b" ~ "~15-20 hairs; 90 ul water, 90 ul Solid Tissue Buffer, 10 ul 1M DTT, 10 ul ProK",
+        lysisProtocol == "zymoSTB_c" ~ "~10 hairs; 112.5 ul water, 112.5 ul Solid Tissue Buffer, 12.5 ul 1M DTT, 12.5 ul ProK",
+        lysisProtocol == "zymoSTB_d" ~ "~10 hairs; 110 ul water, 110 ul Solid Tissue Buffer, 10 ul 1M DTT, 20 ul ProK",
+        lysisProtocol == "omegaTL_a" ~ "~10 hairs; 100 ul TL Buffer, 10 ul 1M DTT, 20 ul ProK",
+        lysisProtocol == "omegaTL_b" ~ "~10 hairs; 100 ul TL Buffer, 10 ul 1M DTT, 20 ul ProK; *in my lab notebook I have protocol B steps listed, yet the lysis mix calculator for protocol E - I'm pretty certain I used protocol E here, but wanted to note this discrepancy just in case",
+        .default = NA
+        ),
+    xtnDate = xtnDate,
+    xtnRemaining = case_when(
+      str_detect(xtnStatus, "OUT") ~ "no",
+      str_detect(xtnStatus, "nonfxnl") ~ "yes, but nonfxnl",
+      !is.na(xtnDate) ~ "yes"
+      ),
+    xtnYear = str_sub(xtnDate, start = -4, end = length(xtnDate)),
+    xtnType = case_when(
+      is.na(xtnDate) ~ NA,
+      !is.na(xtnTube) ~ "tube",
+      .default = "plate"
+      ),
+    xtnLoc = case_when(
+      str_detect(xtnTube, "A,B") ~ str_c("tx", gsub("A,B", "A", xtnTube)),
+      str_detect(xtnTube, "WBO") ~ str_c("tx", xtnTube),
+      !is.na(xtnTube) ~ str_c("t", xtnTube),
+      .default = str_c("p", xtnPlate)
+      ),
+    eltn = case_when(
+      !is.na(xtnDate) ~ "e1"
+      ),
+    xtnRow = xtnRow,
+    xtnCol = xtnCol,
+    xtnID = case_when(
+      xtnType == "plate" ~ str_c(sampleType, "_", xtnLoc, ".", xtnRow, xtnCol, "_", eltn),
+      .default = str_c(sampleType, "_", xtnLoc, "_", eltn)
+      ),
+    xtnProtocol = 
+      case_when(
+        xtnProtocol == "A" ~ "zymoViralMagbead_a_manual",
+        xtnProtocol == "B" ~ "omegaBloodTissue_a_manual",
+        xtnProtocol == "C" ~ "zymoViralMagbead_b_manual",
+        xtnProtocol == "D" ~ "zymoGenomicDNA_a_manual",
+        xtnProtocol == "E" ~ "zymoMagbeadPlus_a_manual",
+        xtnProtocol == "F" ~ "zymoViralMagbead_a_ot2",
+        xtnProtocol == "G" ~ "omegaBloodTissue_a_ot2",
+        .default = xtnProtocol
+      ),
+    xtnNotes = case_when(
+      !is.na(xtnStatus) ~ str_c(xtnNotes, "; ", xtnStatus),
+      .default = xtnNotes
+      ),
+    qubit_ng.ul = qubit_ng.ul_e1,
+    qubitDate = qubitDate,
+    pico_ng.ul = NA,
+    picoDate = NA,
+    purity_260.280 = ndrop.260.280,
+    purity_260.230 = ndrop.260.230,
+    purityDate = ndropDate,
+    fieldNotes = NA,
+    captureDate = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      animalID == 56 & sampleLocated == "yes" ~ "07/18/2016",
+      .default = captureDate
+      ),
+    captureYear = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      .default = str_sub(captureDate, start = -4, end = -1)
+    ),
+    group = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      .default = groupName
+      ),
+    animalName = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      .default = animalName
+      ),
+    species = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      species == "SFUS" ~ "LWED",
+      species == "SIMP" ~ "SIMP"
+      ),
+    sex = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      .default = sex
+      )) %>%
+  dplyr::rename("animalLog_microchip" = "AnimalLog_microchip",
+         "animalLog_group" = "AnimalLog_group",
+         "animalLog_name" = "AnimalLog_name") %>%
+  select(c("sampleLocated", "animalID", "sampleRemaining", "sampleType", "sampleStorage", "sampleID", "sampleNotes", "lysateRemaining", "lysisDate", "lysisType", "lysisLoc", "lysisRow", "lysisCol", "lysisVol_ul", "lysisDuration", "lysis_prokProp", "lysisProtocol", "lysisNotes", "xtnRemaining", "xtnDate", "xtnYear", "xtnType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnProtocol", "xtnNotes", "qubit_ng.ul", "qubitDate", "pico_ng.ul", "picoDate", "purity_260.280", "purity_260.230", "purityDate", "fieldNotes", "captureDate", "captureYear", "group", "animalName", "species", "sex", "animalLog_microchip", "animalLog_group", "animalLog_name"))
+
+xtnMaster_hair_e2 <- xtnMaster_hair %>%
+  filter(is.na(elution)|elution != "E2") %>%
+  mutate(
+    hairType = case_when(
+      hairType == "NULL" ~ "unk; assume plucked",
+      hairType == "UNK" ~ "unk; assume plucked",
+      .default = hairType
+      )
+    ) %>%
+  mutate(
+    sampleLocated = case_when(
+      animalID == "BLANK" ~ NA,
+      .default = located.
+      ),
+    animalID = case_when(
+      animalID == "BLANK" ~ str_c("xtnNeg_p", xtnPlate, ".", xtnRow, xtnCol),
+      .default = animalID
+      ),
+    sampleRemaining = case_when(
+      hairDepleted. == "yes" ~ "no",
+      hairDepleted. == "no" ~ "yes",
+      .default = NA
+    ),
+    sampleType = case_when(
+      str_detect(animalID, "xtnNeg") ~ "xtnNeg",
+      .default = "hair"
+    ),
+    sampleStorage = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = "envelope"
+    ),
+    sampleID = str_c("env_", envelope.),
+    sampleNotes = case_when(
+      str_detect(hairType, "unk") ~ generalNotes,
+      !str_detect(hairType, "unk") ~ str_c(hairType, "; ", generalNotes)
+      ),
+    lysateRemaining = "unk",
+    lysisDate = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = lysisDate
+      ),
+    lysisType = case_when(
+      is.na(lysisDate) ~ NA,
+      .default = "tube"
+    ),
+    lysisLoc = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      str_detect(xtnTube, "A,B") ~ NA,
+      .default = str_c("t", lysisTube)
+      ),
+    lysisRow = NA,
+    lysisCol = NA,
+    lysisVol_ul = 
+      case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        lysisProtocol == "A" ~ "200",
+        lysisProtocol == "B" ~ "200",
+        lysisProtocol == "C" ~ "250",
+        lysisProtocol == "D" ~ "250",
+        lysisProtocol == "E" ~ "130",
+        lysisProtocol == "E*" ~ "130",
+        .default = lysisProtocol
+        ),
+    lysis_prokProp = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      lysisProtocol == "A" ~ as.character(20/200),
+      lysisProtocol == "B" ~ as.character(10/200),
+      lysisProtocol == "C" ~ as.character(12.5/250),
+      lysisProtocol == "D" ~ as.character(20/250),
+      lysisProtocol == "E" ~ as.character(20/130),
+      lysisProtocol == "E*" ~ as.character(20/130),
+      .default = lysisProtocol
+      ),
+    lysisDuration = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      str_detect(xtnTube, "A,B") ~ NA,
+      str_detect(lysisDuration, "'") ~ gsub("'", "", lysisDuration),
+      str_detect(lysisDuration, "‘") ~ gsub("‘", "", lysisDuration)
+    ),
+    lysisProtocol = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      lysisProtocol == "A" ~ "zymoSTB_a",
+      lysisProtocol == "B" ~ "zymoSTB_b",
+      lysisProtocol == "C" ~ "zymoSTB_c",
+      lysisProtocol == "D" ~ "zymoSTB_d",
+      lysisProtocol == "E" ~ "omegaTL_a",
+      lysisProtocol == "E*" ~ "omegaTL_b",
+      .default = lysisProtocol
+      ),
+    lysisNotes = case_when(
+        str_detect(animalID, "xtnNeg") ~ NA,
+        lysisProtocol == "zymoSTB_a" ~ "~4-6 hairs; 80 ul water, 90 ul Solid Tissue Buffer, 10 ul 1M DTT, 20 ul ProK",
+        lysisProtocol == "zymoSTB_b" ~ "~15-20 hairs; 90 ul water, 90 ul Solid Tissue Buffer, 10 ul 1M DTT, 10 ul ProK",
+        lysisProtocol == "zymoSTB_c" ~ "~10 hairs; 112.5 ul water, 112.5 ul Solid Tissue Buffer, 12.5 ul 1M DTT, 12.5 ul ProK",
+        lysisProtocol == "zymoSTB_d" ~ "~10 hairs; 110 ul water, 110 ul Solid Tissue Buffer, 10 ul 1M DTT, 20 ul ProK",
+        lysisProtocol == "omegaTL_a" ~ "~10 hairs; 100 ul TL Buffer, 10 ul 1M DTT, 20 ul ProK",
+        lysisProtocol == "omegaTL_b" ~ "~10 hairs; 100 ul TL Buffer, 10 ul 1M DTT, 20 ul ProK; *in my lab notebook I have protocol B steps listed, yet the lysis mix calculator for protocol E - I'm pretty certain I used protocol E here, but wanted to note this discrepancy just in case",
+        .default = NA
+        ),
+    xtnDate = xtnDate,
+    xtnRemaining = case_when(
+      str_detect(xtnStatus, "OUT") ~ "no",
+      str_detect(xtnStatus, "nonfxnl") ~ "yes, but nonfxnl",
+      !is.na(xtnDate) ~ "yes"
+      ),
+    xtnYear = str_sub(xtnDate, start = -4, end = length(xtnDate)),
+    xtnType = case_when(
+      is.na(xtnDate) ~ NA,
+      !is.na(xtnTube) ~ "tube",
+      .default = "plate"
+      ),
+    xtnLoc = case_when(
+      str_detect(xtnTube, "A,B") ~ str_c("tx", gsub("A,B", "B", xtnTube)),
+      str_detect(xtnTube, "WBO") ~ str_c("tx", xtnTube),
+      !is.na(xtnTube) ~ str_c("t", xtnTube),
+      .default = str_c("p", xtnPlate)
+      ),
+    eltn = case_when(
+      !is.na(xtnDate) ~ "e2"
+      ),
+    xtnRow = xtnRow,
+    xtnCol = xtnCol,
+    xtnID = case_when(
+      xtnType == "plate" ~ str_c(sampleType, "_", xtnLoc, ".", xtnRow, xtnCol, "_", eltn),
+      .default = str_c(sampleType, "_", xtnLoc, "_", eltn)
+      ),
+    xtnProtocol = 
+      case_when(
+        xtnProtocol == "A" ~ "zymoViralMagbead_a_manual",
+        xtnProtocol == "B" ~ "omegaBloodTissue_a_manual",
+        xtnProtocol == "C" ~ "zymoViralMagbead_b_manual",
+        xtnProtocol == "D" ~ "zymoGenomicDNA_a_manual",
+        xtnProtocol == "E" ~ "zymoMagbeadPlus_a_manual",
+        xtnProtocol == "F" ~ "zymoViralMagbead_a_ot2",
+        xtnProtocol == "G" ~ "omegaBloodTissue_a_ot2",
+        .default = xtnProtocol
+      ),
+    xtnNotes = case_when(
+      !is.na(xtnStatus) ~ str_c(xtnNotes, "; ", xtnStatus),
+      .default = xtnNotes
+      ),
+    qubit_ng.ul = qubit_ng.ul_e2,
+    qubitDate = qubitDate,
+    pico_ng.ul = NA,
+    picoDate = NA,
+    purity_260.280 = ndrop.260.280,
+    purity_260.230 = ndrop.260.230,
+    purityDate = ndropDate,
+    fieldNotes = NA,
+    captureDate = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      animalID == 56 & sampleLocated == "yes" ~ "07/18/2016",
+      .default = captureDate
+      ),
+    captureYear = case_when(
+      str_detect(animalID, "Neg") ~ NA,
+      .default = str_sub(captureDate, start = -4, end = -1)
+    ),
+    group = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = groupName
+      ),
+    animalName = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = animalName
+      ),
+    species = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      species == "SFUS" ~ "LWED",
+      species == "SIMP" ~ "SIMP"
+      ),
+    sex = case_when(
+      str_detect(animalID, "xtnNeg") ~ NA,
+      .default = sex
+      )) %>%
+  dplyr::rename("animalLog_microchip" = "AnimalLog_microchip",
+         "animalLog_group" = "AnimalLog_group",
+         "animalLog_name" = "AnimalLog_name") %>%
+  select(c("sampleLocated", "animalID", "sampleRemaining", "sampleType", "sampleStorage", "sampleID", "sampleNotes", "lysateRemaining", "lysisDate", "lysisType", "lysisLoc", "lysisRow", "lysisCol", "lysisVol_ul", "lysisDuration", "lysis_prokProp", "lysisProtocol", "lysisNotes", "xtnRemaining", "xtnDate", "xtnYear", "xtnType", "xtnID", "xtnLoc", "eltn", "xtnRow", "xtnCol", "xtnProtocol", "xtnNotes", "qubit_ng.ul", "qubitDate", "pico_ng.ul", "picoDate", "purity_260.280", "purity_260.230", "purityDate", "fieldNotes", "captureDate", "captureYear", "group", "animalName", "species", "sex", "animalLog_microchip", "animalLog_group", "animalLog_name"))
+
+xtnMaster_hair_updated27July2023 <- rbind(xtnMaster_hair_e1, xtnMaster_hair_e2)
+```
+
+Export
+
+```{r}
+write.csv(xtnMaster_hair_updated27July2023, "./extractions/tamGenetics_xtnsHair_master_updated27July2023.csv", row.names = F)
+```
+
+# Xtns remaining after August 2023
+
+## Import xtn records post-onsite checks & post-30x3
+
+First import xtn records updated after on-site checks & 30x3 run
+
+```{r}
+xtnsAll_updated_postOnsiteChecks_post30x3 <- read.csv("./extractions/tamGenetics_xtnsAll_updated_postOnsiteChecks_post30x3.csv")
+```
+
+## Xtns depleted
+
+Then update xtns depleted during the tamGenetics prep (which used xtns from all blood & hair samples) - xtns listed were either completely depleted or have a remaining volume that's too low to be usable unless rehydrated
+
+```{r}
+xtnsOut_postTamGenetics_Aug2023 <- data.frame(
+  xtnID = c(
+            "blood_t700_e1",
+            "blood_t1275_e1",
+            "hair_p3.C5_e1",
+            "hair_p3.F6_e1",
+            "hair_p3.F6_e2",
+            "hair_p3.H10_e1",
+            "hair_t76_e1",
+            "hair_p3.D10_e1",
+            "hair_p3.F12_e1",
+            "hair_p4.F3_e1",
+            "hair_p4.F3_e2",
+            "hair_p4.H1_e1",
+            "hair_p4.H1_e2",
+            "hair_t16_e1",
+            "hair_t16_e2",
+            "hair_tT11.e1",
+            "hair_t110_e1",
+            "hair_tx23A_e1",
+            "hair_tx23A_e2",
+            "hair_ptamTiger1.A1_e1",
+            "hair_ptamTiger1.B1_e1",
+            "hair_ptamTiger2.A2_e1",
+            "hair_t55_e1",
+            "hair_t1_e1",
+            "hair_tT1.11_e2",
+            "hair_tT1.13_e1",
+            "hair_tT1.14_e1",
+            "hair_t2_e1",
+            "hair_t49_e1",
+            "hair_t51_e1",
+            "hair_t7_e1"
+            )) %>%
+  merge(., xtnsAll_updated_postOnsiteChecks_post30x3[, c("animalID", "xtnID")], by = "xtnID", all.x = T) %>%
+  mutate(xtnRemaining = "no") %>%
+  select(c("animalID", "xtnID", "xtnRemaining"))
+```
+
+## Xtns mistakenly listed as depleted
+
+There were also a few xtns that were listed as depleted, but still have volume - update those here:
+
+```{r}
+xtnsUpdate_asPresent <- data.frame(
+  xtnID = c(
+            "hair_p3.C9_e2",
+            "hair_p3.A11_e2",
+            "hair_t6_e1",
+            "hair_t6_e2"
+            )) %>%
+  merge(., xtnsAll_updated_postOnsiteChecks_post30x3[, c("animalID", "xtnID")], by = "xtnID", all.x = T) %>%
+  mutate(xtnRemaining = "yes") %>%
+  select(c("animalID", "xtnID", "xtnRemaining"))
+```
+
+## Update xtn records
+
+```{r}
+xtnsAll_updated_postTamGenetics_Aug2023 <- xtnsAll_updated_postOnsiteChecks_post30x3 %>%
+  mutate(
+    xtnRemaining = case_when(
+      xtnID %in% xtnsOut_postTamGenetics_Aug2023$xtnID ~ "no",
+      xtnID %in% xtnsUpdate_asPresent$xtnID ~ "yes",
+      .default = xtnRemaining
+      ))
+
+xtnsBlood_updated_postTamGenetics_Aug2023 <- xtnsAll_updated_postTamGenetics_Aug2023 %>%
+  filter(sampleType == "blood")
+
+xtnsFecal_updated_postTamGenetics_Aug2023 <- xtnsAll_updated_postTamGenetics_Aug2023 %>%
+  filter(sampleType == "fecal")
+
+xtnsHair_updated_postTamGenetics_Aug2023 <- xtnsAll_updated_postTamGenetics_Aug2023 %>%
+  filter(sampleType == "hair")
+```
+
+Export
+
+```{r}
+write.csv(xtnsAll_updated_postTamGenetics_Aug2023, "./extractions/tamGenetics_xtnsBloodFecalHair_master_updated22Aug2023.csv", row.names = F)
+
+write.csv(xtnsBlood_updated_postTamGenetics_Aug2023, "./extractions/tamGenetics_xtnsBlood_master_updated22Aug2023.csv", row.names = F)
+
+write.csv(xtnsFecal_updated_postTamGenetics_Aug2023, "./extractions/tamGenetics_xtnsFecal_master_updated22Aug2023.csv", row.names = F)
+
+write.csv(xtnsHair_updated_postTamGenetics_Aug2023, "./extractions/tamGenetics_xtnsHair_master_updated22Aug2023.csv", row.names = F)
+```
+
+
