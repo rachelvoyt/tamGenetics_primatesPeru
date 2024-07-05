@@ -1,0 +1,108 @@
+---
+title: "Quality Checks"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+To get sequence quality scores for each sample, we can use 'fastqc' -- 'fastp' is better for paired-end reads, but doesn't play nice when it comes to getting quality scores from the MultiQC report. Once 
+
+```{r}
+library(TidyMultiqc)
+```
+
+## 2.1 Run FastQC & create MultiQC report
+
+Step 1: Run FastQC & create MultiQC report
+
+((*Note*: use "\--interactive" to force plots to tell you which line belongs to which sample, otherwise it will remove this option since there are so many samples in this run.))
+
+First need to get files out of their folders
+```{bash eval = F}
+# Navigate to the directory containing the .fastq.gz files from the sequencing run
+cd 00_run3Seqs/
+
+# Move all .gz files out of their individual folders and into the current directory & remove empty folders
+mv */* ./
+rm /*
+
+# Extract all files
+gunzip -r .
+```
+
+Then run fastqc and multiqc
+
+```{bash eval = F}
+cd ../01_run3QualityChecks
+conda activate fastqc-env
+for i in ../00_run3Seqs/*; do fastqc $i; done
+mv ../01_run2Seqs/*fastqc* .
+conda activate multiqc-env
+multiqc --interactive .
+```
+
+Step 2: Load FastQC MultiQC report to R
+
+```{r}
+MultiQCfastQCpath <- file.path("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/01_run2_fecalHairBlood/00_qualityChecksFastQC/multiqc_data", "multiqc_data.json")
+
+MultiQCfastQC <- TidyMultiqc::load_multiqc(MultiQCfastQCpath, sections = c("general", "raw"))
+```
+
+## 2.2 Obtain median sequence quality scores
+
+For the analyses in this section, I followed [this vignette](https://cran.r-project.org/web/packages/TidyMultiqc/vignettes/TidyMultiqc.html) provided by the makers of the TidyMultiqc package.
+
+MultiQC reports do not provide a numerical summary statistic for read quality; they only have mapping quality and pass/fails for the per-base sequence quality. We instead need to pull this data from one of the plots -- I'm using the "Per Sequence Quality Scores" plot here:
+
+```{r}
+df <- TidyMultiqc::load_multiqc(
+  MultiQCfastQCpath, 
+  sections = 'plot',
+  plots = "fastqc_per_sequence_quality_scores_plot")
+```
+
+This provides a nested data frame as a set of x, y pairs. As it's a histogram plot, we know that the `x` value is the quality score, and `y` is the number of times that score has been counted.
+
+We can use tidyr to unnest the data, HistDat to create a HistDat object for each group, then purr to map each plot data frame into a row of summary statistics:
+
+```{r}
+df_unNest <- df %>%
+  dplyr::mutate(
+    purrr::map_dfr(plot.fastqc_per_sequence_quality_scores_plot, function(plot_df){
+      hist = HistDat::HistDat(vals=plot_df$x, counts = plot_df$y)
+      list(
+        mean_qc = mean(hist),
+        median_qc = median(hist),
+        max_qc = max(hist)
+      )
+    }),
+    plot.fastqc_per_sequence_quality_scores_plot = NULL
+  )
+```
+
+This dataframe has separate rows for reads 1 & 2; we can rearrange that to make it easier to work with for our purposes. Since we're most interested in median quality, we'll just pull that value for each sample.
+
+```{r}
+seqQC_r1 <- df_unNest %>%
+  select(c("metadata.sample_id", "median_qc")) %>%
+  filter(grepl("R1", metadata.sample_id)) %>%
+  rename(medianQC_r1 = median_qc) %>%
+  mutate(sampleNo = substr(metadata.sample_id, start = 9, stop = 11))
+seqQC_r2 <- df_unNest %>%
+  select(c("metadata.sample_id", "median_qc")) %>%
+  filter(grepl("R2", metadata.sample_id)) %>%
+  rename(medianQC_r2 = median_qc) %>%
+  mutate(sampleNo = substr(metadata.sample_id, start = 9, stop = 11))
+seqQC <- merge(seqQC_r1, seqQC_r2, by = "sampleNo") %>%
+  select(c("sampleNo", "medianQC_r1", "medianQC_r2")) %>%
+  arrange(sampleNo)
+```
+
+Let's just take a peek at the distribution of sequence quality scores for now; we'll use it in our other analyses later on:
+
+```{r}
+ggplot(seqQC, aes(medianQC_r1)) +
+  geom_bar(stat = "count") +
+  theme_bw()
+```
