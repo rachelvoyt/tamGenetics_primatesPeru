@@ -1,0 +1,1271 @@
+---
+title: "tamGenetics_demography"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+# 2 Packages
+
+```{r}
+library(tidyverse)
+library(janitor)
+```
+
+# 3 Data
+
+## md_tamRun5
+
+Latest version of md_tamRun5 (from metadataReconciliation.Rmd file)
+
+```{r}
+# latest updated version of md_tamRun5 from metadataReconciliation.Rmd
+md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+md_tamRun5_hairSamples <- md_tamRun5_v5 %>%
+  filter(sampleType == "hair")
+
+md_tamRun5_hairSamples %>%
+  get_dupes(animalID)
+
+md_tamRun5_bloodSamples <- md_tamRun5_v5 %>%
+  filter(sampleType == "blood")
+```
+
+## capData_byIndiv
+
+Latest version of capData_byIndiv (from
+tamGenetics_paper3_dataOrganization) 1) filter to first capture for each
+animalID 2) filter again to animalIDs in tamRun5
+
+**note** exclude those in capData w/"UNK" animalID; did a lot of digging
+in tamGenetics_paper3_dataOrganization.Rmd and most likely these entries
+need to be ditched
+
+**note2** change rowID 1 ageClass to adult (found that was not in fact a
+juv as listed in capData)
+
+```{r}
+# latest updated version of capData_byIndiv from current rmd
+capData_byIndiv_v5 <- read.csv("./paper3_demographics/dataOrganization/captureData_byIndividual_v5.csv") %>%
+  filter(as.character(animalID) != "UNK") %>%
+  mutate(
+    ageClass = case_when(
+      rowID == 1 ~ "adult",
+      .default = ageClass
+    )
+  )
+
+# species subsets
+capData_byIndiv_lwed <- capData_byIndiv_v5 %>%
+  filter(species == "LWED")
+capData_byIndiv_simp <- capData_byIndiv_v5 %>%
+  filter(species == "SIMP")
+
+# filter to first capture for each animalID
+capData_byIndiv_firstEntry <- capData_byIndiv_v5[match(unique(capData_byIndiv_v5$animalID), capData_byIndiv_v5$animalID),] %>%
+  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+
+# filter animalIDs in tamRun5
+## full set
+capData_byIndiv_firstEntry_tamRun5 <- capData_byIndiv_firstEntry %>%
+  filter(animalID %in% md_tamRun5_v5$animalID)
+
+## hair samples
+capData_byIndiv_firstEntry_tamRun5Hair <- capData_byIndiv_firstEntry %>%
+  filter(animalID %in% md_tamRun5_hairSamples$animalID)
+
+## blood samples
+capData_byIndiv_firstEntry_tamRun5Blood <- capData_byIndiv_firstEntry %>%
+  filter(animalID %in% md_tamRun5_bloodSamples$animalID)
+```
+
+# 4 Population overview
+
+## 4.1 capData numbers
+
+From 2009-2019: - LWED - n = 145 total - n = 70 juveniles (born during
+study period) - n = 75 non-juvs - n = 16 distinct groups - SIMP - n =
+103 total - n = 53 juveniles (born during study period) - n = 50
+non-juvs - n = 10 distinct groups
+
+```{r}
+# LWED
+capData_byIndiv_firstEntry_lwed <- capData_byIndiv_firstEntry %>%
+  # lwed only
+  filter(species == "LWED") %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613)
+
+table(capData_byIndiv_firstEntry_lwed$ageClass)
+
+## n = 145 total LWED individuals from 2009-2019
+capData_byIndiv_firstEntry_lwed %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  nrow()
+
+## n = 70 juv LWED
+capData_byIndiv_firstEntry_lwed %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # juvs only
+  filter(ageClass == "juvenile") %>%
+  nrow()
+
+## n = 75 non-juv LWED
+145-70
+
+## n = 33 male non-juv lwed
+capData_byIndiv_firstEntry_lwed %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # non-juvs only
+  filter(ageClass != "juvenile") %>%
+  # males
+  filter(sex == "M") %>%
+  nrow()
+
+## n = 42 female non-juv lwed
+capData_byIndiv_firstEntry_lwed %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # non-juvs only
+  filter(ageClass != "juvenile") %>%
+  # males
+  filter(sex == "F") %>%
+  nrow()
+
+## groups
+capData_byIndiv_firstEntry %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  filter(species == "LWED") %>%
+  select(groupName) %>%
+  distinct() %>%
+  nrow()
+
+
+
+# SIMP
+## n = 103 total SIMP individuals from 2009-2019
+capData_byIndiv_firstEntry %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "SIMP") %>%
+  nrow()
+
+## n = 53 juv SIMP
+capData_byIndiv_firstEntry %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "SIMP") %>%
+  # juvs only
+  filter(ageClass == "juvenile") %>%
+  nrow()
+
+## n = 50 non-juv SIMP
+103-53
+
+## groups
+capData_byIndiv_firstEntry %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  filter(species == "SIMP") %>%
+  select(groupName) %>%
+  distinct() %>%
+  nrow()
+```
+
+## 4.2 tamRun5 numbers
+
+### Full set
+
+From 2009-2019: - LWED - n = 144 total (out of 145 capData) - n = 69
+juveniles (70 capData) - n = 75 non-juvs (75 capData) - SIMP - n = 100
+total (103 capData) - n = 52 juveniles (53 capData) - n = 48 non-juvs
+(50 capData)
+
+```{r}
+# LWED
+## n = 144 total LWED individuals from 2009-2019
+capData_byIndiv_firstEntry_tamRun5 %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "LWED") %>%
+  nrow()
+
+## n = 69 juv LWED
+capData_byIndiv_firstEntry_tamRun5 %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "LWED") %>%
+  # juvs only
+  filter(ageClass == "juvenile") %>%
+  # ditch animalID 100/rowID 1 (listed as juv, but found not to be)
+  filter(rowID != 1) %>%
+  nrow()
+
+## n = 75 non-juv LWED
+144-69
+
+
+# SIMP
+## n = 100 total SIMP individuals from 2009-2019
+capData_byIndiv_firstEntry_tamRun5 %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "SIMP") %>%
+  nrow()
+
+## n = 52 juv SIMP
+capData_byIndiv_firstEntry_tamRun5 %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "SIMP") %>%
+  # juvs only
+  filter(ageClass == "juvenile") %>%
+  nrow()
+
+## n = 48 non-juv SIMP
+100-52
+```
+
+### Hair samples
+
+From 2009-2019: - LWED - n = 135 total (144 all tamRun5; 145 capData) -
+n = 62 juveniles (69 all tamRun5; 70 capData) - n = 73 non-juvs (75 all
+tamRun5; 75 capData) - SIMP - n = 99 total (100 all tamRun5; 103
+capData) - n = 52 juveniles (52 all tamRun5; 53 capData) - n = 47
+non-juvs (48 all tamRun5; 50 capData)
+
+```{r}
+# n = 234 indivs w/hair samples in tamRun5 total
+md_tamRun5_hairSamples %>%
+  select(animalID) %>%
+  distinct() %>%
+  nrow()
+
+# LWED
+## n = 135 total LWED individuals from 2009-2019
+capData_byIndiv_firstEntry_tamRun5Hair %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "LWED") %>%
+  nrow()
+
+## n = 62 juv LWED
+capData_byIndiv_firstEntry_tamRun5Hair %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "LWED") %>%
+  # juvs only
+  filter(ageClass == "juvenile") %>%
+  # ditch animalID 100/rowID 1 (listed as juv, but found not to be)
+  filter(rowID != 1) %>%
+  nrow()
+
+## n = 73 non-juv LWED
+135-62
+
+
+# SIMP
+## n = 99 total SIMP individuals from 2009-2019
+capData_byIndiv_firstEntry_tamRun5Hair %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "SIMP") %>%
+  nrow()
+
+## n = 52 juv SIMP
+capData_byIndiv_firstEntry_tamRun5Hair %>%
+  # filter to 2019 and earlier
+  filter(rowID <= 613) %>%
+  # lwed only
+  filter(species == "SIMP") %>%
+  # juvs only
+  filter(ageClass == "juvenile") %>%
+  nrow()
+
+## n = 47 non-juv SIMP
+99-52
+```
+
+# 5 Capture-mark-recapture models
+
+## 5.1 Some background
+
+-   Jolly-Seber (JS) model - focused on estimating abundance parameters
+    (e.g., pop growth, recruitment, and abundance)
+    -   explicit definitions of process by which unmarked animals are
+        newly captured and marked; assumptions about process allows est
+        of recruitment and pop sizes
+    -   assumed that unmarked indivs in pop have same prob of capture as
+        marked indiv in pop (i.e., newly captured unmarked animals are a
+        random sample of all unmarked animals in pop)
+-   Cormack-Jolly-Seber (CJS) models - focused on estimating survival
+    rates (but not abundance)
+    -   no assumptions made about how newly marked animals are obtained
+    -   subsequent process of recovering marked animals in CJS is
+        conditional upon animal being released alive at first encounter;
+        survival and catchability refer only to those marked animals
+
+Based on Iijima (2020), I want: - **capture-recapture model for open
+population**, where an "open population" is one in which the number of
+individuals can change via natural mortality, birth, and migration
+during the study period - may also benefit from **robust design** where
+multiple surveys are conducted under a constant condition - 1st
+hierarchy of sampling in which variables can change across sampling
+periods - 2nd hierarchy of sampling in which things should remain
+relatively stable
+
+And based on Sandercock (2020), I may also want: - a multistate model,
+in which detections are coded as dynamic categorical states that
+potentially change b/t consecutive occasions
+
+**Resources:** - James Paterson has a
+blog(<https://jamesepaterson.github.io/jamespatersonblog/07_creatingcapturehistories>)
+with a lot of really great info on how to use mark & recapture data
+
+## 5.2 Create capture histories
+
+The first step is to ensure our data is in the right format for
+mark-recapture analyses, which require input data to be formatted as
+"capture histories" - binary strings to describe when individuals were
+found in the study.
+
+For example, a capture history of "101" describes a study where an
+individual was:
+
+-   caught on the first event,
+-   not observed on the second event, and
+-   observed on the third event.
+
+Data from mark-recapture and mark-resight studies are not usually
+recorded or stored in this format. Often data are stored in 'long-form'
+where each capture or resighting is a row. Plus, events when an
+individual are not re-sighted do not usually have rows.
+
+```{r}
+# packages
+library(dplyr)
+library(tidyr)
+library(magrittr)
+
+# subset capData_byIndiv for the columns I need
+capHist_inputData <- capData_byIndiv_v5 %>%
+  # ensure order is correct
+  arrange(rowID) %>%
+  select(animalID, captureDate) %>%
+  filter(animalID != "UNK") %>%
+  mutate(
+    captureYear = as.numeric(str_sub(captureDate, 1, 4))
+  ) %>%
+  select(-captureDate) %>%
+  mutate(
+    detect = 1
+  )
+
+# then create capture histories (Paterson's code & notes below)
+capHist <- capHist_inputData %>%
+  # remove duplicates, which may occur when individuals are caught multiple times in an event
+  # For example, your event may be a year and an individual may be caught multiple times in a year.
+  distinct() %>%
+  # spread out data. The fill = 0 adds rows for combinations of id and event where individuals were not observerd
+  spread(captureYear, detect, fill = 0) %>% 
+  # For every individual....
+  group_by(animalID) %>%
+  # Paste together 0's and 1's
+  # Unite is similar to paste. Here we are pasting the strings together from the second column (first capture event)
+  # to the last capture event ("tail(names(.),1)").
+  # we don't want any characters separating 0's and 1's, so we use: sep = ""
+  unite("ch", 2:tail(names(.),1), sep = "")
+```
+
+Depending on
+
+```{r}
+capHist_lwed <- capHist %>%
+  filter(animalID %in% capData_byIndiv_lwed$animalID)
+
+capHist_simp <- capHist %>%
+  filter(animalID %in% capData_byIndiv_simp$animalID)
+```
+
+## 5.2 Jolly-Seber models
+
+### prep
+
+Packages:
+
+```{r}
+library(marked)
+```
+
+For R packaged 'marked' allows adding info like individual sex, so let's
+add that to capHist
+
+```{r}
+capHist_lwed_sex <- capHist_lwed %>%
+  merge(., capData_byIndiv_v5[, c("animalID", "sex")], by = "animalID") %>%
+  distinct()
+
+capHist_simp_sex <- capHist_simp %>%
+  merge(., capData_byIndiv_v5[, c("animalID", "sex")], by = "animalID") %>%
+  distinct()
+
+# sex has to be a factor though
+capHist_lwed_sex$sex <- as.factor(capHist_lwed_sex$sex)
+capHist_simp_sex$sex <- as.factor(capHist_simp_sex$sex)
+```
+
+### lwed
+
+#### run model
+
+Do the thing (following Pateron blog):
+
+```{r}
+# Jolly-Seber models (POPAN formulation) are open population models, and 
+# can be used to estimate abundance by including two more parameters than the CJS
+
+# Additional parameters:
+# Nsuper (or "superpopulation") = total number of individuals available to enter population throughout study
+# pent ("probability of entry") =  the rate at which individuals enter the population from Nsuper (via births and immigration)
+
+# WARNING: there is no adequate GOF tests for Jolly-Seber models. 
+# One common method: Test equivalent structure of CJS model with R2ucare (previous tutorials).
+
+# This tests *some* assumptions of Phi and p.
+# Jolly-Seber models have an additional assumption:
+# marked AND unmarked animals have same p (R2ucare doesn't test this)
+# This assumption is required to estimate total abundance (sum of marked and unmarked animals in population)
+
+# First, process data (Notice model = "JS", previous version = "CJS"); "collapses data" by distinct rows
+capHist_lwed.js.proc <- process.data(capHist_lwed_sex,
+                                model = "JS",
+                                groups = "sex")
+
+# Second, make design data (from processed data)
+capHist_lwed.js.ddl <- make.design.data(capHist_lwed.js.proc)
+
+fit.js.capHist_lwed.models <- function(){
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  # p formulas
+  p.dot <- list(formula=~1)
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.sex <- list(formula=~sex)
+  pent.dot <- list(formula=~1)
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.sex <- list(formula=~sex)
+  N.dot <- list(formula=~1)
+  cml <- create.model.list(c("Phi","p", "pent", "N"))
+  results <- crm.wrapper(cml,
+                         data = capHist_lwed.js.proc,
+                         ddl = capHist_lwed.js.ddl,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# Run function
+capHist_lwed.js.models <- fit.js.capHist_lwed.models()
+
+# Display model table
+capHist_lwed.js.models
+```
+
+Notes for interpretation: - \~1 = intercept only model - detection
+probability (pt) probability of detecting an indiv at time t if they're
+alive - apparent survival (phi_t) - probability of an individual
+surviving to the next time step - super population size (N_super) -
+total number of indiv available to enter the study - probability of new
+indiv from super population entering at time t (through births and
+immigration pen_t_t)
+
+The model table suggests that the most supported model has the
+following: - Phi(~time)p(~1)pent(~time)N(~1) - Phi(\~time) = ??
+survival - p(\~1) = constant detection probability - pent(\~time) = ??
+probability of entry - N(\~1) =
+
+```{r}
+# Look at estimates of top model (row number on left of model table, or using name)
+capHist_lwed.js.models[[1]]  # or dipper.js.models[["Phi.dot.p.dot.pent.dot.N.dot"]] or dipper.js.models$Phi.dot.p.dot.pent.dot.N.dot
+```
+
+#### calculate unmarked indivs
+
+**I think this is actually what I need??**
+
+```{r}
+# The estimates above are not on probability scale (or in individuals for N)
+# (e.g. Phi, p on logit scale, pent on mlogit scale)
+# Predict (real) values using top model
+capHist_lwed.js.predicted <- predict(capHist_lwed.js.models[[1]]) # [[1]] just calls the model row according to the model table.
+
+# Look at predictions of real parameters
+capHist_lwed.js.predicted 
+```
+
+Output shows: - survival b/t capture events = 0.69 - detection prob =
+0.79 - prob of entry = 0.07 each capture event - number of unmarked
+indiv is about 8, making the super populat \~8 + 180 marked indiv = 188
+
+#### calculate pop size
+
+There is no direct estimate of population size in the model. The
+estimate of "N" in the model output is for the number of unmarked
+individuals in the superpopulation. To estimate population size, we can
+derive it using the model estimates.
+
+```{r}
+# Abundance (N) is derived from the estimated parameters
+# We will estimate population size at each time by making a dataframe of estimates and calculating N
+# We will use the predicted estimates from the top-performing model (in this case: "dipper.js.predicted")
+
+# NOTE: the below method will have to be adjusted based on your final model and the number of capture events
+N.derived_lwed <- data.frame(occ = c(1:7), # 7 events
+                        Phi = c(rep(capHist_lwed.js.predicted$Phi$estimate, 6), NA),   # 6 survival estimates all the same
+                        Nsuper = rep(capHist_lwed.js.predicted$N$estimate + nrow(capHist_lwed), 7), # Nsuper estimate + number of marked animals
+                        pent = c(1-sum(capHist_lwed.js.predicted$pent$estimate), capHist_lwed.js.predicted$pent$estimate)) # Sum of all pent must be 1
+
+# Set-up empty vector for calculating N
+N.derived_lwed$N <- NA
+
+# The inital population size (N[1]) = Nsuper * (1 - sum(all other pent estimates))
+# This is because of the link function for estimating pent.
+# The sum of all pent parameters MUST equal 1 (therefore, one less must be estimated)
+N.derived_lwed$N[1] <- (N.derived_lwed$Nsuper[1] * N.derived_lwed$pent[1])
+
+# Subsequent population sizes are estimated by calculating surviving individuals (N[t-1] * Phi[t]), and
+# Adding new births (Nsuper * pent[t])
+for(i in 2:nrow(N.derived_lwed)){
+  N.derived_lwed$N[i] <- (N.derived_lwed$N[i-1]*N.derived_lwed$Phi[i-1]) + (N.derived_lwed$Nsuper[i] * N.derived_lwed$pent[i])
+}
+
+# Look at what we did
+N.derived_lwed
+```
+
+Add 95% CI w/R package "RMark"
+
+--notes on how to install MARK (required by RMark)
+<http://www.phidot.org/software/mark/rmark/linux/> - download file for
+linux in the link above - create MARK directory in programs and extract
+the file into \~/programs/MARK/ and rename as 'mark' - change directory
+to /usr/local/bin/ - create symbolic link using [sudo ln -s
+\~/Programs/MARK/mark mark]
+
+```{r}
+detach("package:marked", unload=TRUE) # many of the function names are the same. unload `marked`
+
+# install.packages("RMark") # first time only
+# For RMark to work, you also need mark.exe installed separately
+# http://www.phidot.org/software/mark/downloads/
+# this may not be easy on a Mac OS (http://www.phidot.org/software/mark/rmark/linux/)
+# RMark calls "mark" to do all the work outside of R
+library(RMark)
+```
+
+Ok next step
+
+```{r}
+# We will use the same data but will just create the same top model (not all the other subsets)
+capHist_lwed.rmark.processed <- RMark::process.data(capHist_lwed_sex,
+                                              model = "POPAN")
+
+# Formulae for model
+Phi.dot <- list(formula=~1)
+p.dot <- list(formula=~1)
+pent.dot <- list(formula=~1)
+N.dot <- list(formula=~1)
+
+# The argument names are similar but a little different (notice "POPAN" instead of "js")
+capHist_lwed.rmark <- mark(capHist_lwed_sex,
+                           model = "POPAN",
+                           model.parameters = list(Phi = Phi.dot,
+                                                   p= p.dot,
+                                                   pent = pent.dot,
+                                                   N = N.dot),
+                           realvcv = TRUE)
+
+
+# The popan.derived function of RMark estimates N 
+# (plus estimates SE and 95% CI using the delta method)
+capHist_lwed.derived.rmark <- popan.derived(capHist_lwed.rmark.processed,
+                                      capHist_lwed.rmark)$N
+
+# Look at results
+capHist_lwed.derived.rmark
+```
+
+### simp
+
+#### run model
+
+Do the thing (following Pateron blog):
+
+```{r}
+# Jolly-Seber models (POPAN formulation) are open population models, and 
+# can be used to estimate abundance by including two more parameters than the CJS
+
+# Additional parameters:
+# Nsuper (or "superpopulation") = total number of individuals available to enter population throughout study
+# pent ("probability of entry") =  the rate at which individuals enter the population from Nsuper (via births and immigration)
+
+# WARNING: there is no adequate GOF tests for Jolly-Seber models. 
+# One common method: Test equivalent structure of CJS model with R2ucare (previous tutorials).
+
+# This tests *some* assumptions of Phi and p.
+# Jolly-Seber models have an additional assumption:
+# marked AND unmarked animals have same p (R2ucare doesn't test this)
+# This assumption is required to estimate total abundance (sum of marked and unmarked animals in population)
+
+# First, process data (Notice model = "JS", previous version = "CJS")
+capHist_simp.js.proc <- process.data(capHist_simp_sex,
+                                model = "JS",
+                                groups = "sex")
+
+# Second, make design data (from processed data)
+capHist_simp.js.ddl <- make.design.data(capHist_simp.js.proc)
+
+fit.js.capHist_simp.models <- function(){
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  # p formulas
+  p.dot <- list(formula=~1)
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.sex <- list(formula=~sex)
+  pent.dot <- list(formula=~1)
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.sex <- list(formula=~sex)
+  N.dot <- list(formula=~1)
+  cml <- create.model.list(c("Phi","p", "pent", "N"))
+  results <- crm.wrapper(cml,
+                         data = capHist_simp.js.proc,
+                         ddl = capHist_simp.js.ddl,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# Run function
+capHist_simp.js.models <- fit.js.capHist_simp.models()
+
+# Display model table
+capHist_simp.js.models
+```
+
+#### calculate unmarked indivs
+
+**I think this is actually what I need??**
+
+```{r}
+# The estimates above are not on probability scale (or in individuals for N)
+# (e.g. Phi, p on logit scale, pent on mlogit scale)
+# Predict (real) values using top model
+capHist_simp.js.predicted <- predict(capHist_simp.js.models[[1]]) # [[1]] just calls the model row according to the model table.
+
+# Look at predictions of real parameters
+capHist_simp.js.predicted 
+```
+
+Output shows: - survival b/t capture events = 0.75 - detection prob =
+0.71 - prob of entry = 0.08 each capture event - number of unmarked
+indiv is about 8, making the super populat \~8 + 131 marked indiv = 139
+
+**Resources:** - James Pateron blog post on Jolly-Seber models:
+<https://jamesepaterson.github.io/jamespatersonblog/2020-07-26_jolly_seber_models.html> -
+'marked' vignette
+<https://cran.r-project.org/web/packages/marked/vignettes/markedVignette.html>
+
+## 5.3 Cormack-Jolly-Seber
+
+Following ['marked'
+vignette](https://cran.r-project.org/web/packages/marked/vignettes/markedVignette.html)
+
+```{r}
+library(marked) 
+library(ggplot2)
+
+data(dipper)
+
+model=crm(dipper)
+model
+
+# compute & store variance-covariance matrix from hessian at final estimates
+model=cjs.hessian(model)
+model # now able to print SE and 95% CI (set hessian = TRUE in call to crm if want to compute it when model is fitted)
+```
+
+You’ll never fit only one model to data, so the most efficient approach is to call process.data and make.design.data separately and pass the results to crm so they can be used for each fitted model as shown below:
+
+```{r}
+dipper.proc=process.data(dipper)
+
+dipper.ddl=make.design.data(dipper.proc)
+
+Phi.sex=list(formula=~sex)
+
+model=crm(dipper.proc,dipper.ddl,model.parameters=list(Phi=Phi.sex),
+          accumulate=FALSE)
+```
+
+If you fit more than a few models, use crm.wrapper rather than crm. It fits a set of models and returns a list with a model selection table that summarizes the fit of all the models. By default, crm.wrapper stores the model results externally and in the list it only stores the names of the files containing the models. If you set external=FALSE, then it will store the model results in the list as shown in the example below.
+
+```{r}
+dipper.proc=process.data(dipper)
+
+dipper.ddl=make.design.data(dipper.proc)
+
+fit.models=function()
+  {
+  Phi.sex=list(formula=~sex)
+  Phi.time=list(formula=~time)
+  p.sex=list(formula=~sex)
+  p.dot=list(formula=~1)
+  cml=create.model.list(c("Phi","p"))
+  results=crm.wrapper(cml,data=dipper.proc, ddl=dipper.ddl,
+                       external=FALSE,accumulate=FALSE)
+  return(results)
+}
+
+dipper.models=fit.models()
+
+# model selection table (convergence = 0 means successful convergence)
+dipper.models
+
+# extract individual model details
+dipper.models[[1]]
+```
+
+Now adding some covariates... (weight, flood, and trap dependence (td))
+
+```{r}
+data(dipper)
+
+# Add a dummy weight field which are random values from 1 to 10
+set.seed(123)
+dipper$weight=round(runif(nrow(dipper),0,9),0)+1
+
+# Add Flood covariate
+Flood=matrix(rep(c(0,1,1,0,0,0),each=nrow(dipper)),ncol=6)
+colnames(Flood)=paste("Flood",1:6,sep="")
+dipper=cbind(dipper,Flood)
+
+# Add td covariate, but exclude first release as a capture
+# splitCH and process.ch are functions in the marked package
+td=splitCH(dipper$ch)
+td=td[,1:6]
+releaseocc=process.ch(dipper$ch)$first
+releaseocc=cbind(1:length(releaseocc),releaseocc)
+releaseocc=releaseocc[releaseocc[,2]<nchar(dipper$ch[1]),]
+td[releaseocc]=0
+colnames(td)=paste("td",2:7,sep="")
+dipper=cbind(dipper,td)
+
+# show names
+names(dipper)
+```
+
+Process data
+
+```{r}
+# Process data
+dipper.proc=process.data(dipper)
+
+# Create design data with static and time varying covariates
+design.Phi=list(static=c("weight"),time.varying=c("Flood"))
+
+design.p=list(static=c("sex"),time.varying=c("td"),
+                         age.bins=c(0,1,20))
+
+design.parameters=list(Phi=design.Phi,p=design.p)
+
+ddl=make.design.data(dipper.proc,parameters=design.parameters)
+
+names(ddl$Phi)
+names(ddl$p)
+```
+
+# 6 Twin pairs
+
+## 6.1 Likely twins
+
+make sure you're using latest version of capData_byIndiv + the first entry from that
+
+Based on capData, we have n = 36 likely twin pairs in which both have samples in tamRun5. Of these, n = 25 pairs have both blood and hair samples (and thus can be used for chimerism analyses). Within this set, n = 2 sets have three juveniles vs. two. 
+
+```{r}
+# twinList for all capData
+capData_twinList <- capData_byIndiv_firstEntry %>%
+  filter(animalID != "UNK") %>%
+  filter(ageClass == "juvenile") %>%
+  select(c("captureDate", "groupName", "animalID")) %>%
+  group_by(captureDate, groupName) %>%
+  summarise(twinPairs = toString(sort(unique(animalID)))) %>%
+  filter(str_detect(twinPairs, ",")) %>%
+  separate_wider_delim(twinPairs, delim = ",", names = c("twin1", "twin2", "twin3"), too_few = "align_start") %>%
+  as.data.frame() %>%
+#  select(-captureDate) %>%
+  distinct() %>%
+  arrange(captureDate) %>%
+  # remove white spaces
+  apply(., 2, function(x) gsub("\\s+", "", x)) %>%
+  as.data.frame()
+
+# twinList in tamRun5
+capData_twinList_tamRun5 <- capData_twinList %>%
+  mutate(
+    temp = str_sub(captureDate, 1, 4)
+  ) %>%
+  filter(!temp %in% c("2021", "2022", "2023")) %>%
+  select(-temp) %>%
+  mutate(
+    twin1_samples = case_when(
+      twin1 %in% md_tamRun5_bloodSamples$animalID & twin1 %in% md_tamRun5_hairSamples$animalID ~ "both",
+      twin1 %in% md_tamRun5_bloodSamples$animalID & !twin1 %in% md_tamRun5_hairSamples$animalID ~ "bloodOnly",
+      !twin1 %in% md_tamRun5_bloodSamples$animalID & twin1 %in% md_tamRun5_hairSamples$animalID ~ "hairOnly",
+      .default = NA
+    ),
+    
+    twin2_samples = case_when(
+      twin2 %in% md_tamRun5_bloodSamples$animalID & twin2 %in% md_tamRun5_hairSamples$animalID ~ "both",
+      capData_twinList_tamRun5$twin2 %in% md_tamRun5_bloodSamples$animalID & !twin2 %in% md_tamRun5_hairSamples$animalID ~ "bloodOnly",
+      !twin2 %in% md_tamRun5_bloodSamples$animalID & twin2 %in% md_tamRun5_hairSamples$animalID ~ "hairOnly",
+      .default = NA
+    ),
+    
+    twin3_samples = case_when(
+      twin3 %in% md_tamRun5_bloodSamples$animalID & twin3 %in% md_tamRun5_hairSamples$animalID ~ "both",
+      twin3 %in% md_tamRun5_bloodSamples$animalID & !twin3 %in% md_tamRun5_hairSamples$animalID ~ "bloodOnly",
+      !twin3 %in% md_tamRun5_bloodSamples$animalID & twin3 %in% md_tamRun5_hairSamples$animalID ~ "hairOnly",
+      .default = NA
+    )
+  ) %>%
+  merge(., capData_byIndiv_firstEntry[, c("animalID", "species")], by.x = "twin1", by.y = "animalID") %>%
+  relocate(species, .after = captureDate) %>%
+  relocate(twin1, .before = twin2)
+
+# n = 36 pairs where both have samples in tamRun5
+capData_twinList_tamRun5 %>%
+  filter(!is.na(twin2_samples)) %>%
+  nrow()
+
+# n = 27 pairs where both have blood samples
+capData_twinList_tamRun5 %>%
+  filter(!is.na(twin2_samples)) %>%
+  filter(twin1_samples != "hairOnly") %>%
+  filter(twin2_samples != "hairOnly") %>%
+  nrow()
+
+# n = 25 pairs where both have blood and hair samples
+capData_twinList_tamRun5 %>%
+  filter(twin1_samples == "both") %>%
+  filter(twin2_samples == "both") %>%
+  nrow()
+
+# of the 25, have n = 13 LWED pairs & n = 12 SIMP pairs
+capData_twinList_tamRun5 %>%
+  filter(twin1_samples == "both") %>%
+  filter(twin2_samples == "both") %>%
+  #filter(species == "LWED") %>%
+  filter(species == "SIMP") %>%
+  nrow()
+
+# n = 1 pair in which one twin has bloodOnly
+capData_twinList_tamRun5 %>%
+  filter(!is.na(twin2_samples)) %>%
+  filter(twin1_samples != "hairOnly") %>%
+  filter(twin2_samples != "hairOnly") %>%
+  filter(twin1_samples == "bloodOnly") %>%
+#  filter(twin2_samples == "bloodOnly") %>%
+  nrow()
+```
+
+Export twinList
+
+```{r}
+write.csv(capData_twinList_tamRun5, "./paper3_demographics/dataOrganization/twinList_tamRun5_6June2024.csv", row.names = F)
+```
+
+
+# X Lifespan
+
+## Time present in study
+
+The dataframe below includes the animalIDs of all individuals in
+capData_byIndiv_v5 from 2009 to 2023. It includes the first and last
+years and groups in which the individual was captured as well as the
+difference between those two years.
+
+```{r}
+# now last entry
+capData_byIndiv_v5_antiSort <- capData_byIndiv_v5 %>%
+  arrange(desc(rowID))
+
+capData_byIndiv_first.lastEntry <- capData_byIndiv_v5_antiSort[match(unique(capData_byIndiv_v5_antiSort$animalID), capData_byIndiv_v5_antiSort$animalID),] %>%
+  
+  filter(animalID != "UNK") %>%
+  
+  arrange(as.numeric(animalID)) %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4)
+  ) %>%
+  select(animalID, captureYear, groupName) %>%
+  dplyr::rename("captureYear_last" = "captureYear",
+                "groupName_last" = "groupName") %>%
+  merge(., capData_byIndiv_firstEntry[, c("animalID", "captureDate", "groupName")], by = "animalID") %>%
+  mutate(
+    captureYear_first = str_sub(captureDate, 1, 4)
+  ) %>%
+  select(-captureDate) %>%
+  dplyr::rename("groupName_first" = "groupName") %>%
+  mutate(
+    captureYear_first = as.numeric(captureYear_first),
+    captureYear_last = as.numeric(captureYear_last),
+    diff_lastFirst = captureYear_last - captureYear_first,
+    groupMatch = case_when(
+      groupName_first == groupName_last ~ "yes",
+      .default = "no"
+    )
+  ) %>%
+  relocate(animalID, groupName_first, groupName_last, groupMatch, captureYear_first, captureYear_last, diff_lastFirst) %>%
+  
+  # see who started in study as a juvenile
+  merge(., birthYear_knownOnly[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  
+  # then calculate age at last capture
+  mutate(
+    age_lastCap = case_when(
+      !is.na(birthYear_est) ~ diff_lastFirst,
+      .default = NA
+    )
+  )
+```
+
+## Group membership across time
+
+```{r}
+groupMembership <- capData_byIndiv_v5 %>%
+  
+  # filter to 2019 and earlier
+#  filter(rowID <= 613) %>%
+  # remove rowID 611 (likely animalID2, but missing trapsheets; doesn't matter thoughg b/c already have 2019 info for this indiv)
+  filter(rowID != 611) %>%
+  
+  # ditch UNK animalIDs
+  filter(animalID != "UNK") %>%
+  
+  select(animalID, captureDate, groupName) %>%
+  # first need to get cases w/multiple groups in one year into single col
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  distinct() %>%
+  mutate(temp = str_c(animalID, "_", captureYear)) %>%
+  arrange(temp, captureDate) %>%
+  mutate(dup = if_else(duplicated(temp), "entry2", "entry1")) %>%
+  select(temp, groupName, dup) %>%
+  distinct() %>%
+  pivot_wider(names_from = dup,
+              values_from = groupName) %>%
+  mutate(
+    groupName = case_when(
+      is.na(entry2) ~ entry1,
+      entry1 == entry2 ~ entry1,
+      entry1 != entry2 ~ str_c(entry1, entry2, sep = "_")
+    )
+  ) %>%
+  separate("temp", into = c("animalID", "captureYear")) %>%
+  select(animalID, captureYear, groupName) %>%
+  # now can make big df
+  pivot_wider(names_from = captureYear,
+              values_from = groupName) %>%
+  arrange(as.numeric(animalID)) %>%
+  relocate(c(animalID, `2009`, `2010`, `2011`, `2012`, `2013`, `2014`))
+```
+
+
+
+
+# XXXXXXXXXXX
+
+# OLD SCRIPTS
+
+# Potential packages
+
+-   [popkin](https://cran.r-project.org/web/packages/popkin/vignettes/popkin.html)
+    -   estimates the kinship matrix of individuals and FST from their
+        biallelic genotypes
+-   [sequoia](https://cran.r-project.org/web/packages/sequoia/vignettes/vignette-main.html)
+    -   for 100s of SNPs
+-   [skater](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8844523/)
+    -   for genome-wide SNP genotypes
+
+# Packages
+
+```{r}
+library(lubridate)
+library(sequoia)
+library(tidyverse)
+```
+
+# Data
+
+## Metadata
+
+```{r}
+md_tamRun5 <- read.csv("./05_tamRun5/03_run5GTscore/tamRun5_metadata.csv") %>%
+  mutate(
+    animalID = 
+      case_when(
+        sampleID == "tamRun5-411" ~ "pcr1Neg_p5.C4",
+        .default = animalID
+      ),
+    sampleType =
+      case_when(
+        sampleID == "tamRun5-411" ~ "pcr1Neg",
+        .default = sampleType
+      )
+  ) %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
+
+sampleList_lwedHair <- md_tamRun5 %>%
+  filter(species == "LWED") %>%
+  filter(sampleType == "hair") %>%
+  select(sampleID) %>%
+  pull()
+
+sampleList_simpHair <- md_tamRun5 %>%
+  filter(species == "SIMP") %>%
+  filter(sampleType == "hair") %>%
+  select(sampleID) %>%
+  pull()
+```
+
+## Loci
+
+Below are the loci sets that I'll be using for kinship analyses. These
+include ONLY the INDID loci, including general and species-specific
+INDID loci.
+
+```{r}
+indidLoci_lwed <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt", sep = "\t", header = T) %>%
+  select(Locus) %>%
+  filter(!str_detect(Locus, "SEXID|SPECIESID")) %>%
+  pull()
+
+indidLoci_simp <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt", sep = "\t", header = T) %>%
+  select(Locus) %>%
+  filter(!str_detect(Locus, "SEXID|SPECIESID")) %>%
+  pull()
+```
+
+## Genotypes
+
+### Original genos
+
+```{r}
+genos_tamRun5_10x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  mutate(across(everything(), ~ gsub(",", "", .)))
+
+# LWED hair genos
+genos_lwedHair <- genos_tamRun5_10x %>%
+  select(any_of(sampleList_lwedHair)) %>%
+  t() %>%
+  as.data.frame() %>%
+  select(any_of(indidLoci_lwed))
+
+# SIMP hair genos
+genos_simpHair <- genos_tamRun5_10x %>%
+  select(any_of(sampleList_simpHair)) %>%
+  t() %>%
+  as.data.frame() %>%
+  select(any_of(indidLoci_simp))
+```
+
+### Reformat for sequoia
+
+Sequoia requires genotypes to be in a numeric matrix GenoM with one line
+per individual and one column per SNP, with each SNP coded as 0, 1, 2
+copies of the reference allele, or missing (-9). The rownames should be
+the individual IDs, and column names are ignored.
+
+#### LWED
+
+```{r}
+genos_lwedHair_seq <- sequoia::GenoConvert(
+  InData = genos_lwedHair,
+  InFormat = "single",
+  Missing = "0",
+  OutFile = "./dissChapter_demography/genos_lwedHair_seq.txt",
+  OutFormat = "seq")
+```
+
+GenoConvert gives the following warnings:
+
+-   There are 14 SNPs scored for \<5% of individuals, these will be
+    excluded
+-   There are 8 monomorphic (fixed) SNPs, these will be excluded
+-   In addition, there are 85 SNPs scored for \<50% of individuals
+-   There are 47 individuals scored for \<5% of SNPs, these WILL BE
+    IGNORED
+-   Warning: In addition, there are 16 individuals scored for \<20% of
+    SNPs, it is advised to treat their assignments with caution
+
+After exclusion, There are 91 out of 138 individuals and 132 SNPs.
+
+#### SIMP
+
+```{r}
+genos_simpHair_seq <- sequoia::GenoConvert(
+  InData = genos_simpHair,
+  InFormat = "single",
+  Missing = "0",
+  OutFile = "./dissChapter_demography/genos_simpHair_seq.txt",
+  OutFormat = "seq")
+```
+
+GenoConvert gives the following warnings:
+
+-   There are 23 SNPs scored for \<5% of individuals, these will be
+    excluded
+-   There are 6 monomorphic (fixed) SNPs, these will be excluded
+-   In addition, there are 80 SNPs scored for \<50% of individuals
+-   There are 34 individuals scored for \<5% of SNPs, these WILL BE
+    IGNORED
+-   In addition, there are 9 individuals scored for \<20% of SNPs, it is
+    advised to treat their assignments with caution
+
+After exclusion, There are 65 out of 99 individuals and 125 SNPs.
+
+### Read in sequoia genos
+
+```{r}
+GenoM_lwed <- as.matrix(read.table("./dissChapter_demography/genos_lwedHair_seq.txt", row.names = 1, header = FALSE))
+
+GenoM_simp <- as.matrix(read.table("./dissChapter_demography/genos_simpHair_seq.txt", row.names = 1, header = FALSE))
+```
+
+## Life history data
+
+Sequoia requires a life history file that should be a dataframe composed
+of 3-5 columns:
+
+-   **ID**
+    -   It is probably safest to stick to R's 'syntactically valid
+        names', defined as "consists of letters, numbers and the dot or
+        underline characters and starts with a letter, or the dot not
+        followed by a number".
+-   **Sex**
+    -   1 = female, 2 = male, 3=unknown, 4=hermaphrodites. All other
+        numbers, letters, or NA = unknown
+-   **BirthYear**
+    -   Year of birth/hatching/germination/. . . In species with more
+        than one generation per year, a finer time scale than year of
+        birth ought to be used (in round numbers), ensuring that parents
+        are always 'born' in a time unit prior to their first offspring
+        (e.g. parent's BirthYear=2001 (t = 1) and offspring
+        BirthYear=2005 (t = 5)). Negative numbers and NA's are
+        interpreted as unknown
+-   **BY.min (optional)**
+    -   Earliest year in which individual may have been born, if exact
+        year is unknown. Ignored when BirthYear is non-missing.
+-   **BY.max (optional)**
+    -   Latest year in which individual may have been born
+
+```{r}
+infancyPeriods <- read.csv("./sampleOrganization/allCaptures_infancyPeriods_2009-2019.csv") %>%
+  select(c("animalID", "infStart")) %>%
+  distinct() %>%
+  na.omit() %>%
+  mutate(
+    infStart_date = mdy(infStart),
+    BirthYear = year(infStart_date)
+  )
+
+LifeHistData_lwed <- md_tamRun5 %>%
+  filter(species == "LWED") %>%
+  filter(sampleType == "hair") %>%
+  select(c("animalID", "sampleID", "sex")) %>%
+  merge(., infancyPeriods[, c("animalID", "BirthYear")], by = "animalID", all.x = T) %>%
+  rename("ID" = "sampleID",
+         "Sex" = "sex") %>%
+  select(c("ID", "Sex", "BirthYear")) %>%
+  mutate(
+    Sex = 
+      case_when(
+        Sex == "F" ~ "1",
+        Sex == "M" ~ "2"
+      )
+  )
+
+LifeHistData_simp <- md_tamRun5 %>%
+  filter(species == "SIMP") %>%
+  filter(sampleType == "hair") %>%
+  select(c("animalID", "sampleID", "sex")) %>%
+  merge(., infancyPeriods[, c("animalID", "BirthYear")], by = "animalID", all.x = T) %>%
+  rename("ID" = "sampleID",
+         "Sex" = "sex") %>%
+  select(c("ID", "Sex", "BirthYear")) %>%
+  mutate(
+    Sex = 
+      case_when(
+        Sex == "F" ~ "1",
+        Sex == "M" ~ "2"
+      )
+  )
+```
+
+# Kinship run
+
+## LWED
+
+### Parentage
+
+```{r}
+ParOUT_lwed <- GetMaybeRel(GenoM = GenoM_lwed,
+                       LifeHistData = LifeHistData_lwed,
+                       Module = "par")
+
+names(ParOUT_lwed)
+
+# export
+writeSeq(
+  SeqList = ParOUT_lwed,
+  MaybeRel = T,
+  OutFormat = "xls",
+  folder = "./dissChapter_demography/sequoiaOutput",
+  file = "sequoia_output_lwedPar.xlsx")
+```
