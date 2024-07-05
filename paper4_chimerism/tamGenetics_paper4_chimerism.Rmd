@@ -1,0 +1,1495 @@
+---
+title: "tamGeneticsc_paper4_chimerism"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto
+}
+
+pre[class] {
+  max-height: 100px;
+}
+```
+
+# 1 Overview
+
+This set of scripts is for calculating chimerism percentages for each
+tamarin invididual in a twin pair. In doing so, I'm following the protocols outlined in Vynck et al. 2023, which includes chimerism calculations for NGS SNP data as well as additional calculations to account for amplification bias of particular alleles.
+
+Vynck, Matthijs, Friedel Nollet, Lode Sibbens, and Helena Devos. 2023. “Bias Reduction Improves Accuracy and Informativity of High-Throughput Sequencing Chimerism Assays.” Clinica Chimica Acta 547 (June): 117452. https://doi.org/10.1016/j.cca.2023.117452.
+
+# 2 Packages
+
+```{r}
+library(gsubfn)
+library(kableExtra)
+library(rlist)
+library(tidyverse)
+```
+
+# 3 Data
+
+## md_tamRun5
+
+Right now 
+
+```{r}
+# Full set of metadata (latest version from metadataReconciliation)
+md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+# Metadata subsets by sample type
+md_hairSamples <- md_tamRun5_v5 %>%
+  filter(sampleType == "hair") %>%
+  # remove tamRunt.264 (animalID 200 dup)
+  filter(sampleID != "tamRun5.264")
+
+md_bloodSamples <- md_tamRun5_v5 %>%
+  filter(sampleType == "blood") %>%
+  # ditch bloodDupes (based on geno success, just checked it manually but should probably do it via script...)
+  filter(sampleID != "tamRun5.073") %>%
+  filter(sampleID != "tamRun5.132") %>%
+  filter(sampleID != "tamRun5.161") %>%
+  filter(sampleID != "tamRun5.053") %>%
+  filter(sampleID != "tamRun5.054") %>%
+  filter(sampleID != "tamRun5.031") %>%
+  filter(sampleID != "tamRun5.168")
+
+# Sample lists by sample type
+hairSamples <- md_hairSamples %>%
+  select(sampleID) %>%
+  pull()
+
+bloodSamples <- md_bloodSamples %>%
+  select(sampleID) %>%
+  pull()
+```
+
+## Twin pair list
+
+I created the list of twin pairs in tamGenetics_paper3_dataOrganization.Rmd by locating juveniles that were captured in the same group within the same year. In two cases, three juveniles were present; for now, I'm keeping these entries, but removing one of the individuals - **will need to revisit this though.**
+
+It's also possible that there are additional twin pairs that were not captured as juveniles, but I'll be saving these for future analyses as well. 
+
+```{r}
+twinList_tamRun5_file <- read.csv("./paper3_demographics/dataOrganization/twinList_tamRun5_6June2024.csv")
+
+twinPairs_tamRun5 <- twinList_tamRun5_file %>%
+  # add twinID
+  mutate(twinID = row_number()) %>%
+  relocate(twinID) %>%
+  select(twinID, species, twin1, twin2) %>%
+  # add hair sample ID & species
+  merge(., md_hairSamples[, c("animalID", "sampleID")], by.x = "twin1", by.y = "animalID") %>%
+  rename("sampleID_hair_twin1" = "sampleID",
+         "animalID_twin1" = "twin1") %>%
+  merge(., md_hairSamples[, c("animalID", "sampleID")], by.x = "twin2", by.y = "animalID") %>%
+  rename("sampleID_hair_twin2" = "sampleID",
+         "animalID_twin2" = "twin2") %>%
+  # add blood sample ID
+  merge(., md_bloodSamples[, c("animalID", "sampleID")], by.x = "animalID_twin1", by.y = "animalID", all.x = T) %>%
+  rename("sampleID_blood_twin1" = "sampleID") %>%
+  merge(., md_bloodSamples[, c("animalID", "sampleID")], by.x = "animalID_twin2", by.y = "animalID", all.x = T) %>%
+  rename("sampleID_blood_twin2" = "sampleID") %>%
+  # remove twin pair only if both blood samples are missing
+  filter_at(vars(sampleID_blood_twin1, sampleID_blood_twin2), any_vars(!is.na(.))) %>%
+  select(c("twinID", "species", "animalID_twin1", "animalID_twin2", "sampleID_hair_twin1", "sampleID_hair_twin2", "sampleID_blood_twin1", "sampleID_blood_twin2")) %>%
+  arrange(twinID)
+
+twinPairs_tamRun5_lwed <- twinPairs_tamRun5 %>%
+  filter(species == "LWED")
+
+twinPairs_tamRun5_simp <- twinPairs_tamRun5 %>%
+  filter(species == "SIMP")
+
+# Create long-format dataframe; gives each individual + their hair/blood sample IDs
+twinPairs_twin1 <- twinPairs_tamRun5 %>%
+  select(c("twinID", "species", contains("twin1"))) %>%
+  dplyr::rename("animalID" = "animalID_twin1",
+         "sampleID_hair" = "sampleID_hair_twin1",
+         "sampleID_blood" = "sampleID_blood_twin1")
+
+twinPairs_twin2 <- twinPairs_tamRun5 %>%
+  select(c("twinID", "species", contains("twin2"))) %>%
+  dplyr::rename("animalID" = "animalID_twin2",
+         "sampleID_hair" = "sampleID_hair_twin2",
+         "sampleID_blood" = "sampleID_blood_twin2")
+
+twinPairs_tamRun5_l <- rbind(twinPairs_twin1, twinPairs_twin2)
+
+# Twin sample ID lists by sample type
+twinPairs_hair_sampleList <- data.frame(
+  sampleID_hair = c(twinPairs_tamRun5$sampleID_hair_twin1, twinPairs_tamRun5$sampleID_hair_twin2)
+) %>%
+  pull()
+
+twinPairs_blood_sampleList <- data.frame(
+  sampleID_blood = c(twinPairs_tamRun5$sampleID_blood_twin1, twinPairs_tamRun5$sampleID_blood_twin2)
+) %>%
+  pull()
+```
+
+## Loci
+
+List of all loci in version 3 of the primer pool
+
+```{r}
+loci_v3 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", sep = "\t", header = T)
+
+# locus table
+locusTable <- read.table("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = T) %>%
+  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
+```
+
+# 4 GTscore 10x chimerism estimates
+
+## 4.0 Data
+
+### Hair genos & allele reads
+
+Import genotypes for hair samples (using GTscore 10x cutoff) + allele reads for hair samples (unfiltered)
+
+```{r}
+hairGenos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  # replace 0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                )) %>%
+  # adjust locus name formatting
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # filter to hair samples
+  select(any_of(hairSamples)) %>%
+  t() %>%
+  as.data.frame()
+
+hairReads <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                )) %>%
+  # adjust locus name formatting
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  select(any_of(hairSamples)) %>%
+  as.data.frame()
+```
+
+### Blood allele reads
+
+Import allele reads for blood samples (unfiltered)
+
+```{r}
+bloodReads <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                )) %>%
+  # adjust locus name formatting
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  select(any_of(bloodSamples)) %>%
+  t() %>%
+  as.data.frame()
+```
+
+## 4.1 Pull twinPair hair & blood data
+
+### Hair genos
+
+```{r}
+# Filter hairGenos to twin pairs
+hairGenos_allTwins <- hairGenos %>%
+  rownames_to_column("sampleID") %>%
+  filter(sampleID %in% twinPairs_tamRun5_l$sampleID_hair) %>%
+  merge(., twinPairs_tamRun5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
+  select(-sampleID) %>%
+  relocate(twinID) %>%
+  # Move animalID to rowname
+  column_to_rownames("animalID")
+
+# Split into groups by twin pair (twinID)
+hairGenos_twinPairs <- split(hairGenos_allTwins, f = hairGenos_allTwins$twinID) %>%
+  # Remove twinID column
+  lapply(., function(x) x[!(names(x) %in% c("twinID"))]) %>%
+  # Filter to loci where both twins have genos
+  lapply(., function(x) x[, colSums(is.na(x)) == 0, drop = FALSE]) %>%
+  # Filter to loci with NON-MATCHING genos
+#  lapply(., function(x) x[, vapply(x, function(x) length(unique(x)) > 1, logical(1L)), drop = FALSE]) %>%
+  # Remove empty dataframes
+  discard(., ~length(as.matrix(.))==0) %>%
+  # Transpose all dataframes
+  lapply(., t) %>%
+  lapply(., as.data.frame) %>%
+  lapply(., rownames_to_column, "locus")
+```
+
+### Blood reads
+
+```{r}
+bloodReads_allTwins <- twinPairs_tamRun5_l %>%
+  select(-species, -sampleID_hair) %>%
+  merge(., bloodReads, by.x = "sampleID_blood", by.y = "row.names", all.x = T) %>%
+  select(-sampleID_blood) %>%
+  relocate(c(animalID, twinID)) %>%
+  # filter to twinIDs present in hairGenos_twinPairs
+  filter(twinID %in% names(hairGenos_twinPairs)) %>%
+  column_to_rownames("animalID")
+
+bloodReads_twinPairs <- split(bloodReads_allTwins, f = bloodReads_allTwins$twinID) %>%
+  # Remove twinID column
+  lapply(., function(x) x[!(names(x) %in% c("twinID"))]) %>%
+  # Transpose all dataframes
+  lapply(., t) %>%
+  lapply(., as.data.frame) %>%
+  lapply(., rownames_to_column, "locus")
+```
+
+## 4.2 Merge hair & blood data
+
+```{r}
+hairBlood_twinPairs <- map2(hairGenos_twinPairs, bloodReads_twinPairs, ~left_join(.x, .y, by = "locus")) %>%
+  lapply(., setNames, c("locus", "hairGeno_twin1", "hairGeno_twin2", "bloodReads_twin1", "bloodReads_twin2")) %>%
+  map2(., names(.), ~ mutate(.x, twinID = .y)) %>%
+  lapply(., relocate, twinID) %>%
+  bind_rows(.) %>%
+  # add twin animalIDs
+  merge(., twinPairs_tamRun5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
+  relocate(c(twinID, animalID_twin1, animalID_twin2))
+```
+
+## 4.3 Initial chimerism estimates
+
+To calculate initial chimerism estimates, I'm using the following
+formulas from Vynck et al. (2023):
+
+|                |                                                    |                           |
+|------------------------|------------------------|------------------------|
+| Chimerism type | Biallelic constellation (donor/recipient genotype) | Formula for estimating HC |
+| type0          | AA/BB                                              | VAF [B/(A+B)]             |
+| type1          | BB/AA                                              | 1 - VAF                   |
+| type10         | AA/AB                                              | 2 x VAF                   |
+| type11         | BB/AB                                              | 2 x (1 - VAF)             |
+| type20         | AB/AA                                              | 1 - 2 x VAF               |
+| type21         | AB/BB                                              | 2 x VAF - 1               |
+
+### Functions
+
+```{r}
+# Identify alleles
+allele1 <- function(x) str_sub(x, 1, 1)
+allele2 <- function(x) str_sub(x, -1, -1)
+
+# Define chimType
+calc_chimType <- function(donorGeno, recipGeno) 
+  case_when(
+    # Donor/Recipient AA/BB
+    allele1(donorGeno) != allele1(recipGeno) &
+      allele1(donorGeno) != allele2(recipGeno) &
+      allele1(donorGeno) < allele1(recipGeno) ~ "type00",
+    # D/R BB/AA
+    allele1(donorGeno) != allele1(recipGeno) &
+      allele1(donorGeno) != allele2(recipGeno) &
+      allele1(donorGeno) > allele1(recipGeno) ~ "type01",
+    # D/R AA/AB
+    allele1(donorGeno) == allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) != allele2(recipGeno) ~ "type10",
+    # D/R BB/AB
+    allele1(donorGeno) == allele2(donorGeno) &
+      allele1(donorGeno) != allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type11",
+    # D/R AB/AA
+    allele1(donorGeno) != allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) != allele2(recipGeno) ~ "type20",
+    # D/R AB/BB
+    allele1(donorGeno) != allele2(donorGeno) &
+      allele1(donorGeno) != allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type21",
+    # D/R AA/AA or BB/BB
+    allele1(donorGeno) == allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type30",
+    # D/R AB/AB
+    allele1(donorGeno) != allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type31"
+    )
+
+# Find blood read counts
+bloodReads_allele1 <- function(x) as.numeric(sub(",.*", "", x))
+bloodReads_allele2 <- function(x) as.numeric(sub(".*,", "", x))
+
+# Calculate variant allele frequency
+vaf <- function(recipBloodReads)
+  round(bloodReads_allele2(recipBloodReads)/(bloodReads_allele1(recipBloodReads) + bloodReads_allele2(recipBloodReads)), 2)
+
+# Calculate chimProp (hc)
+calc_chimProp <- function(recipChimType, recipBloodReads) 
+  case_when(
+    recipChimType == "type00" ~ vaf(recipBloodReads),
+    recipChimType == "type01" ~ 1 - vaf(recipBloodReads),
+    recipChimType == "type10" ~ 2 * vaf(recipBloodReads),
+    recipChimType == "type11" ~ 2 * (1 - vaf(recipBloodReads)),
+    recipChimType == "type20" ~ 1 - 2 * vaf(recipBloodReads),
+    recipChimType == "type21" ~ 2 * vaf(recipBloodReads) - 1
+  )
+```
+
+### Calculations
+
+```{r}
+# Identify chimType & calculate VAF
+twinChimerism <- hairBlood_twinPairs %>%
+  # twin1 as recipient, twin2 as donor
+  mutate(
+    chimType_twin1 = calc_chimType(donorGeno = hairGeno_twin2, recipGeno = hairGeno_twin1),
+    vaf_twin1 = vaf(recipBloodReads = bloodReads_twin1),
+    chimProp_twin1 = calc_chimProp(recipChimType = chimType_twin1, recipBloodReads = bloodReads_twin1)
+    ) %>%
+  # twin1 as donor, twin2 as recipient
+  mutate(
+    chimType_twin2 = calc_chimType(donorGeno = hairGeno_twin1, recipGeno = hairGeno_twin2),
+    vaf_twin2 = vaf(recipBloodReads = bloodReads_twin2),
+    chimProp_twin2 = calc_chimProp(recipChimType = chimType_twin2, recipBloodReads = bloodReads_twin2)
+  ) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism %>%
+  kable(caption = "GTscore 10x: Estimated % twin chimerism for twin pairs by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Reformat for individual twins vs. pairs
+twinChimerism_twin1 <- twinChimerism %>%
+  select(c("twinID", "locus", contains("twin1")))
+
+twinChimerism_twin2 <- twinChimerism %>%
+  select(c("twinID", "locus", contains("twin2")))
+colnames(twinChimerism_twin2) <- colnames(twinChimerism_twin1)
+
+twinChimerism_allTwins <- rbind(twinChimerism_twin1, twinChimerism_twin2) %>%
+  rename(
+    "animalID" = "animalID_twin1",
+    "hairGenos" = "hairGeno_twin1",
+    "bloodReads" = "bloodReads_twin1",
+    "chimType" = "chimType_twin1",
+    "vaf" = "vaf_twin1",
+    "chimProp" = "chimProp_twin1"
+  ) %>%
+#  na.omit() %>%
+  merge(., md_hairSamples[, c("animalID", "species")], by = "animalID") %>%
+  relocate(c(twinID, animalID, species)) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_allTwins %>%
+  kable(caption = "GTscore 10x: Estimated % twin chimerism for individuals by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Subset by species
+twinChimerism_lwed <- twinChimerism_allTwins %>%
+  filter(species == "LWED")
+
+twinChimerism_simp <- twinChimerism_allTwins %>%
+  filter(species == "SIMP")
+```
+
+## 4.4 Bias correction
+
+Following Vynck et al. (2023), marker bias is calculated as the average deviation from 50% allele frequency in reference samples with allele frequencies between 40% and 60%. They performed this calculation for "(i) markers in reference samples with a VAF between 40% and 60% and (ii) type-III markers in follow-up samples with a VAF between 40% and 60%, that is where both the donor and the recipient are heterozygous. The average deviation was calculated in the combined set (i) and (ii), as well as separately". 
+
+As such, I'm doing the following:
+
+1.  Calculate VAF for all hair reads
+    1.  Subset data to only values between 0.4 and 0.6
+    2.  Calculate deviation from 0.5 for each value
+    3.  Calculate median deviation from 0.5 for each locus
+2.  Calculate VAF for twinPair blood reads where BOTH twins are AB/AB
+    1.  Subset data to only values between 0.4 and 0.6
+    2.  Calculate deviation from 0.5 for each value
+    3.  Calculate median deviation from 0.5 for each locus
+3.  Calculate chimProp w/bias corrections
+    1.  chimProp_c1 - correct based on hair sample bias
+    2.  chimProp_c2 - correct based on blood sample bias
+    3.  chimProp_c3 - correct based on hair AND blood sample bias
+
+### Functions
+
+```{r}
+calc_chimProp_c <- function(recipChimType, HC, b)
+  case_when(
+        recipChimType == "type00" ~ round((HC-2*HC*b)/(-4*b*HC+2*b+1), 2),
+        recipChimType == "type01" ~ round((2*b*HC+HC)/(4*b*HC-2*b+1), 2),
+        recipChimType == "type10" ~ round((HC-2*b*HC)/(-2*b*HC+2*b+1), 2),
+        recipChimType == "type11" ~ round((2*b*HC+HC)/(2*b*(HC-1)+1), 2),
+        recipChimType == "type20" ~ round((2*b+HC)/(2*b*HC+1), 2),
+        recipChimType == "type21" ~ round((2*b-HC)/(2*b*HC-1), 2)
+  )
+```
+
+### Calculations
+
+```{r}
+# Calculate VAF for all hair reads
+vaf_hairReads <- replace(hairReads, TRUE, lapply(hairReads, vaf)) %>%
+  mutate(across(everything(),as.numeric)) %>%
+  rownames_to_column("locus")
+
+# Calculate VAF for AB/AB type-III blood reads
+vaf_bloodReads <- twinChimerism_allTwins %>%
+  select(c("animalID", "locus", "chimType", "vaf")) %>%
+  merge(., md_bloodSamples[, c("sampleID", "animalID")], by = "animalID") %>%
+  select(-animalID) %>%
+  arrange(sampleID) %>%
+  mutate(
+    vaf = case_when(
+      chimType != "type31" ~ NA,
+      .default = vaf
+      )
+    ) %>%
+  select(-chimType) %>%
+  pivot_wider(., names_from = sampleID, values_from = vaf)
+
+vaf_bloodReads_sampleList <- vaf_bloodReads %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  pull()
+
+# Combine VAF from hair & blood reads
+vaf_allReads <- merge(vaf_hairReads, vaf_bloodReads, by = "locus", all.x = T) %>%
+  column_to_rownames("locus")
+
+# Subset to VAF between 0.4 and 0.6
+vaf_allReads[vaf_allReads > 0.6] <- NA
+vaf_allReads[vaf_allReads < 0.4] <- NA
+
+# Get median deviation from 0.5 per locus
+## all hair samples
+## type31 blood samples
+## combination of both
+
+vafDev <- (vaf_allReads - 0.5) %>%
+  rownames_to_column("locus") %>%
+  rowwise() %>%
+  mutate(
+    b1 = median(c_across(hairSamples), na.rm = TRUE),
+    b2 = median(c_across(vaf_bloodReads_sampleList), na.rm = TRUE),
+    b3 = median(c_across(where(is.numeric)), na.rm = TRUE)
+    ) %>%
+  select(c("locus", "b1", "b2", "b3"))
+
+# Calculate chimerism corrected for b1, b2, and b3 bias values
+twinChimerism_allTwins_corrected <- merge(twinChimerism_allTwins, vafDev, by = "locus", all.x = T) %>%
+  mutate(
+    chimProp_c1 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b1),
+    chimProp_c2 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b2),
+    chimProp_c3 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b3)
+  ) %>%
+  filter(
+    chimType != "type30",
+    chimType != "type31"
+  ) %>%
+  filter(
+    !is.na(bloodReads)
+  ) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_allTwins_corrected %>%
+  kable(caption = "GTscore 10x: Bias-corrected estimated % twin chimerism for individuals by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Subset by species
+twinChimerism_lwed_corrected <- twinChimerism_allTwins_corrected %>%
+  filter(species == "LWED")
+
+twinChimerism_simp_corrected <- twinChimerism_allTwins_corrected %>%
+  filter(species == "SIMP")
+```
+
+## 4.3 Summaries
+
+```{r}
+twinChimerism_lwed_summary <- twinChimerism_lwed_corrected %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = round(mean(chimProp), 2),
+    mean_chimProp_c1 = round(mean(chimProp_c1), 2),
+    mean_chimProp_c2 = round(mean(chimProp_c2), 2),
+    mean_chimProp_c3 = round(mean(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(species = "LWED") %>%
+  relocate(species)
+
+twinChimerism_lwed_summary %>%
+  kable(caption = "GTscore 10x: LWED avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+twinChimerism_simp_summary <- twinChimerism_simp_corrected %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = round(mean(chimProp), 2),
+    mean_chimProp_c1 = round(mean(chimProp_c1), 2),
+    mean_chimProp_c2 = round(mean(chimProp_c2), 2),
+    mean_chimProp_c3 = round(mean(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(species = "SIMP") %>%
+  relocate(species)
+
+twinChimerism_simp_summary %>%
+  kable(caption = "GTscore 10x: SIMP avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+```
+
+# 5 GTscore 0x chimerism estimates
+
+**Still need to double check that I changed everything correctly after copy/pasting the 10x scripts for the 0x tests, but it seems like 0x-cutoff didn't really change much for final chimerism estimates**
+
+## 5.0 Data
+
+### Hair genos & allele reads
+
+Import 0x-cutoff genotypes for hair samples (allele reads file is the same as above)
+
+```{r}
+hairGenos_0x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  # replace 0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0" ~ gsub("0", NA, .),
+                            .default = .)
+                )) %>%
+  # adjust locus name formatting
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus") %>%
+  # filter to hair samples
+  select(any_of(hairSamples)) %>%
+  t() %>%
+  as.data.frame()
+```
+
+### Blood allele reads
+
+Blood allele reads file is the same as above
+
+## 4.1 Pull twinPair hair & blood data
+
+### Hair genos
+
+```{r}
+# Filter hairGenos to twin pairs
+hairGenos_allTwins_0x <- hairGenos_0x %>%
+  rownames_to_column("sampleID") %>%
+  filter(sampleID %in% twinPairs_tamRun5_l$sampleID_hair) %>%
+  merge(., twinPairs_tamRun5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
+  select(-sampleID) %>%
+  relocate(twinID) %>%
+  # Move animalID to rowname
+  column_to_rownames("animalID")
+
+# Split into groups by twin pair (twinID)
+hairGenos_twinPairs_0x <- split(hairGenos_allTwins_0x, f = hairGenos_allTwins_0x$twinID) %>%
+  # Remove twinID column
+  lapply(., function(x) x[!(names(x) %in% c("twinID"))]) %>%
+  # Filter to loci where both twins have genos
+  lapply(., function(x) x[, colSums(is.na(x)) == 0, drop = FALSE]) %>%
+  # Filter to loci with NON-MATCHING genos
+#  lapply(., function(x) x[, vapply(x, function(x) length(unique(x)) > 1, logical(1L)), drop = FALSE]) %>%
+  # Remove empty dataframes
+  discard(., ~length(as.matrix(.))==0) %>%
+  # Transpose all dataframes
+  lapply(., t) %>%
+  lapply(., as.data.frame) %>%
+  lapply(., rownames_to_column, "locus")
+```
+
+### Blood reads
+
+```{r}
+bloodReads_allTwins_0x <- twinPairs_tamRun5_l %>%
+  select(-species, -sampleID_hair) %>%
+  merge(., bloodReads, by.x = "sampleID_blood", by.y = "row.names", all.x = T) %>%
+  select(-sampleID_blood) %>%
+  relocate(c(animalID, twinID)) %>%
+  # filter to twinIDs present in hairGenos_twinPairs
+  filter(twinID %in% names(hairGenos_twinPairs_0x)) %>%
+  column_to_rownames("animalID")
+
+bloodReads_twinPairs_0x <- split(bloodReads_allTwins_0x, f = bloodReads_allTwins_0x$twinID) %>%
+  # Remove twinID column
+  lapply(., function(x) x[!(names(x) %in% c("twinID"))]) %>%
+  # Transpose all dataframes
+  lapply(., t) %>%
+  lapply(., as.data.frame) %>%
+  lapply(., rownames_to_column, "locus")
+```
+
+## 4.2 Merge hair & blood data
+
+```{r}
+hairBlood_twinPairs_0x <- map2(hairGenos_twinPairs_0x, bloodReads_twinPairs_0x, ~left_join(.x, .y, by = "locus")) %>%
+  lapply(., setNames, c("locus", "hairGeno_twin1", "hairGeno_twin2", "bloodReads_twin1", "bloodReads_twin2")) %>%
+  map2(., names(.), ~ mutate(.x, twinID = .y)) %>%
+  lapply(., relocate, twinID) %>%
+  bind_rows(.) %>%
+  # add twin animalIDs
+  merge(., twinPairs_tamRun5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
+  relocate(c(twinID, animalID_twin1, animalID_twin2))
+```
+
+## 4.3 Initial chimerism estimates
+
+To calculate initial chimerism estimates, I'm using the following
+formulas from Vynck et al. (2023):
+
+|                |                                                    |                           |
+|------------------------|------------------------|------------------------|
+| Chimerism type | Biallelic constellation (donor/recipient genotype) | Formula for estimating HC |
+| type0          | AA/BB                                              | VAF [B/(A+B)]             |
+| type1          | BB/AA                                              | 1 - VAF                   |
+| type10         | AA/AB                                              | 2 x VAF                   |
+| type11         | BB/AB                                              | 2 x (1 - VAF)             |
+| type20         | AB/AA                                              | 1 - 2 x VAF               |
+| type21         | AB/BB                                              | 2 x VAF - 1               |
+
+### Functions
+
+```{r}
+# Identify alleles
+allele1 <- function(x) str_sub(x, 1, 1)
+allele2 <- function(x) str_sub(x, -1, -1)
+
+# Define chimType
+calc_chimType <- function(donorGeno, recipGeno) 
+  case_when(
+    # Donor/Recipient AA/BB
+    allele1(donorGeno) != allele1(recipGeno) &
+      allele1(donorGeno) != allele2(recipGeno) &
+      allele1(donorGeno) < allele1(recipGeno) ~ "type00",
+    # D/R BB/AA
+    allele1(donorGeno) != allele1(recipGeno) &
+      allele1(donorGeno) != allele2(recipGeno) &
+      allele1(donorGeno) > allele1(recipGeno) ~ "type01",
+    # D/R AA/AB
+    allele1(donorGeno) == allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) != allele2(recipGeno) ~ "type10",
+    # D/R BB/AB
+    allele1(donorGeno) == allele2(donorGeno) &
+      allele1(donorGeno) != allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type11",
+    # D/R AB/AA
+    allele1(donorGeno) != allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) != allele2(recipGeno) ~ "type20",
+    # D/R AB/BB
+    allele1(donorGeno) != allele2(donorGeno) &
+      allele1(donorGeno) != allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type21",
+    # D/R AA/AA or BB/BB
+    allele1(donorGeno) == allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type30",
+    # D/R AB/AB
+    allele1(donorGeno) != allele2(donorGeno) &
+      allele1(donorGeno) == allele1(recipGeno) &
+      allele2(donorGeno) == allele2(recipGeno) ~ "type31"
+    )
+
+# Find blood read counts
+bloodReads_allele1 <- function(x) as.numeric(sub(",.*", "", x))
+bloodReads_allele2 <- function(x) as.numeric(sub(".*,", "", x))
+
+# Calculate variant allele frequency
+vaf <- function(recipBloodReads)
+  round(bloodReads_allele2(recipBloodReads)/(bloodReads_allele1(recipBloodReads) + bloodReads_allele2(recipBloodReads)), 2)
+
+# Calculate chimProp (hc)
+calc_chimProp <- function(recipChimType, recipBloodReads) 
+  case_when(
+    recipChimType == "type00" ~ vaf(recipBloodReads),
+    recipChimType == "type01" ~ 1 - vaf(recipBloodReads),
+    recipChimType == "type10" ~ 2 * vaf(recipBloodReads),
+    recipChimType == "type11" ~ 2 * (1 - vaf(recipBloodReads)),
+    recipChimType == "type20" ~ 1 - 2 * vaf(recipBloodReads),
+    recipChimType == "type21" ~ 2 * vaf(recipBloodReads) - 1
+  )
+```
+
+### Calculations
+
+```{r}
+# Identify chimType & calculate VAF
+twinChimerism_0x <- hairBlood_twinPairs_0x %>%
+  # twin1 as recipient, twin2 as donor
+  mutate(
+    chimType_twin1 = calc_chimType(donorGeno = hairGeno_twin2, recipGeno = hairGeno_twin1),
+    vaf_twin1 = vaf(recipBloodReads = bloodReads_twin1),
+    chimProp_twin1 = calc_chimProp(recipChimType = chimType_twin1, recipBloodReads = bloodReads_twin1)
+    ) %>%
+  # twin1 as donor, twin2 as recipient
+  mutate(
+    chimType_twin2 = calc_chimType(donorGeno = hairGeno_twin1, recipGeno = hairGeno_twin2),
+    vaf_twin2 = vaf(recipBloodReads = bloodReads_twin2),
+    chimProp_twin2 = calc_chimProp(recipChimType = chimType_twin2, recipBloodReads = bloodReads_twin2)
+  ) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_0x %>%
+  kable(caption = "GTscore 0x: Estimated % twin chimerism for twin pairs by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Reformat for individual twins vs. pairs
+twinChimerism_twin1_0x <- twinChimerism_0x %>%
+  select(c("twinID", "locus", contains("twin1")))
+
+twinChimerism_twin2_0x <- twinChimerism_0x %>%
+  select(c("twinID", "locus", contains("twin2")))
+colnames(twinChimerism_twin2_0x) <- colnames(twinChimerism_twin1_0x)
+
+twinChimerism_allTwins_0x <- rbind(twinChimerism_twin1_0x, twinChimerism_twin2_0x) %>%
+  rename(
+    "animalID" = "animalID_twin1",
+    "hairGenos" = "hairGeno_twin1",
+    "bloodReads" = "bloodReads_twin1",
+    "chimType" = "chimType_twin1",
+    "vaf" = "vaf_twin1",
+    "chimProp" = "chimProp_twin1"
+  ) %>%
+#  na.omit() %>%
+  merge(., md_hairSamples[, c("animalID", "species")], by = "animalID") %>%
+  relocate(c(twinID, animalID, species)) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_allTwins_0x %>%
+  kable(caption = "GTscore 0x: Estimated % twin chimerism for individuals by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Subset by species
+twinChimerism_lwed_0x <- twinChimerism_allTwins_0x %>%
+  filter(species == "LWED")
+
+twinChimerism_simp_0x <- twinChimerism_allTwins_0x %>%
+  filter(species == "SIMP")
+```
+
+## 4.4 Bias correction
+
+Following Vynck et al. (2023), marker bias is calculated as the average deviation from 50% allele frequency in reference samples with allele frequencies between 40% and 60%. They performed this calculation for "(i) markers in reference samples with a VAF between 40% and 60% and (ii) type-III markers in follow-up samples with a VAF between 40% and 60%, that is where both the donor and the recipient are heterozygous. The average deviation was calculated in the combined set (i) and (ii), as well as separately". 
+
+As such, I'm doing the following:
+
+1.  Calculate VAF for all hair reads
+    1.  Subset data to only values between 0.4 and 0.6
+    2.  Calculate deviation from 0.5 for each value
+    3.  Calculate median deviation from 0.5 for each locus
+2.  Calculate VAF for twinPair blood reads where BOTH twins are AB/AB
+    1.  Subset data to only values between 0.4 and 0.6
+    2.  Calculate deviation from 0.5 for each value
+    3.  Calculate median deviation from 0.5 for each locus
+3.  Calculate chimProp w/bias corrections
+    1.  chimProp_c1 - correct based on hair sample bias
+    2.  chimProp_c2 - correct based on blood sample bias
+    3.  chimProp_c3 - correct based on hair AND blood sample bias
+
+### Functions
+
+```{r}
+calc_chimProp_c <- function(recipChimType, HC, b)
+  case_when(
+        recipChimType == "type00" ~ round((HC-2*HC*b)/(-4*b*HC+2*b+1), 2),
+        recipChimType == "type01" ~ round((2*b*HC+HC)/(4*b*HC-2*b+1), 2),
+        recipChimType == "type10" ~ round((HC-2*b*HC)/(-2*b*HC+2*b+1), 2),
+        recipChimType == "type11" ~ round((2*b*HC+HC)/(2*b*(HC-1)+1), 2),
+        recipChimType == "type20" ~ round((2*b+HC)/(2*b*HC+1), 2),
+        recipChimType == "type21" ~ round((2*b-HC)/(2*b*HC-1), 2)
+  )
+```
+
+### Calculations
+
+```{r}
+# Calculate VAF for all hair reads
+vaf_hairReads <- replace(hairReads, TRUE, lapply(hairReads, vaf)) %>%
+  mutate(across(everything(),as.numeric)) %>%
+  rownames_to_column("locus")
+
+# Calculate VAF for AB/AB type-III blood reads
+vaf_bloodReads_0x <- twinChimerism_allTwins_0x %>%
+  select(c("animalID", "locus", "chimType", "vaf")) %>%
+  merge(., md_bloodSamples[, c("sampleID", "animalID")], by = "animalID") %>%
+  select(-animalID) %>%
+  arrange(sampleID) %>%
+  mutate(
+    vaf = case_when(
+      chimType != "type31" ~ NA,
+      .default = vaf
+      )
+    ) %>%
+  select(-chimType) %>%
+  pivot_wider(., names_from = sampleID, values_from = vaf)
+
+vaf_bloodReads_sampleList_0x <- vaf_bloodReads_0x %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  pull()
+
+# Combine VAF from hair & blood reads
+vaf_allReads_0x <- merge(vaf_hairReads, vaf_bloodReads_0x, by = "locus", all.x = T) %>%
+  column_to_rownames("locus")
+
+# Subset to VAF between 0.4 and 0.6
+vaf_allReads_0x[vaf_allReads_0x > 0.6] <- NA
+vaf_allReads_0x[vaf_allReads_0x < 0.4] <- NA
+
+# Get median deviation from 0.5 per locus
+## all hair samples
+## type31 blood samples
+## combination of both
+
+vafDev_0x <- (vaf_allReads_0x - 0.5) %>%
+  rownames_to_column("locus") %>%
+  rowwise() %>%
+  mutate(
+    b1 = median(c_across(hairSamples), na.rm = TRUE),
+    b2 = median(c_across(vaf_bloodReads_sampleList_0x), na.rm = TRUE),
+    b3 = median(c_across(where(is.numeric)), na.rm = TRUE)
+    ) %>%
+  select(c("locus", "b1", "b2", "b3"))
+
+# Calculate chimerism corrected for b1, b2, and b3 bias values
+twinChimerism_allTwins_corrected_0x <- merge(twinChimerism_allTwins_0x, vafDev_0x, by = "locus", all.x = T) %>%
+  mutate(
+    chimProp_c1 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b1),
+    chimProp_c2 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b2),
+    chimProp_c3 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b3)
+  ) %>%
+  filter(
+    chimType != "type30",
+    chimType != "type31"
+  ) %>%
+  filter(
+    !is.na(bloodReads)
+  ) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_allTwins_corrected_0x %>%
+  kable(caption = "GTscore 0x: Bias-corrected estimated % twin chimerism for individuals by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Subset by species
+twinChimerism_lwed_corrected_0x <- twinChimerism_allTwins_corrected_0x %>%
+  filter(species == "LWED")
+
+twinChimerism_simp_corrected_0x <- twinChimerism_allTwins_corrected_0x %>%
+  filter(species == "SIMP")
+```
+
+## 4.3 Summaries
+
+```{r}
+twinChimerism_lwed_summary_0x <- twinChimerism_lwed_corrected_0x %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = round(mean(chimProp), 2),
+    mean_chimProp_c1 = round(mean(chimProp_c1), 2),
+    mean_chimProp_c2 = round(mean(chimProp_c2), 2),
+    mean_chimProp_c3 = round(mean(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(species = "LWED") %>%
+  relocate(species)
+
+twinChimerism_lwed_summary_0x %>%
+  kable(caption = "GTscore 0x: LWED avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+twinChimerism_simp_summary_0x <- twinChimerism_simp_corrected_0x %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = round(mean(chimProp), 2),
+    mean_chimProp_c1 = round(mean(chimProp_c1), 2),
+    mean_chimProp_c2 = round(mean(chimProp_c2), 2),
+    mean_chimProp_c3 = round(mean(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(species = "SIMP") %>%
+  relocate(species)
+
+twinChimerism_simp_summary_0x %>%
+  kable(caption = "GTscore 10x: SIMP avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+```
+
+
+
+# 6 GTseq chimerism estimates
+
+## 6.0 Data
+
+### Hair genos
+
+```{r, warning=FALSE}
+hairGenos_gtseq <- read_csv("./05_tamRun5/05_run5GTseq/genos/compiledGenos_gtseq_tamRun5.csv") %>%
+  as.data.frame() %>%
+  mutate(Sample = sub("-", "\\.", Sample)) %>%
+  dplyr::rename_all(funs(make.names(.))) %>%
+  # read_csv adds a comma to last column - remove this
+  mutate(
+    SPECIESID_9 = gsub(",", "", SPECIESID_9)
+  ) %>%
+  select(-Raw.Reads, -On.Target.Reads, -X.On.Target, -X.GT, -IFI) %>%
+  # filter to hair samples
+  filter(Sample %in% hairSamples) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  # add commas so we can reuse the same functions
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ str_c(substr(., 1, 1), ",", substr(., 2, 2)))) %>%
+  # replace 0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                )) %>%
+  t() %>%
+  as.data.frame()
+```
+
+### Allele reads
+
+#### Create allele reads file
+
+GTseq doesn't automatically output allele reads in an easily usable
+format - instead, we need to extract this data from the ".genos" files
+as follows:
+
+1.  Convert .genos files to csv files
+2.  Import as one dataframe
+3.  Subset relevant columns and reformat
+
+**Convert .genos to .csv in bash**
+
+```{bash, eval = FALSE}
+# first copied all .genos files to genos_csv
+# then cd to genos_csv and run the following:
+
+for f in *.genos; do
+    g="${f%.genos}.csv"
+    mv "${f}" "${g}"
+done
+```
+
+**Import all csv files as one dataframe & reformat**
+
+```{r}
+fileNames <- dir("./05_tamRun5/05_run5GTseq/genos/genos_csv", full.names = T)
+
+readCounts_gtseq.list <- lapply(fileNames, function(file.name) {
+  df <- read.csv(file.name, skip = 1, header = F)
+  df$file.name <- file.name
+  return(df)
+  })
+
+readCounts_gtseq <- rlist::list.rbind(readCounts_gtseq.list) %>%
+  rename("locus" = "V1",
+         "allele1_counts" = "V2",
+         "allele2_counts" = "V3",
+         "a1.a2_ratio" = "V4",
+         "geno" = "V5",
+         "genoClass" = "V6",
+         "a1_correctionValue" = "V7",
+         "a2_corectionValue" = "V8",
+         "onTargetReads" = "V9",
+         "locus_otProp.readTotal" = "V10",
+         "locus_otProp.otTotal" = "V11",
+         "sampleID" = "file.name") %>%
+  mutate(
+    readCounts = str_c(sub(".*=", "", allele1_counts), ",", sub(".*=", "", allele2_counts)),
+    sampleID = sub("./05_tamRun5/05_run5GTseq/genos/genos_csv/", "", sampleID),
+    sampleID = sub(".csv", "", sampleID),
+    sampleID = gsub("-", "\\.", sampleID)
+    ) %>%
+  select(c("sampleID", "locus", "readCounts")) %>%
+  pivot_wider(names_from = sampleID, values_from = readCounts) %>%
+  column_to_rownames("locus") %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+```
+
+#### Hair reads
+
+```{r}
+hairReads_gtseq <- readCounts_gtseq %>%
+  select(any_of(hairSamples)) %>%
+  as.data.frame()
+```
+
+#### Blood reads
+
+```{r}
+bloodReads_gtseq <- readCounts_gtseq %>%
+  select(any_of(bloodSamples)) %>%
+  t() %>%
+  as.data.frame()
+```
+
+## 6.1 Pull twinPair hair & blood data
+
+### Hair genos
+
+```{r}
+# Filter hairGenos to twin pairs
+hairGenos_allTwins_gtseq <- hairGenos_gtseq %>%
+  rownames_to_column("sampleID") %>%
+  filter(sampleID %in% twinPairs_tamRun5_l$sampleID_hair) %>%
+  merge(., twinPairs_tamRun5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
+  select(-sampleID) %>%
+  relocate(twinID) %>%
+  # Move animalID to rowname
+  column_to_rownames("animalID")
+
+# Split into groups by twin pair (twinID)
+hairGenos_twinPairs_gtseq <- split(hairGenos_allTwins_gtseq, f = hairGenos_allTwins_gtseq$twinID) %>%
+  # Remove twinID column
+  lapply(., function(x) x[!(names(x) %in% c("twinID"))]) %>%
+  # Filter to loci where both twins have genos
+  lapply(., function(x) x[, colSums(is.na(x)) == 0, drop = FALSE]) %>%
+  # Filter to loci with NON-MATCHING genos
+#  lapply(., function(x) x[, vapply(x, function(x) length(unique(x)) > 1, logical(1L)), drop = FALSE]) %>%
+  # Remove empty dataframes
+  discard(., ~length(as.matrix(.))==0) %>%
+  # Transpose all dataframes
+  lapply(., t) %>%
+  lapply(., as.data.frame) %>%
+  lapply(., rownames_to_column, "locus")
+```
+
+### Blood reads
+
+```{r}
+bloodReads_allTwins_gtseq <- twinPairs_tamRun5_l %>%
+  select(-species, -sampleID_hair) %>%
+  merge(., bloodReads_gtseq, by.x = "sampleID_blood", by.y = "row.names", all.x = T) %>%
+  select(-sampleID_blood) %>%
+  relocate(c(animalID, twinID)) %>%
+  # filter to twinIDs present in hairGenos_twinPairs
+  filter(twinID %in% names(hairGenos_twinPairs)) %>%
+  column_to_rownames("animalID")
+
+bloodReads_twinPairs_gtseq <- split(bloodReads_allTwins_gtseq, f = bloodReads_allTwins_gtseq$twinID) %>%
+  # Remove twinID column
+  lapply(., function(x) x[!(names(x) %in% c("twinID"))]) %>%
+  # Transpose all dataframes
+  lapply(., t) %>%
+  lapply(., as.data.frame) %>%
+  lapply(., rownames_to_column, "locus")
+```
+
+## 6.2 Merge hair & blood data
+
+```{r}
+hairBlood_twinPairs_gtseq <- map2(hairGenos_twinPairs_gtseq, bloodReads_twinPairs_gtseq, ~left_join(.x, .y, by = "locus")) %>%
+  lapply(., setNames, c("locus", "hairGeno_twin1", "hairGeno_twin2", "bloodReads_twin1", "bloodReads_twin2")) %>%
+  map2(., names(.), ~ mutate(.x, twinID = .y)) %>%
+  lapply(., relocate, twinID) %>%
+  bind_rows(.) %>%
+  # add twin animalIDs
+  merge(., twinPairs_tamRun5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
+  relocate(c(twinID, animalID_twin1, animalID_twin2))
+```
+
+## 6.3 Initial chimerism estimates
+
+Initial chimerism estimates are performed as above (section 4.3)
+
+### Calculations
+
+```{r}
+# Identify chimType & calculate VAF
+twinChimerism_gtseq <- hairBlood_twinPairs_gtseq %>%
+  # twin1 as recipient, twin2 as donor
+  mutate(
+    chimType_twin1 = calc_chimType(donorGeno = hairGeno_twin2, recipGeno = hairGeno_twin1),
+    vaf_twin1 = vaf(recipBloodReads = bloodReads_twin1),
+    chimProp_twin1 = calc_chimProp(recipChimType = chimType_twin1, recipBloodReads = bloodReads_twin1)
+    ) %>%
+  # twin1 as donor, twin2 as recipient
+  mutate(
+    chimType_twin2 = calc_chimType(donorGeno = hairGeno_twin1, recipGeno = hairGeno_twin2),
+    vaf_twin2 = vaf(recipBloodReads = bloodReads_twin2),
+    chimProp_twin2 = calc_chimProp(recipChimType = chimType_twin2, recipBloodReads = bloodReads_twin2)
+  ) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_gtseq %>%
+  kable(caption = "GTseq 10x: Estimated % twin chimerism for twin pairs by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Reformat for individual twins vs. pairs
+twinChimerism_twin1_gtseq <- twinChimerism_gtseq %>%
+  select(c("twinID", "locus", contains("twin1")))
+
+twinChimerism_twin2_gtseq <- twinChimerism_gtseq %>%
+  select(c("twinID", "locus", contains("twin2")))
+colnames(twinChimerism_twin2_gtseq) <- colnames(twinChimerism_twin1_gtseq)
+
+twinChimerism_allTwins_gtseq <- rbind(twinChimerism_twin1_gtseq, twinChimerism_twin2_gtseq) %>%
+  rename(
+    "animalID" = "animalID_twin1",
+    "hairGenos" = "hairGeno_twin1",
+    "bloodReads" = "bloodReads_twin1",
+    "chimType" = "chimType_twin1",
+    "vaf" = "vaf_twin1",
+    "chimProp" = "chimProp_twin1"
+  ) %>%
+#  na.omit() %>%
+  merge(., md_hairSamples[, c("animalID", "species")], by = "animalID") %>%
+  relocate(c(twinID, animalID, species)) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_allTwins_gtseq %>%
+  kable(caption = "GTseq 10x: Estimated % twin chimerism for individuals by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Subset by species
+twinChimerism_lwed_gtseq <- twinChimerism_allTwins_gtseq %>%
+  filter(species == "LWED")
+
+twinChimerism_simp_gtseq <- twinChimerism_allTwins_gtseq %>%
+  filter(species == "SIMP")
+```
+
+## 6.4 Bias correction
+
+Bias correction is performed as above (section 4.4).
+
+### Calculations
+
+```{r}
+# Calculate VAF for all hair reads
+vaf_hairReads_gtseq <- replace(hairReads_gtseq, TRUE, lapply(hairReads_gtseq, vaf)) %>%
+  mutate(across(everything(),as.numeric)) %>%
+  rownames_to_column("locus")
+
+# Calculate VAF for AB/AB type-III blood reads
+vaf_bloodReads_gtseq <- twinChimerism_allTwins_gtseq %>%
+  select(c("animalID", "locus", "chimType", "vaf")) %>%
+  merge(., md_bloodSamples[, c("sampleID", "animalID")], by = "animalID") %>%
+  select(-animalID) %>%
+  arrange(sampleID) %>%
+  mutate(
+    vaf = case_when(
+      chimType != "type31" ~ NA,
+      .default = vaf
+      )
+    ) %>%
+  select(-chimType) %>%
+  pivot_wider(., names_from = sampleID, values_from = vaf)
+
+vaf_bloodReads_sampleList_gtseq <- vaf_bloodReads %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID) %>%
+  pull()
+
+# Combine VAF from hair & blood reads
+vaf_allReads_gtseq <- merge(vaf_hairReads_gtseq, vaf_bloodReads_gtseq, by = "locus", all.x = T) %>%
+  column_to_rownames("locus")
+
+# Subset to VAF between 0.4 and 0.6
+vaf_allReads_gtseq[vaf_allReads_gtseq > 0.6] <- NA
+vaf_allReads_gtseq[vaf_allReads_gtseq < 0.4] <- NA
+
+# Get median deviation from 0.5 per locus
+## all hair samples
+## type31 blood samples
+## combination of both
+
+vafDev_gtseq <- (vaf_allReads_gtseq - 0.5) %>%
+  rownames_to_column("locus") %>%
+  rowwise() %>%
+  mutate(
+    b1 = median(c_across(hairSamples), na.rm = TRUE),
+    b2 = median(c_across(vaf_bloodReads_sampleList_gtseq), na.rm = TRUE),
+    b3 = median(c_across(where(is.numeric)), na.rm = TRUE)
+    ) %>%
+  select(c("locus", "b1", "b2", "b3"))
+
+# Calculate chimerism corrected for b1, b2, and b3 bias values
+twinChimerism_allTwins_corrected_gtseq <- merge(twinChimerism_allTwins_gtseq, vafDev_gtseq, by = "locus", all.x = T) %>%
+  mutate(
+    chimProp_c1 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b1),
+    chimProp_c2 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b2),
+    chimProp_c3 = calc_chimProp_c(recipChimType = chimType, HC = chimProp, b = b3)
+  ) %>%
+  filter(
+    chimType != "type30",
+    chimType != "type31"
+  ) %>%
+  filter(
+    !is.na(bloodReads)
+  ) %>%
+  arrange(as.numeric(twinID))
+
+twinChimerism_allTwins_corrected_gtseq %>%
+  kable(caption = "GTseq 10x: Bias-corrected estimated % twin chimerism for individuals by locus") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# Subset by species
+twinChimerism_lwed_corrected_gtseq <- twinChimerism_allTwins_corrected_gtseq %>%
+  filter(species == "LWED")
+
+twinChimerism_simp_corrected_gtseq <- twinChimerism_allTwins_corrected_gtseq %>%
+  filter(species == "SIMP")
+```
+
+## 6.3 Summaries
+
+```{r}
+twinChimerism_lwed_summary_gtseq <- twinChimerism_lwed_corrected_gtseq %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = round(mean(chimProp), 2),
+    mean_chimProp_c1 = round(mean(chimProp_c1), 2),
+    mean_chimProp_c2 = round(mean(chimProp_c2), 2),
+    mean_chimProp_c3 = round(mean(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(species = "LWED") %>%
+  relocate(species)
+
+twinChimerism_lwed_summary_gtseq %>%
+  kable(caption = "GTseq 10x: LWED avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+twinChimerism_simp_summary_gtseq <- twinChimerism_simp_corrected_gtseq %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = round(mean(chimProp), 2),
+    mean_chimProp_c1 = round(mean(chimProp_c1), 2),
+    mean_chimProp_c2 = round(mean(chimProp_c2), 2),
+    mean_chimProp_c3 = round(mean(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(species = "SIMP") %>%
+  relocate(species)
+
+twinChimerism_simp_summary_gtseq %>%
+  kable(caption = "GTseq 10x: SIMP avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+```
+
+# 6 GTscore vs. GTseq
+
+## 6.1 Summary comparison
+
+```{r}
+# LWED
+gtscore.seq_lwed_summary <- merge(twinChimerism_lwed_summary, twinChimerism_lwed_summary_gtseq, by = c("species", "animalID"), all = T, suffixes = c("_gtscore", "_gtseq")) %>%
+  select(order(colnames(.))) %>%
+  relocate(c(species, animalID, n_loci_gtscore, n_loci_gtseq, mean_chimProp_gtscore, mean_chimProp_gtseq))
+
+gtscore.seq_lwed_summary %>%
+  kable(caption = "GTscore vs GTseq: LWED avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+
+# SIMP
+gtscore.seq_simp_summary <- merge(twinChimerism_simp_summary, twinChimerism_simp_summary_gtseq, by = c("species", "animalID"), all = T, suffixes = c("_gtscore", "_gtseq")) %>%
+  select(order(colnames(.))) %>%
+  relocate(c(species, animalID, n_loci_gtscore, n_loci_gtseq, mean_chimProp_gtscore, mean_chimProp_gtseq))
+
+gtscore.seq_simp_summary %>%
+  kable(caption = "GTscore vs GTseq: SIMP avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+```
+
+## 6.2 Mismatches
+
+Did any of the included samples have mismatched genotypes for species or sex compared to metadata?
+
+### Import mismatches
+
+```{r}
+# Species mismatches
+mismatchSpecies_gtscore10x <- read.csv("./05_tamRun5/03_run5GTscore/summaryFiles/genos_species_mismatch_gtscore10x.csv")
+
+mismatchSpecies_gtscore30x <- read.csv("./05_tamRun5/03_run5GTscore/summaryFiles/genos_species_mismatch_gtscore30x.csv")
+
+mismatchSpecies_gtseq <- read.csv("./05_tamRun5/05_run5GTseq/summaryFiles/genos_species_mismatch_gtseq.csv")
+
+# Sex mismatches (hair samples only)
+mismatchSex_gtscore10x <- read.csv("./05_tamRun5/03_run5GTscore/summaryFiles/genos_sex_mismatchAll_gtscore10x.csv")
+
+mismatchSex_gtscore30x <- read.csv("./05_tamRun5/03_run5GTscore/summaryFiles/genos_sex_mismatchAll_gtscore30x.csv")
+
+mismatchSex_gtseq <- read.csv("./05_tamRun5/05_run5GTseq/summaryFiles/genos_sex_mismatchAll_gtseq.csv")
+```
+
+### Note mismatches
+
+#### LWED
+
+animalID 189 had mismatched species genotypes, and animalID 190 had mismatched sex genotypes - they're from the same twin pair. Probably a good idea to remove them from TABA final results
+
+```{r}
+gtscore.seq_lwed_summary_mm <- gtscore.seq_lwed_summary %>%
+  mutate(
+    mmSp_gtscore10x = case_when(
+      animalID %in% mismatchSpecies_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSp_gtscore30x = case_when(
+      animalID %in% mismatchSpecies_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSp_gtseq = case_when(
+      animalID %in% mismatchSpecies_gtseq$animalID ~ "yes",
+      .default = "no")
+    ) %>%
+  relocate(c(mmSp_gtscore10x, mmSp_gtscore30x, mmSp_gtseq), .after = animalID) %>%
+  mutate(
+    mmSex_gtscore10x = case_when(
+      animalID %in% mismatchSex_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSex_gtscore30x = case_when(
+      animalID %in% mismatchSex_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSex_gtseq = case_when(
+      animalID %in% mismatchSex_gtseq$animalID ~ "yes",
+      .default = "no")
+    ) %>%
+  relocate(c(mmSex_gtscore10x, mmSex_gtscore30x, mmSex_gtseq), .after = mmSp_gtseq)
+
+gtscore.seq_lwed_summary_mm %>%
+  kable(caption = "GTscore vs GTseq: Species/sex mismatches in LWED avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+```
+
+#### SIMP
+
+Species and sex mismatches were found in animalID 211 & 212 (which belong to the same twin pair)
+
+Just sex mismatches were found in animalID 167 & 168 (same twin pair) as well as animalID 55 (twin is animalID 93, which didn't have a blood sample)
+
+Probably also good to remove these individuals from TABA final results.
+
+```{r}
+gtscore.seq_simp_summary_mm <- gtscore.seq_simp_summary %>%
+  mutate(
+    mmSp_gtscore10x = case_when(
+      animalID %in% mismatchSpecies_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSp_gtscore30x = case_when(
+      animalID %in% mismatchSpecies_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSp_gtseq = case_when(
+      animalID %in% mismatchSpecies_gtseq$animalID ~ "yes",
+      .default = "no")
+    ) %>%
+  relocate(c(mmSp_gtscore10x, mmSp_gtscore30x, mmSp_gtseq), .after = animalID) %>%
+  mutate(
+    mmSex_gtscore10x = case_when(
+      animalID %in% mismatchSex_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSex_gtscore30x = case_when(
+      animalID %in% mismatchSex_gtscore10x$animalID ~ "yes",
+      .default = "no"),
+    mmSex_gtseq = case_when(
+      animalID %in% mismatchSex_gtseq$animalID ~ "yes",
+      .default = "no")
+    ) %>%
+  relocate(c(mmSex_gtscore10x, mmSex_gtscore30x, mmSex_gtseq), .after = mmSp_gtseq)
+
+gtscore.seq_simp_summary_mm %>%
+  kable(caption = "GTscore vs GTseq: Species/sex mismatches in LWED avg. estimated % chimerism") %>%
+  kable_material(full_width = F) %>%
+  scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
+```
+
+# Both species summary
+
+Remove samples with mismatches and/or < 3 loci
+
+```{r}
+gtscore.seq_lwed_summary_final <- gtscore.seq_lwed_summary_mm %>%
+  filter(mmSp_gtscore10x == "no") %>%
+  filter(mmSex_gtscore10x == "no") %>%
+  filter(n_loci_gtscore >=3) %>%
+  merge(., twinPairs_tamRun5_l[, c("animalID", "twinID")], by = "animalID")
+
+gtscore.seq_simp_summary_final <- gtscore.seq_simp_summary_mm %>%
+  filter(mmSp_gtscore10x == "no") %>%
+  filter(mmSex_gtscore10x == "no") %>%
+  filter(n_loci_gtscore >=3) %>%
+  merge(., twinPairs_tamRun5_l[, c("animalID", "twinID")], by = "animalID")
+```
+
+```{r}
+gtscore.seq_lwedSIMP_summary_final <- rbind(gtscore.seq_lwed_summary_final, gtscore.seq_simp_summary_final)
+
+mean(gtscore.seq_lwedSIMP_summary_final$n_loci_gtscore)
+
+min(gtscore.seq_lwed_summary_final$mean_chimProp_gtscore)
+max(gtscore.seq_lwed_summary_final$mean_chimProp_gtscore)
+
+min(gtscore.seq_simp_summary_final$mean_chimProp_gtscore)
+max(gtscore.seq_simp_summary_final$mean_chimProp_gtscore)
+```
+
