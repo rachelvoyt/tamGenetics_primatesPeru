@@ -1,0 +1,262 @@
+---
+title: "Run 2: Sample analyses"
+author: Rachel Voyt
+date: "2022-09-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages, include=FALSE}
+library(here)
+library(tidyverse)
+```
+
+# Overview
+
+The following report is for "tamGenetics Run 2", the second MiSeq run. This run has a total of **142 samples**, including:
+
+1.  **44 testing samples (+ 2 negatives)**, allowing us to assess:
+
+    1.  Full vs. split primer pools
+    2.  0.025 vs. 0.05 uM primer concentration
+    3.  4 ul sample vs. dilute 1:1 sample with water
+    4.  a couple chelex samples
+    5.  blood samples run with the Burgess PCR1 protocol
+    6.  Diluting PCR1 products 1:10 vs. 1:20 prior to running PCR2
+    7.  duplicates for many of the above as well as for the fecal/hair/blood paired samples
+
+2.  **30 paired samples (+ 4 PCR1 negatives + 1 PCR2 negative)**, with DNA extractions from the same 30 individuals across three different sample types: fecal, hair, and blood
+
+# Sample list
+
+The sample list below is a summary file that includes both 1) results from the GTscore pipeline and 2) metadata for each sample.
+
+```{r}
+d <- read.csv(here('./seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/summaryFiles/p123_master_sampleSummary.csv'))
+  
+View(d)
+
+# Remove negatives
+dNoNeg <- d %>%
+  filter(!sampleType == "(-)")
+View(dNoNeg)
+```
+
+# PCR1 conditions
+
+This run includes three different sets of PCR1 conditions, including:
+
+1.  "gt-seq" - generally follows the original gt-seq PCR1 conditions used by Campbell et al. (2015), but optimized for blood samples and our particular set of primers.
+
+2.  "d" - follows the PCR1 conditions from Burgess et al. (2022), which they used successfully with fecal and hair samples
+
+    1.  Note - this is the same protocol provided in the "Qiagen Multiplex PCR Handbook" for "Amplification of Microsatellite Loci using Multiplex PCR"
+
+3.  "d-plus" - same conditions as "d", but with a 5-minute hotstart instead of 15 minutes. I changed the hotstart time because while the regular Qiagen Multiplex Mastermix requires a 15-minute hotstart, Qiagen Multiplex Mastermix PLUS requires only a 5-minute hotstart (both according to Qiagen documentation). It seemed better not to have our lower-quality samples at such a high temperature for so long a time, and since we're using the PLUS mastermix I opted to change the hotstart to 5 minutes. A couple notes on this:
+
+    1.  Campbell et al. (2015) used the PLUS mastermix with a 15-min hotstart instead of 5-min, and I have been using those conditions with the blood samples without a problem.
+
+    2.  Qiagen reps weren't able to tell me the difference between the PLUS vs. non-PLUS taqs, and there is no indication on the mastermix tube that it even contains the PLUS version despite coming in the Mastermix PLUS kit - so is there actually difference? Who knows!
+
+## "gt-seq" PCR1 conditions
+
+| Step                      | Temp | Time | Cycles |
+|---------------------------|------|------|--------|
+| Taq activation            | 95C  | 15 m | 1      |
+| Denaturation              | 94C  | 30 s |        |
+| Annealing + 1C/s rampdown | 54C  | 90 s | 5      |
+| Extension                 | 72C  | 90 s |        |
+|                           |      |      |        |
+| Denaturation              | 94C  | 30 s |        |
+| Annealing                 | 60C  | 90 s | 20     |
+| Extension                 | 72C  | 90 s |        |
+|                           |      |      |        |
+| Final extension           | 72C  | 10 m | 1      |
+| Hold                      | 4C   | \-   | 1      |
+
+## "d" & "d-plus" PCR1 conditions
+
+| Step            | Temp | Time                         | Cycles |
+|-----------------|------|------------------------------|--------|
+| Taq activation  | 95C  | 15 m ("d") OR 15 m ("d-plus" | 1      |
+| Denaturation    | 94C  | 30 s                         |        |
+| Annealing       | 60C  | 90 s                         | 35     |
+| Extension       | 72C  | 60 s                         |        |
+| Final extension | 60C  | 30 m                         | 1      |
+| Hold            | 4C   | \-                           | 1      |
+
+asdf
+
+# Sample tests
+
+## 1) Full vs. split primer pools
+
+The primer pools tested include the following:
+
+-   **Full pool** - where samples were run with ALL primers whose loci passed the optimization run
+
+    -   **Primer Pool 1**: 221 loci (442 primers)
+
+-   **Split pools** - where samples were run with only HALF the primers whose loci passed the optimization run
+
+    -   **Primer Pool 2**: 111 loci (222 primers)
+
+    -   **Primer Pool 3**: 110 loci (220 primers)
+
+Split primer pools were tested with hair and fecal samples, with primarily hair samples included in the sequencing run.
+
+### 1.1) Hair samples
+
+First we'll look at samples from the set specifically testing performance with full vs. split pools, which includes 5 hair samples (2 LWED, 3 SIMP; xtnTubes "4-C1","4-F3","4-G8","4-H2","4-H8") tested across primer pools 1, 2, and 3. All used PCR1 protocol "d-plus" with a 1:20 dilution post-PCR1.
+
+```{r}
+# Subset data
+splitTest <- d %>%
+  filter(xtnTube %in% c("4-C1","4-F3","4-G8","4-H2","4-H8")) %>%
+  filter(dilution == "‘1:20") %>%
+  filter(pcr1Protocol == "d-plus")
+View(splitTest)
+
+# Genotype rate per pool
+st1 <- ggplot(splitTest, aes(as.character(primerPool.x), GenotypeRate)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(shape=xtnTube,color=species),size=2.5, stroke=1.5) +
+  xlab("Primer Pool") +
+  ylab("Genotype Rate") +
+  ggtitle("5 paired hair samples, d-plus, 1:20") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+st1
+
+# Primer-probe reads per pool
+ggplot(splitTest, aes(as.character(primerPool.x), Primer.Probe.Reads)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(shape=xtnTube, color=species),size=2.5, stroke=1.5) +
+  xlab("Primer Pool") +
+  ylab("Primer-Probe Reads") +
+  ggtitle("5 paired hair samples") +
+  theme_bw()
+```
+
+The samples run with Pool 1, however, had a slightly different library prep, where gel excisions were pooled prior to adding to the full library instead of being processed individually. If we look at Pool 1 hair samples prepped individually, do we see difference?
+
+```{r}
+# Subset data
+st2 <- splitTest2 <- d %>%
+  filter(sampleType == "hair") %>%
+  filter(dilution == "‘1:20") %>%
+  filter(pcr1Protocol == "d-plus") %>%
+  filter(!pcr1Description == "set 2 (hair) again")
+View(splitTest2)
+
+# Genotype rate per pool
+ggplot(splitTest2, aes(x=as.character(primerPool.x), y=GenotypeRate)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter() +
+  xlab("Primer Pool") +
+  ylab("Genotype Rate") +
+  ggtitle("Hair samples, d-plus, 1:20, indiv prep") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Now let's look at ALL hair samples, still with 1:20 dilution, but with any PCR1 protocol and any library prep method
+
+```{r}
+# Subset data
+splitTest3 <- d %>%
+  filter(sampleType == "hair") %>%
+  filter(dilution == "‘1:20")
+View(splitTest3)
+
+# Genotype rate per pool
+st3 <- ggplot(splitTest3, aes(x=as.character(primerPool.x), y=GenotypeRate)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter() +
+  xlab("Primer Pool") +
+  ylab("Genotype Rate") +
+  ggtitle("Hair samples, any PCR1, 1:20, any prep") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+st3
+```
+
+### 1.2) Fecal samples
+
+Note that fecals included on this run only include those tested with primer pool 1 (pcr1 protocol d-plus) & pool 2 (pcr1 protocol d)
+
+```{r}
+# Subset data
+splitTest4 <- d %>%
+  filter(sampleType == "fecal") %>%
+  filter(dilution == "‘1:20") %>%
+  filter(ulAdded == "4") %>%
+  filter(primerCon_uM == "0.025")
+View(splitTest4)
+
+# Genotype rate per pool
+st4 <- ggplot(splitTest4, aes(x=as.character(primerPool.x), y=GenotypeRate)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter() +
+  xlab("Primer Pool") +
+  ylab("Genotype Rate") +
+  ggtitle("Fecal samples, any PCR1, 1:20, any prep") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+st4
+```
+
+### 1.3) ALL samples
+
+```{r}
+# Sample genotype rate per pool
+st5 <- ggplot(dNoNeg, aes(x=as.character(primerPool.x), y=GenotypeRate, fill=sampleType, color = sampleType)) +
+  geom_boxplot(outlier.shape = NA, alpha=0.5) +
+  geom_point(position=position_jitterdodge(dodge.width=0.9)) +
+  xlab("Primer Pool") +
+  ylab("Genotype Rate") +
+  ggtitle("Fecal samples, any PCR1, 1:20, any prep") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+st5
+```
+
+## 2) 0.025 vs. 0.05 uM PCR1 primer concentration
+
+The original GT-seq protocol from Campbell et al. (2015) as well as the other published papers I've seen have all used 0.05 uM PCR1 primer concentration. Because initial PCR1 tests with blood samples showed substantial primer dimerization, I decreased final primer concentration such that the final PCR reaction mixture included 0.025 uM, which I used for all samples in the first sequencing run (optimizaion run).
+
+During troubleshooting tests with hair samples, however, I wanted to reassess whether a higher primer concentration made a difference, as the Burgess et al. (2022) protocol used 0.05 uM primer concentration successfully with their hair and fecal samples.
+
+```{r}
+pcon1 <- d $>$
+  filter(pcr1Description == "")
+```
+
+### 6) Dilution 1:20 vs. 1:10
+
+The dilution test includes 3 samples (xtnTube 4-C1, 4-F3, and 4-G8), with the same 3 samples used for each of the 3 primer pools.
+
+```{r}
+# Create list of samples diluted 1:10
+oneTenSamples <- d %>%
+  filter(dilution == "‘1:10") %>%
+  select(xtnTube) %>%
+  pull()
+View(oneTenSamples)
+
+# Pull out same samples from the dataset
+dilutionTest <- d %>%
+  filter(xtnTube %in% oneTenSamples)
+View(dilutionTest)
+
+# Genotype rate per dilution type
+ggplot(dilutionTest, aes(x=as.character(primerPool.x), y=GenotypeRate, fill=dilution)) +
+  geom_boxplot(position = position_dodge(1)) +
+  geom_point(position=position_jitterdodge(jitter.width = 0.05,dodge.width = 1)) +
+  xlab("Dilution") +
+  ylab("Genotype Rate") +
+  theme_bw()
+```

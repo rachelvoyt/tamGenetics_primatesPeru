@@ -1,0 +1,77 @@
+---
+title: "Quality Checks"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Fastp
+
+For quality checks, I originally used the program *fastp*, which - unlike fastqc - allows for processing of paired-end reads.
+
+Set up environment: - Go to directory:
+
+```{bash}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/
+```
+
+-   Activate fastp environment:
+
+```{bash eval = F}
+conda activate fastp-env
+```
+
+-   Use a bash loop to run fastp on all files:
+
+```{bash eval = F}
+for i in 01_run2Seqs/*R1*; do name=$(basename $i _L001_R1_001.fastq.gz); mkdir 00_qualityChecks/${name}; cd 00_qualityChecks/${name}; fastp -i ../../01_run2Seqs/${name}_L001_R1_001.fastq.gz -I ../../01_run2Seqs/${name}_L001_R2_001.fastq.gz; mv fastp.html ../${name}_fastp.html; mv fastp.json ../${name}_fastp.json; cd ../; rm -r ${name}; cd ../; done
+```
+
+-   Run multiqc to unify all reports:
+
+```{bash eval = F}
+conda activate multiqc-env
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/00_qualityChecks
+multiqc .
+```
+
+```{r}
+library(TidyMultiqc)
+MultiQCpath <- file.path("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/00_qualityChecks/multiqc_data_1", "multiqc_data.json")
+MultiQC <- TidyMultiqc::load_multiqc(MultiQCpath)
+MultiQC$sampleNo <- substr(MultiQC$metadata.sample_id, start = 9, stop = 11)
+View(MultiQC)
+
+md <- read.csv('/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/03_run2GTscore/metadata_tamRun2.csv') %>%
+  mutate(sampleNo = substr(sampleID, start = 9, stop = 11))
+head(md)
+
+MultiQC_md <- merge(MultiQC, md, by = "sampleNo")
+```
+
+# FastQC
+
+Note: use "\--interactive" to force plots to tell you which line belongs to which sample, otherwise it will remove this option since there are so many samples in this run.
+
+```{bash eval = F}
+conda activate fastqc-env
+for i in ../01_run2Seqs/*; do fastqc $i; done
+mv ../01_run2Seqs/*fastqc* .
+conda activate multiqc-env
+multiqc --interactive .
+```
+
+```{r}
+MultiQCfastQCpath <- file.path("/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamarinGenetics_primatesPeru/seqAnalysis/01_run2_fecalHairBlood/00_qualityChecksFastQC/multiqc_data", "multiqc_data.json")
+MultiQCfastQC <- TidyMultiqc::load_multiqc(MultiQCfastQCpath, sections = c("general", "raw"))
+```
+
+```{r}
+MultiQCfastQC %>% dplyr::select(dplyr::contains('quality'))
+```
+
+```{r}
+TidyMultiqc::list_plots(MultiQCfastQCpath)
+```
+
+asdf

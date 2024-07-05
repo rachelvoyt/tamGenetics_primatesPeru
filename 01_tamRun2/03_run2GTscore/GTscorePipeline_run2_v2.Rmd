@@ -1,0 +1,115 @@
+---
+title: "GTscorePipeline_run2_v2"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+This pipeline is a redo of that for tamRun2, where in this case I'm genotyping only loci with greater than 10x coverage. This pipeline also includes an updated primer-probe file, since the one I used in the first run-through was missing at least one locus (SEXID_LWED_211). [apparently this was unnecessary to do; 211 was one of the loci that we cut]
+
+Note that here I'm not separating by species or primer pool; I'm just running the full set as is (naming with fullSetv2_).
+
+# Packages
+```{r}
+library(gsubfn)
+library(phylotools)
+library(TidyMultiqc)
+library(tidyverse)
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("Biostrings")
+source("GTscore.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+```
+
+# Sample files
+
+```{r}
+sf_original <- read.table("run2_sampleFiles_original.txt")
+```
+
+# Primer-probe files
+
+Going to use the file in tamRun3 (primerProbeFile_fullSet.txt)
+
+# Amplicon read-counter
+
+```{r}
+system2("perl",
+        args="AmpliconReadCounter.pl -p ./../../03_tamRun3/03_run3GTscore/primerProbeFile_fullSet.txt --files run2_sampleFiles_original.txt --prefix fullSetv2_")
+```
+
+Recode loci with <10x coverage
+```{r}
+# Read in allele counts for the full dataset
+readCounts <- read.table("fullSetv2_AlleleReads_singleSNPs.txt")
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts[readCounts_sum < 10] <- "0,0"
+
+# Export
+write.table(readCounts,"fullSetv2_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
+```
+
+Genotyping
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable<-read.delim("fullSetv2_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads<-read.delim("fullSetv2_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP<-polyGen(fullSet_singleSNP_locusTable,fullSet_singleSNP_alleleReads)
+
+#write results
+write.table(fullSet_polyGenResults_singleSNP,"fullSetv2_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
+```
+
+#### BELOW IS NOT UPDATED ####
+
+Species assignments
+
+```{r}
+speciesKey <- read.csv("./../../03_tamRun3/04_genoAnalyses/speciesSNP_key_14Dec2022.csv")
+
+genos_fullSet <- read.table("fullSet_polyGenResults_singleSNP_10x.txt", header = T)
+
+genos_species <- genos_fullSet %>%
+  rownames_to_column("Locus") %>%
+  filter(str_detect(Locus, "SPECIES")) %>%
+  mutate(Locus = sub('[.][^.]+$', '', Locus)) %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(!Locus,
+               names_to = "sampleID",
+               values_to = "genotype") %>%
+  left_join(speciesKey, by = c("Locus", "genotype")) %>%
+  mutate(species = coalesce(species, genotype)) %>%
+  select(c(Locus, sampleID, species)) %>%
+  pivot_wider(names_from = sampleID,
+              values_from = species) %>%
+  column_to_rownames("Locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalGenos_sp = (rowSums(. == "LWED") + rowSums(. == "SIMP"))) %>%
+  mutate(propGenos_sp = (totalGenos_sp/12)) %>%
+  mutate(propLWED = (rowSums(. == "LWED")/totalGenos_sp)) %>%
+  mutate(propSIMP = (rowSums(. == "SIMP")/totalGenos_sp)) %>%
+  mutate(propMismatch_species = (1 - abs(propLWED - propSIMP))) %>%
+  mutate(speciesAssigned = ifelse(propLWED == 1, "LWED", ifelse(propSIMP == 1, "SIMP", NA))) %>%
+  rownames_to_column("sampleID") %>%
+  relocate(c(speciesAssigned, totalGenos_sp, propMismatch_species, propLWED, propSIMP, propGenos_sp), .after = sampleID)
+```
+
+
