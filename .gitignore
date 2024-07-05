@@ -14,5 +14,6 @@
 01_run2_fecalHairBlood/
 02_laLab_run1/
 05_tamRun5/05_run5GTseq/*.pl
-gtscore_vs_gtseq/tamRun3/*.pl
 bearTest/
+gtscore_vs_gtseq/tamRun3/*.pl
+paper2_snpPanel/*.pl
