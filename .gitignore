@@ -1,25 +1,9 @@
-# general stuff to ignore
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
+# ignore everything (dirs, files, sub-dirs, sub-files)
+*
 
-# directories to ignore
-/01_run2_fecalHairBlood
-/02_laLab_run1
-/bearTest
-/downsamplingTests
-/extractions
-/gelPics
-/picogreen
-/primers
-/robotProtocols
-/samFiles
+# but do not ignore .gitignore file or .Rmd files (override)
+!.gitignore
+!*.Rmd
 
-# files to ignore
-*archived*
-*.fastq.gz
-*.fastq
-*fastqc.html
-*fastqc.zip
-*scatter.jpg
+# apply override to all dirs recursively
+!**/
