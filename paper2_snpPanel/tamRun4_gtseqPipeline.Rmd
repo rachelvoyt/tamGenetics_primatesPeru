@@ -1,0 +1,195 @@
+---
+title: "tamRun4_gtseqPipeline"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+## General info
+
+This document outlines data analysis for tamGenetics_run4 using the "GTseq pipeline" ([GitHub link](https://github.com/GTseq/GTseq-Pipeline)) created by Nate Campbell.
+
+In using this pipeline, I primarily followed the steps outlined in "GTseq_Pipeline.txt". Note, however, that while the perl scripts are taken directly from the originals, I've added information below on how to run each as a loop to allow analysis of all sample files at once, as this was not included in the original GTseq pipeline. I've also included descriptions of each script taken from various locations on the GTseq GitHub page, with additional information added where needed for further clarification.
+
+## About the data
+
+The sequence data used in this pipeline is from tamRun4, whichhas a total of **96 samples**, including blood, fecal, and hair samples from 15 LWED and 15 SIMP individuals as well as 6 negative controls.
+
+# Step 1: Split raw fastq sequence file into individual fastq files using dual index sequences
+
+No need to complete this step; fastq files were split automatically by MiSeq
+
+# Step 2 (optional): Test plate fastq sequence files for the presence of forward primers and probes using the GTseq_SeqTest.pl script
+
+This script counts the occurrence of each forward primer sequences, in-silico probe sequences, and when both occur within the same sequence read. This can help identify primers that create large numbers of artifact sequences.
+
+While this step is listed as optional, I think it's important to complete it; doing so will also help with comparisons to the GTscore pipeline output.
+
+## 2.1 GTseq_HashSeqs.pl
+
+First use the GTseq_HashSeqs.pl script on plate .fastq files. This script collects and counts unique reads within the fastq file and reduces the compute time for the GTseq_SeqTest.pl script.
+
+GTseq example:
+
+```{bash, eval = F}
+perl GTseq_HashSeqs.pl i20_plate123.fastq > i20_plate123.hash
+```
+
+Loop form for tamRun4 data:
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/paper2_snpPanelDev
+
+for i in ./../04_tamRun4/02_run4Interleaved/tamRun4*; do perl GTseq_HashSeqs.pl $i > ./hashSeqs/$(basename "${i/.fastq/.hash}"); done
+```
+
+## 2.2 GTseq_SeqTest.pl
+
+Next use the GTseq_SeqTest.pl script by supplying a tab delimited text file containing loci name, forward primer sequence, allele 1 probe, and allele 2 probe.
+
+Note: The script checks for both the supplied sequence and the reverse complement of the in-silico probes.
+
+### Create loci info file
+
+Below I'm taking the version 3 primer-probe file that I used for the GTscore pipeline and reformatting it for the GTseq_SeqTest.pl script.
+
+```{r, eval = F}
+primerList_v3 <- read.csv("./primers/03_lociChoices/tamGenetics_primerList_v3.csv")
+
+pp_fullSet <- read.table("./03_tamRun3/03_run3GTscore/primerProbeFile_fullSet.txt", header = T) %>%
+  filter(Locus %in% primerList_v3$locus)
+
+pp_gtseq_seqTest <- pp_fullSet %>%
+  select(c(Locus, Primer, Probe1, Probe2))
+
+write.table(pp_gtseq_seqTest,"./paper2_snpPanelDev/primerProbe_gtseq.txt", quote = F, sep = "\t", col.names = F, row.names = F)
+```
+
+### Run GTseq_SeqTest.pl
+
+GTseq example:
+
+```{bash, eval = F}
+perl GTseq_SeqTest.pl Primer-Probe_input.txt i20_plate123.hash > i20_plate123.seqtest.csv
+```
+
+Loop form for tamRun4 data:
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/paper2_snpPanelDev
+
+for i in ./hashSeqs/tamRun4*; do perl GTseq_SeqTest.pl primerProbe_gtseq.txt $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
+```
+
+# Step 3: Genotype individuals
+
+The original GTseq_Pipeline.txt file says that we can use either 1) GTseq_Genotyper.pl script or 2) GTseq_Genotyper_v2.pl script, which allows for count corrections for loci which amplify. However, there's also a GTseq_Genotyper_v3.pl script, which I'm opting to use here.
+
+Version 3 appears to be the same as Version 2, but includes fuzzy matching for detection of possible null alleles. Additional notes provided for Version 3 are as follows:
+
+-   Requires the String::Approx perl extension.
+-   Possible null alleles can be summarized using the GTseq_ErrorReport_v3.pl script. Keep in mind that some loci with flagged null alleles could be the result of co-amplification of a paralogous locus.
+-   In some cases the reported fuzzy match sequence doesn't match either probe sequence at all. This happens when the location of the fuzzy match doesn't match the position of the exact probe match on the amplicon. This probably means that there is amplification of a PSV with these primers.
+
+## 3.1 Create loci info file
+
+The genotyper script requires a slightly different loci info file than for the seqTest script. This loci information file needs to contain locus names, allele names, and in-silico probe sequences in .csv format.
+
+Note that versions 2 and 3 of the genotyper script allow for correction values for each locus; these are optional and will be zero for all loci of not used.
+
+```{r, eval = F}
+pp_gtseq_genotyper <- pp_fullSet %>%
+  select(c(Locus, Allele1, Allele2, Probe1, Probe2, Primer))
+
+write.table(pp_gtseq_genotyper, "./paper2_snpPanelDev/locusInfo_gtseq.csv", col.names = F, row.names = F, sep = ",", quote = F)
+```
+
+## 3.2 Run GTseq_Genotyper_v3.pl
+
+GTseq example:
+
+```{bash, eval = F}
+perl GTseq_Genotyper.pl LocusInfo.csv i20_90_P0123_IndividualID.fastq > i20_90_P0123_IndividualID.genos &
+```
+
+Loop form for tamRun4 data:
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/paper2_snpPanelDev
+
+for i in ./../04_tamRun4/02_run4Interleaved/tamRun4*; do perl GTseq_Genotyper_v3.pl locusInfo_gtseq.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
+```
+
+Output files contain a header line with summary information followed by locus specific data. Immediately below the header are a set of locus specific metrics, with (unlabeled) columns for the following:
+
+-   LocusName
+-   Allele1_counts
+-   Allele2_counts
+-   A1/A2-ratio
+-   Genotype
+-   Genotype_Class
+-   A1_correction value
+-   A2_correction value
+-   On_target reads
+-   Locus OT_percentage
+-   Locus On-target reads as percentage of total on-target reads
+
+# Step 4: Compile genotypes from individual .genos files to a single .csv file
+
+This script collects genotypes for all individuals at all loci and provides summary statistics for each individual.
+
+Note that the GTseq_GenoCompile version 3 utilizes the expanded output from the GTseq_Genotyper_v3 script to gather summary data and does not require the individual fastq files. Further notes below:
+
+-   Includes IFI score (Individual Fuzziness Index) as an indication of possible contamination of DNA from another individual.
+
+-   For optional output formats use arguments. N for numeric genotypes or C for allele counts. Defaults to SNP genotypes.
+
+-   Optional filtered output requires 2 argument values. Genotype output type and a genotyping threshold [S,N, or C] [90]
+
+    -   example: \$ GTseq_GenoCompile_v3.pl S 90 (outputs SNP genotypes for individual .genos files with 90% or higher genotyping percentage); genotypes for individuals with less than the threshold genotyping percentage are converted to "00".
+
+## 4.1 Run GTseq_GenoCompile_v3.pl
+
+GTseq example:
+```{bash, eval = F}
+perl GTseq_GenoCompile_v2.pl > Library_Genotypes.csv
+```
+
+Script for tamRun4 data:
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/paper2_snpPanelDev/genos
+
+perl ./../GTseq_GenoCompile_v3.pl > compiledGenos_gtseq_tamRun4.csv
+```
+
+# Step 5 (optional): Compile read count data for each sample at each locus
+
+note that the .fastq and .genos files need to be in the same directory for this to work; I also haven't gotten it working 100%, it puts out tamRun4_001 as a column for some reason, but have to check if it affects allele read counts or not
+
+```{bash, eval = F}
+# original
+perl GTseq_GenoCompile_Counts.pl > Library_Counts.csv
+
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/gtscore_vs_gtseq/test/
+
+# test
+perl ./../GTseq_GenoCompile_Counts.pl > Library_Counts.csv
+
+```
+
+# Step 6 (optional but highly recommended): Generate summary figures for library using the GTseq_SummaryFigures_v3.py script
+
+This generates a .pdf file containing summary figures for the library as well as a text document with summary data.
+
+Both are very useful in troubleshooting optimizing a solid panel of primers for GTseq.
+
+```{bash, eval = F}
+
+```
+

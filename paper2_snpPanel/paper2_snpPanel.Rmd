@@ -1,0 +1,51 @@
+---
+title: "paper2_snpPanel"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+This document contains the analyses for tamGenetics paper 2 on SNP panel development.
+
+# Loci
+
+**species-specific SEXID loci counts may need to be altered
+
+```{r, echo=FALSE}
+primerSet_v1 <- read.csv("./primers/03_lociChoices/primerSet_v1.csv")
+primerSet_v2 <- read.csv("./primers/03_lociChoices/primerSet_v2.csv")
+primerSet_v3 <- read.csv("./primers/03_lociChoices/primerSet_v3.csv")
+
+table(primerSet_v1$lociSet)
+```
+
+```{r, echo=FALSE}
+# for html
+table_lociOverview <- rbind(table(primerSet_v1$lociSet), table(primerSet_v2$lociSet), table(primerSet_v3$lociSet)) %>%
+  as.data.frame() %>%
+  mutate_all(., funs(./2)) %>%
+  mutate(
+    TOTAL = rowSums(.[1:7])
+  ) %>%
+  relocate(TOTAL) %>%
+  mutate(
+    panelVersion = c("v1", "v2", "v3")
+  ) %>%
+  relocate(panelVersion) %>%
+  mutate(
+    lociRemoved = TOTAL - lag(TOTAL, default = first(TOTAL))
+  )
+```
+
+# Panel optimization: Library 1
+
+```{r}
+
+```
+

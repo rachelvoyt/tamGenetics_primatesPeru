@@ -1,0 +1,301 @@
+---
+title: |
+    | "How-to guide for GT-seq data analysis" 
+    | "Part 1: Sequence preparation & quality analyses" 
+author: "Rachel Voyt"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+Part 1 of the tamGenetics GT-seq how-to guide goes over downloading, interleaving, and performing quality checks for sequencing results from both Illumina and Nanopore platforms.
+
+If you don't yet have your own sequencing results, proceed to the Quality Checks section and use the toy data available in 00_toyRun_seqs and 01_toyRun_interleaved.
+
+# 2 Download & prepare sequencing results
+
+Below are steps to prepare sequencing results from both Illumina and
+Nanopore platforms, including downloading, extracting, and interleaving
+sequences (both platforms) as well as trimming adapter sequences
+(Nanopore only).
+
+## 2.2 ILLUMINA
+
+#### Download sequences from BaseSpace
+
+To download all sample files, it's easiest to use the BaseSpace Command
+Line Interface (CLI).
+
+To install the BaseSpace CLI, follow the scripts provided here:
+<https://developer.basespace.illumina.com/docs/content/documentation/cli/cli-overview>
+
+Note that even if it's already installed, you may need to
+re-authenticate via the command below. Running the command below will
+give a link; click to open in a browser and complete authentication.
+
+```{bash, eval = FALSE}
+bs auth
+```
+
+Once authentication is complete, you can download the desired files as
+follows:
+
+```{bash, eval = FALSE}
+# Check *Project IDs* (make note of which you want to download)
+bs list projects
+
+# Download *Sample Sequences* for the project of interest
+bs download project -i PROJECTID# -o ./toyPipeline/toyRun/00_toyRun_seqs/ --extension=fastq.gz
+
+# Download *Unindexed Reads* for the project of interest
+bs download project -i PROJECTID# -o ./toyPipeline/toyRun/00_toyRun_seqs/ --extension=fastq.gz
+```
+
+#### Extract fast.gz files
+
+```{bash, eval = FALSE}
+# Navigate to the directory containing the .fastq.gz files from the sequencing run
+cd ./toyPipeline/toyRun/00_toyRun_seqs/
+
+# Move all .gz files out of their individual folders and into the current directory; remove empty folders
+mv */* ./
+
+find . -empty -type d -delete
+
+# Extract all files
+gunzip -r .
+```
+
+#### Interleave files & reformat names
+
+To prep for the GTscore pipeline, we need to combine reads 1 & 2 for
+each sample into a single interleaved file - leave a set of
+non-interleaved files in the original folder though to keep for fastq
+quality checks.
+
+I'm also including a step here to trim the extra info from the filenames
+to make them a bit more manageable.
+
+```{bash, eval = FALSE}
+# Move out of toyRun_seqs/ to toyRun directory
+cd ./../
+
+# Interleave reads 1 & 2
+for i in ./00_toyRun_seqs/*_R1_001.fastq; do name=$(basename $i _R1_001.fastq); reformat.sh in=00_run5Seqs/${name}_R1_001.fastq in2=00_toyRun_seqs/${name}_R2_001.fastq out=01_toyRun_interleaved/${name}_interleaved.fastq; done
+
+# Trim filenames to make them more manageable
+cd ./01_toyRun_interleaved/
+
+for f in *.fastq; do g="${f%%_S*}.fastq"; mv "${f}" "${g}"; done
+```
+
+## 2.2 NANOPORE
+
+##### Download sequences
+
+*tbd*
+
+##### Extract sequences
+
+```{bash, eval = FALSE}
+# Navigate to the directory containing the sequence zip file
+cd ALLSEQS_ZIP
+
+# Extract zip file into a new directory - keep the original zip file where it is as a copy
+unzip FILE_NAME.zip -d ../NEW_DIRECTORY
+
+# Navigate to the directory containing the .fastq.gz files from the sequencing run
+cd DIRECTORY
+
+# Move all .gz files out of their individual folders and into the current directory & remove empty folders
+mv */* ./
+
+find . -empty -type d -delete
+
+# Extract all files
+gunzip -r .
+```
+
+##### Trim adapter sequences
+
+For the GTscore pipeline to work, we need to trim off all adapter
+sequences. Guppy can be set to automatically trim the Nanopore adapters,
+but our sequences also contain the Illumina overhang sequence - we can
+use 'cutadapt' in bash to find and remove them, including partial
+sequences. Step to do this are below:
+
+First create, then navigate to new directory for trimmed sequences
+
+```{bash, eval = FALSE}
+mkdir SEQS_TRIMMED
+cd SEQS_TRIMMED
+```
+
+Then run a loop to do the following: 1) clean up the file names so
+they're just "barcodeXX.fastq" 2) remove everything before the
+forward-primer overhang and after the reverse-primer overhang in all of
+our original sequences 3) create a new set of trimmed sample files
+
+```{bash, eval = FALSE}
+for i in ../ORIGINAL_SEQS/*.fastq; do f=${i%%_892ac4c1_03630e12*}; g=${f##*_}; cutadapt -a TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG...GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG -o ${g}_trimmed.fastq $i; done > cutadapt.log
+
+# Can view what it does by running the following:
+for i in ../ORIGINAL_SEQS/*.fastq; do f=${i%%_892ac4c1_03630e12*}; g=${f##*_}; echo cutadapt -a TCGTCGGCAGCGTCAGATGTGTATAAGAGACAG...GTCTCGTGGGCTCGGAGATGTGTATAAGAGACAG -o ${g}_trimmed.fastq $i; done > cutadapt_command.txt
+```
+
+# 3 Quality checks
+
+## 3.1 Create Fastq & MultiQC environments
+
+Fastq and MultiQC are both needed for sequence quality checks. Use the
+scripts below to create new environments and install each program. Note
+that for MultiQC to be up to date, you may need to install it in an
+environment with Python 3.9 using conda-forge.
+
+**Fastq**
+
+```{bash, eval = FALSE}
+# Create new conda environment
+conda create -n fastqc-env
+
+# Activate via:
+conda activate fastqc-env
+
+# Install fastqc
+conda install -c bioconda fastqc
+```
+
+**MultiQC**
+
+```{bash, eval = FALSE}
+# Create new conda environment
+conda create -n multiqc-env python=3.9
+
+# Activate via:
+conda activate multiqc-env
+
+# Install multiqc
+conda install -c bioconda multiqc
+```
+
+## 3.2 Run quality checks
+
+### MultiQC report
+
+Run the scripts below to create the MultiQC report.
+
+**Note** - If there are a lot of samples in the run, use
+"\--interactive" to force plots to tell you which line belongs to which
+sample in the MultiQC plots, otherwise it will remove this option.
+
+```{bash, eval = FALSE}
+# Activate fastqc environment
+cd ./toyPipeline/toyRun/03_toyRun_qualityChecks
+conda activate fastqc-env
+
+# Run fastqc
+for i in ../00_toyRun_seqs/*; do fastqc $i; done
+
+# Move fastqc files to quality checks folder
+mv ../00_toyRun_seqs/*fastqc* .
+
+# Activate multiqc environment
+conda activate multiqc-env
+
+# Run MultiQC on all files within the quality checks folder
+multiqc --interactive .
+```
+
+### TidyMultiqc
+
+The package 'TidyMultiqc' converts the 'multiqc_data.json' file into
+tidy data frames. For the scripts in this section, I followed [this
+vignette](https://cran.r-project.org/web/packages/TidyMultiqc/vignettes/TidyMultiqc.html)
+provided by the makers of the TidyMultiqc package.
+
+#### Load FastQC MultiQC report to R
+
+```{r, eval = FALSE}
+MultiQCfastQCpath <- file.path("./toyRun/03_toyRun_qualityChecks/multiqc_data", "multiqc_data.json")
+
+MultiQCfastQC <- TidyMultiqc::load_multiqc(MultiQCfastQCpath, sections = c("general", "raw"))
+```
+
+#### Obtain median sequence quality scores
+
+MultiQC reports do not provide a numerical summary statistic for read
+quality; they only have mapping quality and pass/fails for the per-base
+sequence quality. We instead need to pull this data from one of the
+plots -- I'm using the "Per Sequence Quality Scores" plot here:
+
+```{r, eval = FALSE}
+df <- TidyMultiqc::load_multiqc(
+  MultiQCfastQCpath, 
+  sections = 'plot',
+  plots = "fastqc_per_sequence_quality_scores_plot")
+```
+
+This provides a nested data frame as a set of x, y pairs. As it's a
+histogram plot, we know that the `x` value is the quality score, and `y`
+is the number of times that score has been counted.
+
+We can use tidyr to unnest the data, HistDat to create a HistDat object
+for each group, then purr to map each plot data frame into a row of
+summary statistics:
+
+```{r, eval = FALSE}
+df_unNest <- df %>%
+  dplyr::mutate(
+    purrr::map_dfr(plot.fastqc_per_sequence_quality_scores_plot, function(plot_df){
+      hist = HistDat::HistDat(vals=plot_df$x, counts = plot_df$y)
+      list(
+        mean_qc = mean(hist),
+        median_qc = median(hist),
+        max_qc = max(hist)
+      )
+    }),
+    plot.fastqc_per_sequence_quality_scores_plot = NULL
+  )
+```
+
+This dataframe has separate rows for reads 1 & 2; we can rearrange that
+to make it easier to work with for our purposes. Since we're most
+interested in median quality, we'll just pull that value for each
+sample.
+
+```{r, eval = FALSE}
+seqQC_r1 <- df_unNest %>%
+  select(c("metadata.sample_id", "median_qc")) %>%
+  filter(grepl("R1", metadata.sample_id)) %>%
+  rename(medianQC_r1 = median_qc) %>%
+  mutate(sampleNo = substr(metadata.sample_id, start = 9, stop = 11))
+seqQC_r2 <- df_unNest %>%
+  select(c("metadata.sample_id", "median_qc")) %>%
+  filter(grepl("R2", metadata.sample_id)) %>%
+  rename(medianQC_r2 = median_qc) %>%
+  mutate(sampleNo = substr(metadata.sample_id, start = 9, stop = 11))
+seqQC <- merge(seqQC_r1, seqQC_r2, by = "sampleNo") %>%
+  select(c("sampleNo", "medianQC_r1", "medianQC_r2")) %>%
+  arrange(sampleNo)
+```
+
+We can take a peek at the distribution of sequence quality scores and
+use it in our other analyses later on if desired:
+
+```{r, eval = FALSE}
+ggplot(seqQC, aes(medianQC_r1)) +
+  geom_bar(stat = "count") +
+  theme_bw()
+
+ggplot(seqQC, aes(medianQC_r2)) +
+  geom_bar(stat = "count") +
+  theme_bw()
+```

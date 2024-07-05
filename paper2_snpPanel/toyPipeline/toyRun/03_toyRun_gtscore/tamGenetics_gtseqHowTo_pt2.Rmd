@@ -1,0 +1,328 @@
+---
+title: |
+    | "How-to guide for GT-seq data analysis" 
+    | "Part 2: Amplicon read counting & genotyping with GTscore" 
+author: "Rachel Voyt"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+Part 2 of the tamGenetics GT-seq how-to guide goes over downloading, interleaving, and performing quality checks for sequencing results from both Illumina and Nanopore platforms.
+
+If you don't yet have your own sequencing results, proceed to the Quality Checks section and use the toy data available in 00_toyRun_seqs and 01_toyRun_interleaved.
+
+# 2 Preparation
+
+## 2.1 Packages
+
+### R packages
+
+```{r, eval = FALSE}
+source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added an option for "\\[ATGC\\]"="N" (lines 616 and 617) to replace brackets in probe
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("Biostrings")
+
+library(gsubfn)
+library(multiqc)
+library(phylotools)
+library(TidyMultiqc)
+library(tidyverse)
+```
+
+### Perl and modules
+
+The GTscore pipeline includes several Perl scripts as well as Perl
+modules "Algorithm::Combinatorics" and "Excel-Writer-XLSX". Use the
+scripts below to install on Linux/Mac computers (more on how to install
+Perl modules [here](http://www.cpan.org/modules/INSTALL.html)).
+
+A couple notes--
+
+-   It used to be possible to install Perl through Conda (conda install
+    -c conda-forge perl), but this doesn't seem to work well anymore
+-   Be sure to install both Perl and the modules in the same place
+    (e.g., both in the root directory)
+-   You can also just use "sudo cpan Algorithm::Combinatorics" instead
+    of using the cpanimus command "cpanm" - I had to switch to using the
+    regular "cpan" command because cpanm started putting my modules in
+    odd places
+
+```{bash, eval = FALSE}
+# Install perl
+curl -L http://xrl.us/installperlnix | bash
+
+# Install cpanminus (makes installing perl modules easier)
+cpan App::cpanminus
+
+# Install necessary perl modules
+sudo cpanm Algorithm::Combinatorics
+sudo cpanm Excel::Writer::XLSX
+## OR
+sudo cpan Algorithm::Combinatorics
+sudo cpan Excel::Writer::XLSX
+```
+
+I also recently had issues with installing perl modules with "cpanm" --
+installing with "cpan" instead solved things. Generally speaking, perl
+continues to be a massive pain in new fun ways every time I open this up
+to re-run something.
+
+## 2.2 Input files
+
+The GTscore pipeline requires two types of input files: 1) a file
+containing all sample file names, and 2) a file containing primer-probe
+information. Because our dataset includes two different species with
+some species-specific loci, I also found it helpful to create separate
+files for each so that we have a more accurate read count and genotype
+rates for each sample and locus.
+
+Note that if your dataset includes multiple species, you will need a
+sample metadata file to create the GTscore sample files.
+
+### 2.4.1 Metadata
+
+Metadata can include whatever information you wish, but at a minimum
+should contain the following:
+
+-   Sample sequence ID
+-   Sample file name (sample sequence ID .fastq)
+-   Individual ID
+-   Sample type
+-   Species
+-   Sex
+
+An example metadata file is below:
+
+```{r, eval = FALSE}
+toyRun_md <- read.csv("./toyRun/toyRun_metadata.csv")
+```
+
+### 2.4.2 Sample files
+
+Sample file prep is split into Illumina and Nanopore workflows since
+Nanopore output has previously included a few extra things that needed
+to be filtered out.
+
+**NOTE** - regardless of sequencing platform, I recommend adjusting
+sample names so that they do NOT include characters such as periods,
+underscores, dashes, etc. The GTscore perl scripts tend to switch these
+around, which then requires formatting adjustments within the R script
+(nothing hard, but a bit of a pain). I haven't taken the time to dig
+into the perl scripts themselves to adjust them, so at this point it's
+easiest to name samples (or change sample names) so that they don't
+include anything aside from text and numbers.
+
+#### ILLUMINA
+
+##### All samples
+
+Create file for all samples in bash
+
+```{bash, eval = FALSE}
+# Navigate to 01_seqrunInterleaved directory
+cd ./toyPipeline/toyRun/01_toyRun_interleaved/
+
+# Create sample file
+for i in *fastq; do echo $i; done > ./../03_toyRun_gtscore/fullSet_sampleFiles.txt
+```
+
+Load into R
+
+```{r, eval = FALSE}
+sf_fullSet <- read.table("./toyRun/03_toyRun_gtscore/fullSet_sampleFiles.txt")
+```
+
+##### Species subsets
+
+Here we're creating separate sample files for each species.
+
+**NOTE** that we're including the negative controls in both species subsets -- e.g., "negative control #1" would be listed in the LWED sample file as well as the SIMP sample file.
+
+```{r, eval = FALSE}
+# Create subsets
+lwed <- filter(md, is.na(species) | !species == "SIMP")
+simp <- filter(md, is.na(species) | !species == "LWED")
+
+sf_lwed <- sf_fullSet %>%
+  filter(V1 %in% lwed$sampleFile)
+
+sf_simp <- sf_fullSet %>%
+  filter(V1 %in% simp$sampleFile)
+```
+
+##### Export sample files
+
+Follow the file export scripts below to ensure that sample files are in
+the correct format for the GTscore pipeline.
+
+```{r, eval = FALSE}
+write.table(sf_fullSet, file = "fullSet_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_LWED, file = "lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(sf_SIMP, file = "simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+#### NANOPORE
+
+Nanopore data may require an extra step when creating sample files,
+since previous MinION output sequences included barcodes that weren't
+supposed to be there. As such, I opted to create an original set of
+sample files (including all MinION output), then subset that to include
+only the barcodes that were used for the samples, and then create
+separate files by species.
+
+##### All barcodes
+
+Easiest to do this part in bash--
+
+```{bash, eval = FALSE}
+for i in bar*; do echo $i; done > sampleFiles_original.txt
+```
+
+##### Barcodes of interest
+
+First step is to clean up the metadata file - note that the script below
+also includes a step to remove duplicates, as some sample entries in the
+metadata file from a previous MinION run were listed multiple times
+(might not be necessary for other runs).
+
+```{r, eval = FALSE}
+md <- read.csv("METADATA_FILE.csv") %>%
+  filter(!is.na(Barcode)) %>%
+  mutate(Barcode = str_replace(Barcode, "BC", "barcode")) %>%
+  mutate(sampleID = paste(Barcode, "trimmed.fastq", sep = "_")) %>%
+  mutate(Field.id.a = str_replace(Field.id.a, "Leontocebus weddeli", "LWED")) %>%
+  mutate(Field.id.a = str_replace(Field.id.a, "Saguinus imperator", "SIMP")) %>%
+  dplyr::rename(species = Field.id.a) %>%
+  distinct()
+```
+
+Then we can subset the original sample files to only the barcodes of
+interest.
+
+```{r, eval = FALSE}
+# Read in original list of sample files
+sf_original <- read.table("sampleFiles_original.txt")
+
+# Subset to barcodes of interst only
+sf_fullSet <- sf_original %>%
+  filter(V1 %in% md$sampleID)
+```
+
+##### Species subsets
+
+Here again I'm including the negative controls in the sample files for
+both species subsets.
+
+```{r, eval = FALSE}
+# Create subsets
+lwed <- filter(md, is.na(species) | !species == "SIMP")
+simp <- filter(md, is.na(species) | !species == "LWED")
+
+sf_LWED <- sf_fullSet %>%
+  filter(V1 %in% lwed$sampleID)
+
+sf_SIMP <- sf_fullSet %>%
+  filter(V1 %in% simp$sampleID)
+```
+
+##### Export sample files
+
+Follow the file export scripts below to ensure that sample files are in
+the correct format for the GTscore pipeline.
+
+```{r, eval = FALSE}
+write.table(sf_fullSet, file = "sampleFiles_fullSet.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_LWED, file = "sampleFiles_LWED.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_SIMP, file = "sampleFiles_SIMP.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+### 2.4.3 Primer-probe files
+
+Each primer-probe file needs to contain the following:
+
+1.  Locus - locus name
+2.  Ploidy - in our case, all are diploid so ploidy = 2
+3.  SNPpos - position of SNP in the amplicon, assuming that the first
+    base = 0
+4.  Allele1 - one of the options for the SNP
+5.  Allele2 - the other option for the SNP
+6.  Probe1 - an 8 nt sequence overlapping the SNP; contains Allele1
+7.  Probe2 - same as Probe1, but contains Allele2
+8.  Primer - the forward primer sequence for each locus
+
+#### Toy data
+
+Here I'm loading in primer-probe files that I created for previous runs.
+I've divided the primer-probe files into three sets, one with all
+samples (contains all loci), one for LWED samples only (excludes
+SIMP-specific loci) and one for SIMP samples only (excludes
+LWED-specific loci).
+
+```{r, eval = FALSE}
+pp_fullSet <- read.table("./toyRun/fullSet_primerProbeFile.txt", header = T)
+pp_lwed <- read.table("./toyRun/lwed_primerProbeFile.txt", header = T)
+pp_simp <- read.table("./toyRun/simp_primerProbeFile.txt", header = T)
+```
+
+#### Create your own
+
+If you need to create these files from scratch, you'll need the
+following: **TBD**
+
+```{python}
+# amplicon pos
+from Bio import SeqIO
+import csv
+import pandas as pd
+import re
+
+primers_file="/proj/sllstore2017021/nobackup/SAM/flanking_regions/final_merged_fastas/19.02.2022_fastas_for_merging/simulating_seqs_to_troubleshoot_gt_seq/primers.tsv"
+fasta_new_snps="/proj/sllstore2017021/nobackup/SAM/flanking_regions/final_merged_fastas/19.02.2022_fastas_for_merging/simulating_seqs_to_troubleshoot_gt_seq/concatenated_ALL_19.02.2022_adding_brakets_replace_snps.fasta"
+probe_file="/proj/sllstore2017021/nobackup/SAM/flanking_regions/final_merged_fastas/19.02.2022_fastas_for_merging/simulating_seqs_to_troubleshoot_gt_seq/LocusInfo.csv"
+
+primers = pd.read_csv(primers_file, sep = '\t')
+
+def reverse_complement(dna):
+    complement = {'A':'T','C':'G','G':'C','T':'A'}
+    return ''.join([complement[base] for base in dna[::-1]])
+
+pos_file = "/proj/sllstore2017021/webexport/first_geno_run/pos_file_rachel/pos_amplicon.tsv"
+
+with open(pos_file, 'w') as output:
+    output.write("SNP_name" + "\t" + "bp3_index" + "\t" + "snp_base" + "\t" + "pos_in_amplicon" + "\t" + "length_amplicon" + "\t" + "amplicon" + "\n")
+    with open(fasta_new_snps) as f:
+        SeqDict = {}
+        pos_dict = {}
+        for record in SeqIO.parse(f, "fasta"):
+            sequence = str(record.seq).replace('<','').replace('>','')
+            snp_name = str(record.id)
+            bp3_index = snp_name.split('_')[-1]
+            for index, row in primers.iterrows():
+                forward_p=str(row["forward"])
+                reverse_p=str(reverse_complement(row["reverse"]))
+                if forward_p in sequence and reverse_p in sequence:
+                    amplicon = re.search('{}(.*?){}'.format(forward_p, reverse_p), sequence).group()
+                    if '[' in amplicon and ']' in amplicon:
+                        start = amplicon.index('[')
+                        # the following will mean the position is 0-based (start counting at 0)
+                        # if you would rather have it 1-based (start at 1), replace the 1 with 2
+                        pos = start + 1
+                        snp = amplicon[pos]
+                        length = len(amplicon) - 2
+                        if snp_name not in pos_dict:
+                            pos_dict[snp_name] = snp_name, bp3_index, str(snp), str(pos)
+                            output.write(snp_name + "\t" + str(bp3_index) + "\t" + str(snp) + "\t" + str(pos) + "\t" + str(length) + "\t" + amplicon + "\n")
+```
