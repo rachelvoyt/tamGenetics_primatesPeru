@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE,fig.path = "tools/")
 # 1 Packages
 
 ```{r load packages, include=FALSE}
-source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+source("./project_scripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
 library(gsubfn)
 library(phylotools)
 library(TidyMultiqc)
@@ -101,27 +101,27 @@ write.table(pp_simpSpec, "./00_tamRun1_optimization/04_run1GTscore_bp3errorRemov
 ```{r count reads for amplicons, eval=FALSE}
 # all samples, all loci (includes negatives)
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_fullSet.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_fullSet.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix fullSet_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_fullSet.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_fullSet.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix fullSet_")
 
 # pos samples (no negs), dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_dual.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_pos.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix posDual_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_dual.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_pos.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix posDual_")
 
 # lwed samples, lwed + dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_LWED.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_LWED.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix LWED_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_LWED.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_LWED.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix LWED_")
 
 # lwed samples, simp-specific loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_simpSpec.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_LWED.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix LWED_simpSpec_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_simpSpec.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_LWED.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix LWED_simpSpec_")
 
 # simp samples, simp + dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_SIMP.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_SIMP.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix SIMP_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_SIMP.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_SIMP.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix SIMP_")
 
 # simp samples, lwed-specific loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_lwedSpec.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_SIMP.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix SIMP_lwedSpec_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/primerProbeFile_lwedSpec.txt --files ./00_tamRun1_optimization/03_run1GTscore/sampleFiles_SIMP.txt --inDir ./00_tamRun1_optimization/02_run1Interleaved/ --outDir ./00_tamRun1_optimization/04_run1GTscore_bp3errorRemoved/ --prefix SIMP_lwedSpec_")
 ```
 
 # 7 Genotyping

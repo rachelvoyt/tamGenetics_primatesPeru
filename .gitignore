@@ -17,3 +17,4 @@
 bearTest/
 gtscore_vs_gtseq/tamRun3/*.pl
 paper2_snpPanel/*.pl
+.Rproj.user
