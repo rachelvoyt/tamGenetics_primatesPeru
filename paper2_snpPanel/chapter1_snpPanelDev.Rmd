@@ -2004,6 +2004,8 @@ homoHet_key <- pp_panelv3 %>%
 
 ### gtscore0x
 
+210 fecal sample seems like it has the wrong metadata
+
 ```{r}
 genoCompare_ill_gtscore0x <- tamRun4_genos_ill_gtscore0x %>%
   t() %>%
@@ -2017,13 +2019,13 @@ genoCompare_ill_gtscore0x <- tamRun4_genos_ill_gtscore0x %>%
                values_to = "geno") %>%
   separate(sampleID_unique, into = c("animalID", "sampleType")) %>%
   # remove genos from spSpec loci for non-target sp
-  mutate(
-    geno = case_when(
-      str_detect(species, "LWED") & str_detect(locus, "SIMP") ~ "0",
-      str_detect(species, "SIMP") & str_detect(locus, "LWED") ~ "0",
-      .default = geno
-    )
-  ) %>%
+#  mutate(
+#    geno = case_when(
+#      str_detect(species, "LWED") & str_detect(locus, "SIMP") ~ "0",
+#      str_detect(species, "SIMP") & str_detect(locus, "LWED") ~ "0",
+#      .default = geno
+#    )
+#  ) %>%
   pivot_wider(names_from = sampleType,
               values_from = geno) %>%
   mutate(across(everything(), na_if, "0")) %>%
@@ -2079,9 +2081,9 @@ genoCompare_ill_gtscore0x <- tamRun4_genos_ill_gtscore0x %>%
 temp_0x <- genoCompare_ill_gtscore0x %>%
   group_by(animalID) %>%
   summarise(
-    mismatchType2_bf = sum(bf_misType == "type2", na.rm = T),
-    mismatchType2_bh = sum(bh_misType == "type2", na.rm = T),
-    mismatchType2_fh = sum(fh_misType == "type2", na.rm = T),
+    type2Mismatch_bf = sum(bf_misType == "type2", na.rm = T),
+    type2Mismatch_bh = sum(bh_misType == "type2", na.rm = T),
+    type2Mismatch_fh = sum(fh_misType == "type2", na.rm = T),
     
     mismatch_bf = sum(bfMatch == FALSE, na.rm = T),
     mismatch_bh = sum(bhMatch == FALSE, na.rm = T),
@@ -2166,13 +2168,13 @@ genoCompare_ill_gtscore10x <- tamRun4_genos_ill_gtscore10x %>%
                values_to = "geno") %>%
   separate(sampleID_unique, into = c("animalID", "sampleType")) %>%
   # remove genos from spSpec loci for non-target sp
-  mutate(
-    geno = case_when(
-      str_detect(species, "LWED") & str_detect(locus, "SIMP") ~ "0",
-      str_detect(species, "SIMP") & str_detect(locus, "LWED") ~ "0",
-      .default = geno
-    )
-  ) %>%
+#  mutate(
+#    geno = case_when(
+#      str_detect(species, "LWED") & str_detect(locus, "SIMP") ~ "0",
+#      str_detect(species, "SIMP") & str_detect(locus, "LWED") ~ "0",
+#      .default = geno
+#    )
+#  ) %>%
   pivot_wider(names_from = sampleType,
               values_from = geno) %>%
   mutate(across(everything(), na_if, "0")) %>%
@@ -2186,6 +2188,59 @@ genoCompare_ill_gtscore10x <- tamRun4_genos_ill_gtscore10x %>%
   mutate(
     uniqueGenos = n_distinct(c_across(blood:hair), na.rm = T),
     seqType = "gtscore10x"
+  ) %>%
+  merge(., readCompare_ill_gtscore, by = c("animalID", "locus"), all.x = T) %>%
+  merge(., homoHet_key, by.x = c("locus", "blood"), by.y = c("locus", "geno"), all.x = T) %>%
+  merge(., homoHet_key, by.x = c("locus", "fecal"), by.y = c("locus", "geno"), suffixes = c("_blood", "_fecal"), all.x = T) %>%
+  merge(., homoHet_key, by.x = c("locus", "hair"), by.y = c("locus", "geno"), all.x = T) %>%
+  dplyr::rename("callType_hair" = "callType") %>%
+  mutate(
+    bf_misType = case_when(
+      is.na(bfMatch) ~ NA,
+      bfMatch == TRUE ~ NA,
+      callType_blood == "het" & callType_fecal %in% c("hom1", "hom2") ~ "type1",
+      callType_blood %in% c("hom1", "hom2") & callType_fecal == "het" ~ "type1",
+      .default = "type2"
+    )
+  ) %>%
+  relocate(bf_misType, .after = bfMatch) %>%
+  mutate(
+    bh_misType = case_when(
+      is.na(bhMatch) ~ NA,
+      bhMatch == TRUE ~ NA,
+      callType_blood == "het" & callType_hair %in% c("hom1", "hom2") ~ "type1",
+      callType_blood %in% c("hom1", "hom2") & callType_hair == "het" ~ "type1",
+      .default = "type2"
+    )
+  ) %>%
+  relocate(bh_misType, .after = bhMatch) %>%
+  mutate(
+    fh_misType = case_when(
+      is.na(fhMatch) ~ NA,
+      fhMatch == TRUE ~ NA,
+      callType_fecal == "het" & callType_hair %in% c("hom1", "hom2") ~ "type1",
+      callType_fecal %in% c("hom1", "hom2") & callType_hair == "het" ~ "type1",
+      .default = "type2"
+    )
+  ) %>%
+  relocate(fh_misType, .after = fhMatch) %>%
+  relocate(locus, animalID, species, blood, fecal, hair)
+
+
+temp_10x <- genoCompare_ill_gtscore10x %>%
+  group_by(animalID) %>%
+  summarise(
+    type2Mismatch_bf = sum(bf_misType == "type2", na.rm = T),
+    type2Mismatch_bh = sum(bh_misType == "type2", na.rm = T),
+    type2Mismatch_fh = sum(fh_misType == "type2", na.rm = T),
+    
+    mismatch_bf = sum(bfMatch == FALSE, na.rm = T),
+    mismatch_bh = sum(bhMatch == FALSE, na.rm = T),
+    mismatch_fh = sum(fhMatch == FALSE, na.rm = T),
+    
+    common_bf = sum(!is.na(bfMatch)),
+    common_bh = sum(!is.na(bhMatch)),
+    common_fh = sum(!is.na(fhMatch))
   )
 
 # general overview
