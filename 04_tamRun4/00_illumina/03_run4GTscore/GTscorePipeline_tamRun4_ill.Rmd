@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # 1 Packages
 
 ```{r load packages, include=FALSE}
-source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+source("./project_scripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
 library(gsubfn)
 library(phylotools)
 library(TidyMultiqc)
@@ -47,13 +47,13 @@ I also recently had issues with installing perl modules with "cpanm" -- installi
 
 ## 2.1 About the pipeline
 
-This pipeline is to analyze data from tamRun4 (the 30x3 sample type comparison project) and includes all steps needed to analyze MiSeq data output, including how to 1) download MiSeq sequencing files, 2) do quality checks, 3) create the necessary files for analysis in GTscore, and 4) run the GTscore pipeline itself.
+This pipeline is to analyze the Illumina results for tamRun4 (the 30x3 sample type comparison project) and includes all steps needed to analyze MiSeq data output, including how to 1) download MiSeq sequencing files, 2) do quality checks, 3) create the necessary files for analysis in GTscore, and 4) run the GTscore pipeline itself.
 
 The GTscore pipeline was originally created by Garrett McKinney (see the associated github [here](https://github.com/gjmckinney/GTscore)). Here, I combine the scripts included in his original "GTscore_pipeline.R" as well as his original "README.md" - there's a good bit of overlap between these files, but a few scripts exist in one but not the other. I've also included separate analyses for each species, since not all not all loci are informative for both species.
 
 ## 2.2 About the data
 
-The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 fecal samples, 29 hair samples (xxx LWED, xxx SIMP), 30 blood samples (xxx LWED, xxx SIMP), and 6 negative controls.
+The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 each of blood, fecal, and hair (-1 for hair) samples from 15 LWED and 15 SIMP individuals.
 
 **NOTE** that of these samples, hair_tx105A_e1 was not added to PCR1; found the second elution too late to be included in the run. Treat as a negative when analysing the data.
 
@@ -66,17 +66,17 @@ md <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
 #### Sample lists
 
 ```{r}
-lwedSamples <- filter(md_tamRun4, is.na(species) | !species == "SIMP") %>%
-  select(sampleID) %>%
+lwedSamples <- filter(md, is.na(species) | !species == "SIMP") %>%
+  select(sampleID_ill) %>%
   pull()
 
-simpSamples <- filter(md_tamRun4, is.na(species) | !species == "LWED") %>%
-  select(sampleID) %>%
+simpSamples <- filter(md, is.na(species) | !species == "LWED") %>%
+  select(sampleID_ill) %>%
   pull()
 
-negSamples <- md_tamRun4 %>%
+negSamples <- md %>%
   filter(str_detect(sampleType, "Neg")) %>%
-  select(sampleID) %>%
+  select(sampleID_ill) %>%
   pull()
 ```
 
@@ -308,6 +308,10 @@ pp_dual <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt", 
 pp_lwed <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt", header = T)
 
 pp_simp <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt", header = T)
+
+pp_lwedSpec <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_lwedSpec.txt", header = T)
+
+pp_simpSpec <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_simpSpec.txt", header = T)
 ```
 
 **File prep**
@@ -321,7 +325,17 @@ pp_dual <- pp_fullSet %>%
   filter(!str_detect(Locus, "LWED")) %>%
   filter(!str_detect(Locus, "SIMP"))
 
+pp_lwedSpec <- pp_fullSet %>%
+  filter(str_detect(Locus, "LWED"))
+
+pp_simpSpec <- pp_fullSet %>%
+  filter(str_detect(Locus, "SIMP"))
+
 write.table(pp_dual, "./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+
+write.table(pp_lwedSpec, "./05_tamRun5/03_run5GTscore/primerProbeFileV3_lwedSpec.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+
+write.table(pp_simpSpec, "./05_tamRun5/03_run5GTscore/primerProbeFileV3_simpSpec.txt", sep = "\t", row.names = F, col.names = T, quote = F)
 ```
 
 # 6 Count reads for amplicons
@@ -329,19 +343,27 @@ write.table(pp_dual, "./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt", s
 ```{r count reads for amplicons, eval=FALSE}
 # all samples, all loci (includes negatives)
 system2("perl",
-        args = "./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_fullSet_")
+        args = "./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --printMatched --printDiscarded --prefix ill_fullSet_")
 
 # pos samples (no negs), dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_pos_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_posDual_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_pos_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_posDual_")
 
 # lwed samples, lwed + dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_lwed_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_lwed_")
+
+# lwed samples, simp-specific loci
+system2("perl",
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_simpSpec.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_lwed_simpSpec_")
 
 # simp samples, simp + dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_simp_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_simp_")
+
+# simp samples, lwed-specific loci
+system2("perl",
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_lwedSpec.txt --files ./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_sampleFiles.txt --inDir ./04_tamRun4/00_illumina/02_run4Interleaved/ --outDir ./04_tamRun4/00_illumina/03_run4GTscore/ --prefix ill_simp_lwedSpec_")
 ```
 
 # 7 Genotyping
@@ -1043,8 +1065,8 @@ master_sampleSummary <- indSum_combo %>%
   relocate(lociSet, .after = Sample) %>%
   dplyr::rename("sampleID" = "Sample") %>%
   # add metadata
-  merge(., md[, c("sampleID_ill", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ill") %>%
-  relocate(sampleID_unique, .after = sampleID)
+  merge(., md[, c("sampleID_ill", "sampleID_unique", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(c(sampleID_unique, sampleType), .after = sampleID)
 
 write.csv(master_sampleSummary, "./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_sampleSummary.csv", row.names = F)
 ```

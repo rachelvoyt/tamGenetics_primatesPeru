@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # 1 Packages
 
 ```{r load packages, include=FALSE}
-source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+source("./project_scripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
 library(gsubfn)
 library(phylotools)
 library(TidyMultiqc)
@@ -26,15 +26,21 @@ BiocManager::install("Biostrings")
 
 ## 2.1 About the pipeline
 
-This pipeline is to analyze data from the ONT (Nanopore) run of tamRun4 (the 30x3 sample type comparison project).
+This pipeline is to analyze the Nanopore (ONT) results for tamRun4 (the 30x3 sample type comparison project)
 
 ## 2.2 About the data
 
-The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 fecal samples, 29 hair samples (xxx LWED, xxx SIMP), 30 blood samples (xxx LWED, xxx SIMP), and 6 negative controls.
+The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 each of blood, fecal, and hair (-1 for hair) samples from 15 LWED and 15 SIMP individuals.
 
-**NOTE** that of these samples, hair_tx105A_e1 was not added to PCR1; found the second elution too late to be included in the run. Treat as a negative when analysing the data.
+**NOTE** that of these samples, hair_tx105A_e1 was not added to PCR1; found the second elution too late to be included in the run. Treat as a negative when analyzing the data.
 
 ### 2.2.1 Metadata
+
+**Quick-load:**
+
+```{r}
+md <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
+```
 
 The metadata was created in GTscorePipeline_tamRun4 (for the Illumina results); editing here so that sequencing sample names are the same as the fastq files recieved.
 
@@ -72,45 +78,20 @@ md_tamRun4_ont <- read.csv("04_tamRun4/ill_tamRun4_metadata.csv") %>%
 write.csv(md_tamRun4_ont, "./04_tamRun4/ont_tamRun4_metadata.csv", row.names = F)
 ```
 
-Quick-load metadata:
-
-```{r}
-md_fullSet <- read.csv("./04_tamRun4/ont_tamRun4_metadata.csv")
-
-md_fullSet_noNegs <- md_fullSet %>%
-  filter(!str_detect(sampleType, "Neg"))
-
-md_lwed_noNegs <- md_fullSet_noNegs %>%
-  filter(species == "LWED")
-
-md_simp_noNegs <- md_fullSet_noNegs %>%
-  filter(species == "SIMP")
-```
-
 #### Sample lists
 
 ```{r}
-lwed_sampleIDs <- filter(md_tamRun4_ont, is.na(species) | !species == "SIMP") %>%
-  select(sampleID) %>%
-  pull()
-lwed_sampleFiles <- filter(md_tamRun4_ont, is.na(species) | !species == "SIMP") %>%
-  select(sampleFile) %>%
+lwedSamples <- filter(md, is.na(species) | !species == "SIMP") %>%
+  select(sampleID_ont) %>%
   pull()
 
-simp_sampleIDs <- filter(md_tamRun4_ont, is.na(species) | !species == "LWED") %>%
-  select(sampleID) %>%
-  pull()
-simp_sampleFiles <- filter(md_tamRun4_ont, is.na(species) | !species == "LWED") %>%
-  select(sampleFile) %>%
+simpSamples <- filter(md, is.na(species) | !species == "LWED") %>%
+  select(sampleID_ont) %>%
   pull()
 
-neg_sampleIDs <- md_tamRun4_ont %>%
+negSamples <- md %>%
   filter(str_detect(sampleType, "Neg")) %>%
-  select(sampleID) %>%
-  pull()
-neg_sampleFiles <- md_tamRun4_ont %>%
-  filter(str_detect(sampleType, "Neg")) %>%
-  select(sampleFile) %>%
+  select(sampleID_ont) %>%
   pull()
 ```
 
@@ -253,307 +234,800 @@ multiqc --interactive .
 
 # 5 Create primer-probe & sample files
 
-Prior to running the GTscore pipeline itself, we need to make a few files, including 1) sample files 2) primer-probe files for each species. I'm separating them out like this so that we have more accurate read counts and genotype rates for each sample and locus.
-
 ## 5.1 Sample files
 
-We need three sets of sample files total: 1) all samples 2) LWED samples only + all negatives 3) SIMP samples only + all negatives.
+**Quick-load**
 
-### 5.1.1 All samples
+```{r}
+sf_fullSet <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_sampleFiles.txt")
+
+sf_pos <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_pos_sampleFiles.txt")
+
+sf_lwed <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_sampleFiles.txt")
+
+sf_simp <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_sampleFiles.txt")
+```
+
+**File creation**
 
 Full set of sample files created under section 2.2.1 above
 
 ```{r}
-sf_fullSet_ont <- sf_fullSet_ont %>%
-  select(-well)
+sf_fullSet <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_sampleFiles.txt")
 ```
 
-### 5.1.2 Species subsets
-
-Use md file to create sample file species subsets. Note that we're including the negative controls in both species subsets 
+Use md file to create sample file species subsets; ditch negatives from species-specific sets
 
 ```{r}
 # Create subsets
-sf_lwed_ont <- sf_fullSet_ont %>%
-  filter(V1 %in% lwed_sampleFiles)
+lwed <- filter(md, species == "LWED")
+simp <- filter(md, species == "SIMP")
 
-sf_simp_ont <- sf_fullSet_ont %>%
-  filter(V1 %in% simp_sampleFiles)
+sf_lwed <- sf_fullSet %>%
+  filter(V1 %in% lwed$sampleFile_ont)
+
+sf_simp <- sf_fullSet %>%
+  filter(V1 %in% simp$sampleFile_ont)
+
+sf_pos <- rbind(sf_lwed, sf_simp) %>%
+  arrange(V1)
 
 # Export sample files
-write.table(sf_lwed_ont, file = "./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed, file = "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 
-write.table(sf_simp_ont, file = "./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
-```
+write.table(sf_simp, file = "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 
-### 5.1.3 Negs excluded
-
-```{r}
-sf_fullSet <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_sampleFiles.txt")
-
-sf_fullSet_noNegs <- sf_fullSet %>%
-  filter(V1 %in% md_fullSet_noNegs$sampleFile)
-
-sf_lwed_noNegs <- sf_fullSet %>%
-  filter(V1 %in% md_lwed_noNegs$sampleFile)
-
-sf_simp_noNegs <- sf_fullSet %>%
-  filter(V1 %in% md_simp_noNegs$sampleFile)
-```
-
-Export
-
-```{r}
-write.table(sf_fullSet_noNegs, file = "./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_noNegs_fullSet_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
-
-write.table(sf_lwed_noNegs, file = "./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_noNegs_lwed_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
-
-write.table(sf_simp_noNegs, file = "./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_noNegs_simp_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_pos, file = "./04_tamRun4/01_nanopore/03_run4GTscore/ont_pos_sampleFiles.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 ```
 
 ## 4.2 Primer probe files
 
-Each primer-probe file contains the following:
-
-1.  Locus - locus name
-2.  Ploidy - in our case, all are diploid so ploidy = 2
-3.  SNPpos - position of SNP in the amplicon, assuming that the first base = 0
-4.  Allele1 - one of the options for the SNP
-5.  Allele2 - the other option for the SNP
-6.  Probe1 - a sequence containing bases 8 upstream and 8 downstream from SNP (including SNP); contains Allele1
-7.  Probe2 - same as Probe1, but contains Allele2
-8.  Primer - the forward primer sequence for each locus
-
-### 4.2.1 Load in primer-probe files
-
-Here I'm loading in version 3 primer-probe files (created in GTscorePipeline_tamRun5.Rmd)
+**Quick-load**
 
 ```{r}
 pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
+
+pp_dual <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt", header = T)
+
 pp_lwed <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt", header = T)
+
 pp_simp <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt", header = T)
 ```
 
-# 5 Count reads for amplicons
-
-Once the files are created, we can proceed with the first step in the GTscore pipeline - counting amplicon reads. We'll be doing doing this for the full set of data (all samples, all loci) as well as the species subsets of the data to allow for more accurate analyses of loci and sample performance.
-
-## 5.1 Info on AmpliconReadCounter.pl
-
-The read counter is written in perl (AmpliconReadCounter.pl), but can be called from R. Running it does the following:
-
-1.  Identifies each unique sequence, then counts the number of times each unique sequence occurs within an individual
-
-2.  Aligns each unique sequence with primer and probe; if the sequence doesn't align, then it is excluded as an off-target sequence and reports by individual and by locus are given.
-
--   Note: By default, all primers are trimmed to the length of the shortest primer to increase speed. Optionally the full length primer can be used for the primer but this may significantly increase run timing depending on variation in primer lengths across loci.
-
-Input flags for this script are:
-
--   --p a tab delimited file containing primer/probe information for each locus
--   --files a text file containing a list of .fastq sequence files to count reads from
-
-Optional flags:
-
--   --prefix optional prefix for output file names
--   --inDir option to specify directory containing sequence data
--   --inputType fq or fastqgz (defaults to fastqgz)
--   --useFullPrimer uses the full primer for counting reads rather than the trimmed primer
--   --alleleOrder order of alleles output in locusTable file. Options are original (matches primer-probe file order) or alphabetical (default)
--   --printMatched outputs matched reads for each individual
--   --printDiscarded outputs discarded reads for each individual
-
-## 5.2 Run AmpliconReadCounterl.pl
-
-To run from the command line, use: perl AmpliconReadCounter.pl -p primerProbeFile.txt --files sampleList.txt. To run from R, use the scripts below.
-
-### Negs included
+# 6 Count reads for amplicons
 
 ```{r count reads for amplicons, eval=FALSE}
-# All samples, all loci
+# all samples, all loci (includes negatives)
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved_ont/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore_ont/ --prefix ont_fullSet_")
+        args = "./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_fullSet_")
 
-# LWED
-## exclude simp-specific loci
+# pos samples (no negs), dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_lwed_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_dual.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_pos_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_posDual_")
 
-## include simp-specific loci
+# lwed samples, lwed + dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_lwed_lociAll_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_lwed_")
 
-# SIMP
-## exclude lwed-specific loci
+# simp samples, simp + dual loci
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_simp_")
-
-## include lwed-specific loci
-system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_simp_lociAll_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_simp_")
 ```
 
-### Negs excluded
+# 7 Genotyping
+
+## 7.1 0x cutoff
+
+### Full set genos
 
 ```{r}
-# All samples, all loci
-system2("perl",
-        args = "./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_noNegs_fullSet_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved_ont/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore_ont/ --prefix ont_noNegs_fullSet_")
-
-# LWED
-## exclude simp-specific loci
-system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_lwed_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_noNegs_lwed_")
-
-## include simp-specific loci
-system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_lwed_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_noNegs_lwed_lociAll_")
-
-# SIMP
-## exclude lwed-specific loci
-system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_simp_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_noNegs_simp_")
-
-## include lwed-specific loci
-system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./04_tamRun4/01_nanopore/03_run4GTscore/ont_noNegs_simp_sampleFiles.txt --inDir ./04_tamRun4/01_nanopore/02_run4Interleaved/ --outDir ./04_tamRun4/01_nanopore/03_run4GTscore/ --prefix ont_noNegs_simp_lociAll_")
-```
-
-AmpliconReadCounter.pl outputs a LocusTable file and an AlleleReads file for single-SNP and haplotype data, plus two summary files.
-
-The default names for these files are as follows, with LWED and SIMP appended to files associated with species-specific analyses:
-
--   LocusTable_singleSNPs.txt - locus name, ploidy, and alleles for each SNP
--   AlleleReads_singleSNPs.txt - counts for each SNP allele (rows are loci, columns are individuals)
--   LocusTable_haplotypes.txt - same as above (doesn't matter for us since we're only using single SNPs)
--   AlleleReads_haplotypes.txt - same as above (doesn't matter for us since we're only using single SNPs)
--   GTscore_individualSummary.txt - counts by individual of total reads, off-target reads, primer-only reads, and primer probe reads
--   GTscore_locusSummary.txt - counts by locus of primer reads and primer probe reads
-
-# 6 Genotyping
-
-## 6.1 10x coverage
-
-### Identify loci \<10x coverage
-
-Genotyping by sequencing generally requires a minimum of 10x coverage to be considered reliable; however, the GTscore genotyping script doesn't include this cutoff, and will provide genotypes with as little as one read per allele for heterozygous calls and 3 reads (vs. 0) for a homozygous call. As such, I'm implementing a filtering step here to recode all loci with \<10 reads to "0" so that loci with lower than 10x coverage will not receive genotypes.
-
-Step 1: Recode loci with \<10x coverage in the full set of allele read counts
-
-```{r}
-# Read in allele counts for the full dataset
-readCounts_original <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_AlleleReads_singleSNPs.txt")
-
-# Create read counts copy for 10x coverage
-readCounts_10x <- readCounts_original
-
-# Set up a function to sum the read counts per allele for each locus, using package gsubfn
-repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
-
-# Then apply the function to readCounts to sum each set of allele reads for each locus
-readCounts_sum_10x <- replace(readCounts_10x, TRUE, lapply(readCounts_10x, repl)) %>%
-  mutate(across(everything(),as.numeric))
-
-# Recode <10x loci with "0"
-readCounts_10x[readCounts_sum_10x < 10] <- "0,0"
-```
-
-Step 2: Create lwed & simp subsets & create new AlleleReads_singleSNPs files
-
-```{r}
-# Get lists of lwed- and simp-specific loci
-lwed_loci <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_lwed_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-simp_loci <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_simp_LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
-
-readCounts_lwed_10x <- readCounts_10x %>%
-  select(any_of(lwed_sampleIDs)) %>%
-  rownames_to_column("Locus") %>%
-  filter(Locus %in% lwed_loci$Locus_ID) %>%
-  column_to_rownames("Locus")
-readCounts_simp_10x <- readCounts_10x %>%
-  select(any_of(simp_sampleIDs)) %>%
-  rownames_to_column("Locus") %>%
-  filter(Locus %in% simp_loci$Locus_ID) %>%
-  column_to_rownames("Locus")
-  
-# Export new AlleleReads_singleSNPs files
-write.table(readCounts_10x,"./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
-write.table(readCounts_lwed_10x,"./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_lwed_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
-write.table(readCounts_simp_10x,"./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_simp_AlleleReads_singleSNPs_10x.txt",quote=FALSE,sep="\t")
-```
-
-Genotyping is accomplished using the polyGen function. The genotyping algorithm is described in McKinney et al. 2018 and is a maximum likelihood algorithm capable of genotyping any number of alleles and ploidy per locus. This allows genoyping of single SNPs as well as microhaplotypes, and loci with elevated ploidy.
-
-Two arguments are required for polyGen, the locusTable and alleleReads files output by AmpliconReadCounter.
-
-Optional arguments for polyGen are:
-
--   p_thresh - threshold p-value for likelihood ratio test (default 0.05)
--   epsilon - error rate for genotyping model (default 0.01)
-
-**NOTE** that only primer probe reads are used in genotyping!
-
-Note also that I'm making three genotype files, one for all loci vs. all samples and two species-specific sets - this allows our genotyping metrics to be more accurate.
-
-### Full set
-
-```{r}
-#load locus table and 10x allele reads file
-fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
-
-fullSet_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_AlleleReads_singleSNPs_10x.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
-
-#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
-fullSet_polyGenResults_singleSNP_10x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_10x)
-
-# write results
-write.table(fullSet_polyGenResults_singleSNP_10x,"./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_fullSet_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
-```
-
-### LWED
-
-```{r Genotyping}
-#load locus table and 10x allele reads file
-LWED_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_lwed_LocusTable_singleSNPs.txt", header=TRUE, stringsAsFactors=FALSE)
-LWED_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_lwed_AlleleReads_singleSNPs_10x.txt",header=TRUE, row.names=1, stringsAsFactors=FALSE)
-
-#generate singleSNP genotypes using the polyGen algorithm
-LWED_polyGenResults_singleSNP_10x <- polyGen(LWED_singleSNP_locusTable, LWED_singleSNP_alleleReads_10x)
-
-#write results
-write.table(LWED_polyGenResults_singleSNP_10x,"./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_lwed_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
-```
-
-### SIMP
-
-```{r}
-#load locus table and 10x allele reads file
-SIMP_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_simp_LocusTable_singleSNPs.txt", header=TRUE, stringsAsFactors=FALSE)
-SIMP_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_simp_AlleleReads_singleSNPs_10x.txt", header=TRUE, row.names=1, stringsAsFactors=FALSE)
-
-#generate singleSNP genotypes using the polyGen algorithm
-SIMP_polyGenResults_singleSNP_10x <- polyGen(SIMP_singleSNP_locusTable, SIMP_singleSNP_alleleReads_10x)
-
-#write results
-write.table(SIMP_polyGenResults_singleSNP_10x,"./04_tamRun4/01_nanopore/03_run4GTscore_ont/ont_simp_polyGenResults_singleSNP_10x.txt",quote=FALSE,sep="\t")
-```
-
-## 6.2 0x coverage
-
-### Full set
-
-```{r}
-#load locus table and 10x allele reads file
+#load locus table and 0x allele reads file
 fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
 
-fullSet_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+fullSet_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
 
 #generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
 fullSet_polyGenResults_singleSNP_0x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_0x)
 
 # write results
-write.table(fullSet_polyGenResults_singleSNP_0x,"./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_0x.txt",quote=FALSE,sep="\t")
+write.table(fullSet_polyGenResults_singleSNP_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
 ```
+
+### Species subsets
+
+#### pos samples only (no negs)
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+posDual_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+posDual_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+posDual_polyGenResults_singleSNP_0x <- polyGen(posDual_singleSNP_locusTable, posDual_singleSNP_alleleReads_0x)
+
+#write results
+write.table(posDual_polyGenResults_singleSNP_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+#### LWED
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+LWED_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP_0x <- polyGen(LWED_singleSNP_locusTable, LWED_singleSNP_alleleReads_0x)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+#### SIMP
+
+```{r}
+#load locus table and 10x allele reads file
+SIMP_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads_0x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP_0x <- polyGen(SIMP_singleSNP_locusTable, SIMP_singleSNP_alleleReads_0x)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_polyGenResults_singleSNP_0x.txt", quote = FALSE, sep = "\t")
+```
+
+## 7.2 10x cutoff
+
+### Recode loci \<10x coverage
+
+Step 1: Recode loci with \<10x coverage in the full set of allele read counts
+
+```{r}
+# Read in allele counts for the full dataset
+readCounts_original <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs.txt")
+
+# Create read counts copy for 10x coverage
+readCounts10x <- readCounts_original
+
+# Set up a function to sum the read counts per allele for each locus, using package gsubfn
+repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+
+# Then apply the function to readCounts to sum each set of allele reads for each locus
+readCounts_sum <- replace(readCounts10x, TRUE, lapply(readCounts10x, repl)) %>%
+  mutate(across(everything(),as.numeric))
+
+# Recode <10x loci with "0"
+readCounts10x[readCounts_sum < 10] <- "0,0"
+```
+
+Step 2: Create lwed & simp subsets & create new AlleleReads_singleSNPs files
+
+```{r}
+# lwed and simp loci sets
+lwed_loci <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+simp_loci <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+readCounts10x_lwed <- readCounts10x %>%
+  select(lwed$sampleID_ont) %>%
+  filter(rownames(.) %in% lwed_loci$Locus_ID)
+
+readCounts10x_simp <- readCounts10x %>%
+  select(simp$sampleID_ont) %>%
+  filter(rownames(.) %in% simp_loci$Locus_ID)
+
+readCounts10x_posDual <- readCounts10x %>%
+  select(colnames(posDual_singleSNP_alleleReads_0x)) %>%
+  filter(rownames(.) %in% rownames(posDual_singleSNP_alleleReads_0x))
+  
+# Export new 10x AlleleReads_singleSNPs files
+write.table(readCounts10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+
+write.table(readCounts10x_posDual, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+
+write.table(readCounts10x_lwed, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+
+write.table(readCounts10x_simp, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_AlleleReads_singleSNPs_10x.txt", quote = FALSE, sep = "\t")
+```
+
+### Full set genos
+
+```{r}
+#load locus table and 10x allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults_singleSNP_10x <- polyGen(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads_10x)
+
+# write results
+write.table(fullSet_polyGenResults_singleSNP_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+### Subsets
+
+#### pos samples only
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+posDual_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+posDual_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+posDual_polyGenResults_singleSNP_10x <- polyGen(posDual_singleSNP_locusTable, posDual_singleSNP_alleleReads_10x)
+
+#write results
+write.table(posDual_polyGenResults_singleSNP_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+#### LWED
+
+```{r Genotyping}
+#load locus table and 10x allele reads file
+LWED_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+LWED_polyGenResults_singleSNP_10x <- polyGen(LWED_singleSNP_locusTable, LWED_singleSNP_alleleReads_10x)
+
+#write results
+write.table(LWED_polyGenResults_singleSNP_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+#### SIMP
+
+```{r}
+#load locus table and 10x allele reads file
+SIMP_singleSNP_locusTable <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads_10x <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_AlleleReads_singleSNPs_10x.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm
+SIMP_polyGenResults_singleSNP_10x <- polyGen(SIMP_singleSNP_locusTable, SIMP_singleSNP_alleleReads_10x)
+
+#write results
+write.table(SIMP_polyGenResults_singleSNP_10x,"./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
+# 8 Data summaries
+
+## 8.1 Locus summaries
+
+### Summarize single SNP results for loci
+
+The summarizeGTscore command generates summary data for each locus in table form. The summary data includes genotype rate, average read depth, minor (least frequent) allele frequency, major (most frequent) allele frequency, alleles per locus, and frequency per allele. Minor allele frequency is a common metric for filtering loci that are likely to be uninformative for population genetics; however, loci with haplotype alleles may have an allele with very low frequency but still have appreciable frequency at multiple other alleles. Because of this, the major allele frequency is included in output, as well as the observed frequencies for all alleles at a given locus.
+
+**gtscore0x**
+
+```{r}
+fullSet_singleSNP_alleleReads <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+posDual_singleSNP_alleleReads <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+LWED_singleSNP_alleleReads <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+SIMP_singleSNP_alleleReads <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#summarize single SNP results
+fullSet_singleSNP_summary_0x <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_0x)
+
+posDual_singleSNP_summary_0x <- summarizeGTscore(posDual_singleSNP_alleleReads, posDual_singleSNP_locusTable, posDual_polyGenResults_singleSNP_0x)
+
+LWED_singleSNP_summary_0x <- summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP_0x)
+
+SIMP_singleSNP_summary_0x <- summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP_0x)
+
+#write results
+write.table(fullSet_singleSNP_summary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(posDual_singleSNP_summary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(LWED_singleSNP_summary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(SIMP_singleSNP_summary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_singleSNP_summary_0x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+**gtscore10x**
+
+```{r}
+#summarize single SNP results
+fullSet_singleSNP_summary_10x <- summarizeGTscore(fullSet_singleSNP_alleleReads, fullSet_singleSNP_locusTable, fullSet_polyGenResults_singleSNP_10x)
+
+posDual_singleSNP_summary_10x <- summarizeGTscore(posDual_singleSNP_alleleReads, posDual_singleSNP_locusTable, posDual_polyGenResults_singleSNP_10x)
+
+LWED_singleSNP_summary_10x <- summarizeGTscore(LWED_singleSNP_alleleReads, LWED_singleSNP_locusTable, LWED_polyGenResults_singleSNP_10x)
+
+SIMP_singleSNP_summary_10x <- summarizeGTscore(SIMP_singleSNP_alleleReads, SIMP_singleSNP_locusTable, SIMP_polyGenResults_singleSNP_10x)
+
+#write results
+write.table(fullSet_singleSNP_summary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(posDual_singleSNP_summary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(LWED_singleSNP_summary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(SIMP_singleSNP_summary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_singleSNP_summary_10x.txt", quote = FALSE, sep = "\t", row.names = FALSE)
+```
+
+### Master locus summary
+
+Generate locus summary files with single SNP summaries + GTscore locus summaries created earlier
+
+```{r}
+# per-locus read summaries
+ls_posDual <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    sampleSet = "posSamples"
+  )
+
+ls_lwed <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    sampleSet = "lwedSamples"
+  )
+
+ls_simp <- read.table("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
+  mutate(
+    sampleSet = "simpSamples"
+  )
+
+# gtscore0x per-locus depth/geno/etc summaries
+ss_posDual_0x <- posDual_singleSNP_summary_0x %>%
+  mutate(
+    sampleSet = "posSamples"
+  )
+
+ss_lwed_0x <- LWED_singleSNP_summary_0x %>%
+  mutate(
+    sampleSet = "lwedSamples"
+  )
+
+ss_simp_0x <- SIMP_singleSNP_summary_0x %>%
+  mutate(
+    sampleSet = "simpSamples"
+  )
+
+# gtscore10x per-locus depth/geno/etc summaries
+ss_posDual_10x <- posDual_singleSNP_summary_10x %>%
+  mutate(
+    sampleSet = "posSamples"
+  )
+
+ss_lwed_10x <- LWED_singleSNP_summary_10x %>%
+  mutate(
+    sampleSet = "lwedSamples"
+  )
+
+ss_simp_10x <- SIMP_singleSNP_summary_10x %>%
+  mutate(
+    sampleSet = "simpSamples"
+  )
+
+# master summary
+ls_combo <- rbind(ls_posDual, ls_lwed, ls_simp)
+ss_combo_0x <- rbind(ss_posDual_0x, ss_lwed_0x, ss_simp_0x) %>%
+  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
+ss_combo_10x <- rbind(ss_posDual_10x, ss_lwed_10x, ss_simp_10x) %>%
+  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
+
+master_locusSummary <- ls_combo %>%
+  merge(., ss_combo_0x, by.x = c("Locus", "sampleSet"), by.y = c("Locus_ID", "sampleSet")) %>%
+  merge(., ss_combo_10x[, c("Locus_ID", "sampleSet", "GenotypeRate", "minAF", "majAF", "allFreqs", "conScore")], by.x = c("Locus", "sampleSet"), by.y = c("Locus_ID", "sampleSet"), suffixes = c("_0x", "_10x")) %>%
+  mutate(
+    metricUse = case_when(
+      str_detect(Locus, "LWED") & sampleSet == "lwedSamples" ~ "for_panelMetrics",
+      str_detect(Locus, "SIMP") & sampleSet == "simpSamples" ~ "for_panelMetrics",
+      sampleSet == "posSamples" ~ "for_panelMetrics",
+      .default = "for_spMetrics"
+    )
+  )
+
+write.csv(master_locusSummary, "./04_tamRun4/01_nanopore/03_run4GTscore/summaryFiles/ont_master_locusSummary.csv", row.names = F)
+```
+
+### Plots
+
+plot genotype rate
+
+```{r locus genotype rate, warning=FALSE}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_0x), binwidth = 0.03) +
+  xlim(-0.01,1.01) +
+  labs(title = "GTscore 0x: Locus genotype rate",
+       x = "Genotype rate",
+       y="count") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_10x), binwidth = 0.03) +
+  xlim(-0.01,1.01) +
+  labs(title = "GTscore 10x: Locus genotype rate",
+       x = "Genotype rate",
+       y="count") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot average read depth for single SNP data
+
+```{r locus read depth}
+# gtscore0x/10x (avg read depth is sampe for both)
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = AvgReadDepth), binwidth = 1)+
+  labs(title = "Average Read Depth per SNP",
+       x = "Average Read Depth",
+       y = "Count") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle=element_text(hjust = 0.5))
+```
+
+plot genotype rate relative to average depth
+
+```{r locus genotype rate vs read depth}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_point(aes(x = AvgReadDepth,
+                 y = GenotypeRate_0x)) +
+  ylim(0, 1) +
+  labs(title = "0x Genotype Rate vs Average Depth per SNP",
+       x = "Average Depth",
+       y = "Genotype Rate") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_point(aes(x = AvgReadDepth,
+                 y = GenotypeRate_10x)) +
+  ylim(0, 1) +
+  labs(title = "10x Genotype Rate vs Average Depth per SNP",
+       x = "Average Depth",
+       y = "Genotype Rate") +
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot distribution of minor allele frequency
+
+```{r histogram of MAF, warning=FALSE}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = minAF_0x),
+                 binwidth = 0.01)+
+  labs(title = "0x Minor Allele Frequency Single SNP",
+       x = "Minor Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = minAF_10x),
+                 binwidth = 0.01)+
+  labs(title = "10x Minor Allele Frequency Single SNP",
+       x = "Minor Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot distribution of major allele frequency
+
+```{r histogram of MajAF, warning=FALSE}
+# gtscore0x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = majAF_0x),
+                 binwidth = 0.01)+
+  labs(title = "0x Major Allele Frequency Single SNP",
+       x = "Major Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_locusSummary %>%
+  filter(metricUse == "for_panelMetrics") %>%
+  ggplot() + 
+  geom_histogram(aes(x = majAF_10x),
+                 binwidth = 0.01)+
+  labs(title = "10x Major Allele Frequency Single SNP",
+       x = "Major Allele Frequency",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+## 8.2 Sample summaries
+
+### Summarize single SNP summaries for samples
+
+**gtscore 0x**
+
+```{r}
+fullSet_singleSNP_sampleSummary_0x <- summarizeSamples(fullSet_polyGenResults_singleSNP_0x, fullSet_singleSNP_alleleReads_0x)
+
+posDual_singleSNP_sampleSummary_0x <- summarizeSamples(posDual_polyGenResults_singleSNP_0x, posDual_singleSNP_alleleReads_0x)
+
+LWED_singleSNP_sampleSummary_0x <- summarizeSamples(LWED_polyGenResults_singleSNP_0x, LWED_singleSNP_alleleReads_0x)
+
+SIMP_singleSNP_sampleSummary_0x <- summarizeSamples(SIMP_polyGenResults_singleSNP_0x, SIMP_singleSNP_alleleReads_0x)
+
+write.csv(fullSet_singleSNP_sampleSummary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_singleSNP_sampleSummary_0x.csv", row.names = F)
+
+write.csv(posDual_singleSNP_sampleSummary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_singleSNP_sampleSummary_0x.csv", row.names = F)
+
+write.csv(LWED_singleSNP_sampleSummary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_singleSNP_sampleSummary_0x.csv", row.names = F)
+
+write.csv(SIMP_singleSNP_sampleSummary_0x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_singleSNP_sampleSummary_0x.csv", row.names = F)
+```
+
+**gtscore 10x**
+
+```{r}
+fullSet_singleSNP_sampleSummary_10x <- summarizeSamples(fullSet_polyGenResults_singleSNP_10x, fullSet_singleSNP_alleleReads_10x)
+
+posDual_singleSNP_sampleSummary_10x <- summarizeSamples(posDual_polyGenResults_singleSNP_10x, posDual_singleSNP_alleleReads_10x)
+
+LWED_singleSNP_sampleSummary_10x <- summarizeSamples(LWED_polyGenResults_singleSNP_10x, LWED_singleSNP_alleleReads_10x)
+
+SIMP_singleSNP_sampleSummary_10x <- summarizeSamples(SIMP_polyGenResults_singleSNP_10x, SIMP_singleSNP_alleleReads_10x)
+
+write.csv(fullSet_singleSNP_sampleSummary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_singleSNP_sampleSummary_10x.csv", row.names = F)
+
+write.csv(posDual_singleSNP_sampleSummary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_posDual_singleSNP_sampleSummary_10x.csv", row.names = F)
+
+write.csv(LWED_singleSNP_sampleSummary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_singleSNP_sampleSummary_10x.csv", row.names = F)
+
+write.csv(SIMP_singleSNP_sampleSummary_10x, "./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_singleSNP_sampleSummary_10x.csv", row.names = F)
+```
+
+### Master sample summary
+
+Sample metrics for genotypes and such are based on species sample/loci sets -
+
+-   LWED sample metrics are based on dual loci + lwed-specific loci
+-   SIMP sample metrics are based on dual loci + simp-specific loci
+-   negCtrl sample metrics are based on all loci
+
+```{r}
+# import individual summaries from AmpliconReadCounter.pl output
+is_neg <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  filter(!Sample %in% lwed$sampleID_ont) %>%
+  filter(!Sample %in% simp$sampleID_ont)
+
+is_lwed <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_lwed_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+is_simp <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_simp_GTscore_individualSummary.txt", header = TRUE, stringsAsFactors = FALSE) %>%
+  mutate(Sample = gsub("-", "\\.", Sample))
+
+# gtscore0x sample summary (from above)
+sampleSum_fullSet_0x <- fullSet_singleSNP_sampleSummary_0x %>%
+  mutate(lociSet = "fullSet")
+
+sampleSum_neg_0x <- sampleSum_fullSet_0x %>%
+  filter(!sample %in% lwed$sampleID_ont) %>%
+  filter(!sample %in% simp$sampleID_ont)
+
+sampleSum_lwed_0x <- LWED_singleSNP_sampleSummary_0x %>%
+  mutate(lociSet = "lwedSet")
+
+sampleSum_simp_0x <- SIMP_singleSNP_sampleSummary_0x %>%
+  mutate(lociSet = "simpSet")
+
+# gtscore10x sample summary (from above)
+sampleSum_fullSet_10x <- fullSet_singleSNP_sampleSummary_10x %>%
+  mutate(lociSet = "fullSet")
+
+sampleSum_neg_10x <- sampleSum_fullSet_10x %>%
+  filter(!sample %in% lwed$sampleID_ont) %>%
+  filter(!sample %in% simp$sampleID_ont)
+
+sampleSum_lwed_10x <- LWED_singleSNP_sampleSummary_10x %>%
+  mutate(lociSet = "lwedSet")
+
+sampleSum_simp_10x <- SIMP_singleSNP_sampleSummary_10x %>%
+  mutate(lociSet = "simpSet")
+
+# combos
+indSum_combo <- rbind(is_neg, is_lwed, is_simp) %>%
+  arrange(Sample)
+
+sampleSum_combo_0x <- sampleSum_neg_0x %>%
+  rbind(sampleSum_lwed_0x, sampleSum_simp_0x) %>%
+  arrange(sample)
+
+sampleSum_combo_10x <- sampleSum_neg_10x %>%
+  rbind(sampleSum_lwed_10x, sampleSum_simp_10x) %>%
+  arrange(sample) %>%
+  select(-lociSet)
+
+# master summary
+master_sampleSummary <- indSum_combo %>%
+  merge(., sampleSum_combo_0x, by.x = "Sample", by.y = "sample") %>%
+  merge(., sampleSum_combo_10x, by.x = "Sample", by.y = "sample", suffixes = c("_0x", "_10x")) %>%
+  relocate(lociSet, .after = Sample) %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  # add metadata
+  merge(., md[, c("sampleID_ont", "sampleID_unique")], by.x = "sampleID", by.y = "sampleID_ont") %>%
+  relocate(sampleID_unique, .after = sampleID)
+
+write.csv(master_sampleSummary, "./04_tamRun4/01_nanopore/03_run4GTscore/summaryFiles/ont_master_sampleSummary.csv", row.names = F)
+```
+
+### Plots
+
+plot histogram of genotype rate
+
+```{r histogram of genotype rate, warning=FALSE}
+# gtscore0x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_0x), binwidth = 0.01) +
+  xlim(-0.01, 1.01) +
+  labs(title = "0x Sample Genotype Rate",
+       x = "Genotype Rate",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# gtscore10x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = GenotypeRate_10x), binwidth = 0.01) +
+  xlim(-0.01, 1.01) +
+  labs(title = "10x Sample Genotype Rate",
+       x = "Genotype Rate",
+       y = "Count") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+plot histogram of heterozygosity
+
+```{r histogram of heterozygosity, warning=FALSE}
+# gtscore0x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = Heterozygosity_0x), binwidth = 0.03) + 
+  xlim(-0.01, 1.01)+
+  labs(title = "0x Sample Heterozygosity",
+       x = "Heterozygosity",
+       y = "Count")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle=element_text(hjust = 0.5))
+
+# gtscore10x
+master_sampleSummary %>%
+  ggplot() +
+  geom_histogram(aes(x = Heterozygosity_10x), binwidth = 0.03) + 
+  xlim(-0.01, 1.01)+
+  labs(title = "10x Sample Heterozygosity",
+       x = "Heterozygosity",
+       y = "Count")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle=element_text(hjust = 0.5))
+```
+
+plot genotype rate vs primer probe reads
+
+```{r genotype rate vs primer probe reads}
+#dashed line added at 90% genotype rate, this is not a strict threshold, just a goal to aim for
+
+# gtscore0x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot(aes(x = Primer.Probe.Reads,
+             y = GenotypeRate_0x,
+             color = sampleType)) +
+  geom_point(stat = "identity") +
+  geom_smooth(method = "loess") +
+  labs(title = "0x Genotype Rate vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Genotype Rate")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0.9, lty = "dashed")
+
+# gtscore10x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot(aes(x = Primer.Probe.Reads,
+             y = GenotypeRate_10x,
+             color = sampleType)) +
+  geom_point(stat = "identity") +
+  geom_smooth(method = "loess") +
+  labs(title = "10x Genotype Rate vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Genotype Rate")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0.9, lty = "dashed")
+```
+
+Samples with unusually high heterozygosity may be contaminated or have elevated ploidy. [[Given chimerism, however, this isn't super helpful for blood samples]]
+
+plot heterozygosity vs primer probe reads
+
+```{r heterozygosity vs primer probe reads}
+# gtscore0x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot() +
+  geom_point(aes(x = Primer.Probe.Reads,
+                 y = Heterozygosity_0x,
+                 color = sampleType))+
+  labs(title = "0x Heterozygosity vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Heterozygosity")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))+
+  geom_hline(yintercept = 0.3, lty = "dashed")
+
+# gtscore10x
+master_sampleSummary %>%
+  separate(sampleID_md, into = c("id", "species", "animalID", "sampleType"), sep = "_") %>%
+  ggplot() +
+  geom_point(aes(x = Primer.Probe.Reads,
+                 y = Heterozygosity_10x,
+                 color = sampleType))+
+  labs(title = "10x Heterozygosity vs Total Reads per Sample",
+       x = "Primer Probe Reads",
+       y = "Heterozygosity")+
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))+
+  geom_hline(yintercept = 0.3, lty = "dashed")
+```
+
+
+# OLD BELOW
+
+
+
+
 
 
 # 7 Data summaries
