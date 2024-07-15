@@ -1941,7 +1941,131 @@ tamRun4_ill_gtscore_sampleSum %>%
 
 ## 7.3 Geno consistency
 
-### allele reads
+### baseline genotypes
+
+Combine results from hair samples sequenced across multiple runs to obtain baseline genotypes
+
+**data**
+
+```{r}
+tamRun5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+tamRun5_hairSamples <- tamRun5_md %>%
+  filter(sampleType == "hair") %>%
+  filter(animalID %in% tamRun4_md$animalID)
+
+tamRun5_alleleReads_hair <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  select(tamRun5_hairSamples$sampleID) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "readCounts_run5") %>%
+  merge(., tamRun5_md[, c("sampleID", "animalID")], by = "sampleID")
+
+tamRun5_genos0x_hair <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  select(tamRun5_hairSamples$sampleID) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genos_run5") %>%
+  merge(., tamRun5_md[, c("sampleID", "animalID")], by = "sampleID")
+  
+
+  
+
+
+tamRun4_hairSamples <- tamRun4_md %>%
+  filter(sampleType == "hair")
+
+tamRun4_alleleReads_hair <- tamRun4_readCounts_ill_gtscore %>%
+  select(tamRun4_hairSamples$sampleID_ill) %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID_ill",
+               values_to = "readCounts_run4") %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
+
+tamRun4_genos0x_hair <- tamRun4_genos_ill_gtscore0x %>%
+  select(tamRun4_hairSamples$sampleID_ill) %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID_ill",
+               values_to = "genos_run4") %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
+```
+
+**compare genos**
+
+```{r}
+# calculate variant allele frequency (w/allele 2 as variant allele)
+get_vaf <- function(x) gsubfn("(\\d+),(\\d+)", ~ round(as.numeric(y)/(as.numeric(x) + as.numeric(y)), 2), paste(x))
+
+get_gtseqRatio <- function(readCounts) {
+  
+  readSum <- gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(readCounts))
+  
+  if(as.numeric(readSum) < 10) {
+    NA
+  } else {
+    gsubfn("(\\d+),(\\d+)", ~ as.numeric(x)/as.numeric(y), paste(readCounts))
+    }
+}
+
+get_gtseqRatio <- function(readCounts) {
+  # Function to process a single read count
+  process_read_count <- function(rc) {
+    # Check if the read count is NA
+    if (is.na(rc)) {
+      return(NA)
+    }
+    
+    # Split the input string into two numeric values
+    counts <- as.numeric(unlist(strsplit(rc, ",")))
+    
+    # Replace 0 counts with 0.1
+    counts[counts == 0] <- 0.1
+    
+    # Sum the read counts
+    readSum <- sum(counts)
+    
+    # Check the sum and compute the ratio if appropriate
+    if (readSum < 10) {
+      return(NA)
+    } else {
+      return(counts[1] / counts[2])
+    }
+  }
+  
+  # Apply the processing function to each element in readCounts
+  sapply(readCounts, process_read_count)
+}
+
+
+
+
+genoCompare_baseGenos <- tamRun4_genos0x_hair %>%
+  merge(., tamRun5_genos0x_hair, by = c("animalID", "locus"), all.x = T) %>%
+  #mutate(across(everything(), na_if, "0")) %>%
+  mutate(across(everything(), \(x) na_if(x, "0"))) %>%
+  mutate(
+    genoMatch = genos_run4 == genos_run5
+  ) %>%
+  merge(., tamRun4_alleleReads_hair, by = c("animalID", "locus"), all.x = T) %>%
+  merge(., tamRun5_alleleReads_hair, by = c("animalID", "locus"), all.x = T) %>%
+  select(!starts_with("sampleID")) %>%
+  mutate(
+    gtRatio_run4 = round(get_gtseqRatio(readCounts_run4), 2),
+    gtRatio_run5 = round(get_gtseqRatio(readCounts_run5), 2)
+  )
+```
+
+
+**START HERE** for the code above, adjust so that 1) readCount cols come after locus, 2) add the possible alleles for each locus so that 3) can produce gtseq genos (will need to write a small function for this to turn gtseq ratios into genotypes)
+
+
+### allele readSums
 
 ```{r, warning=FALSE}
 # sum allele reads
@@ -2403,62 +2527,6 @@ genoReadCompare_ill_gtscore0x_geno100 %>%
 ```
 
 ### new approach
-
-```{r}
-pp_panelv3 <- read.csv("./project_data/primerProbeFile_panelv3_fullSet.txt", header = T, sep = "\t")
-
-homoHet_key <- pp_panelv3 %>%
-  select(Locus, Allele1, Allele2) %>%
-  mutate(
-    hom1 = str_c(Allele1, Allele1, sep = ","),
-    hom2 = str_c(Allele2, Allele2, sep = ","),
-    het = str_c(Allele1, Allele2, sep = ",")
-  ) %>%
-  select(!contains("Allele")) %>%
-  dplyr::rename("locus" = "Locus") %>%
-  pivot_longer(!locus,
-               names_to = "callType",
-               values_to = "geno")
-
-temp <- genoReadCompare_ill_gtscore10x_geno100 %>%
-  merge(., homoHet_key, by.x = c("locus", "blood"), by.y = c("locus", "geno")) %>%
-  merge(., homoHet_key, by.x = c("locus", "fecal"), by.y = c("locus", "geno"), suffixes = c("_blood", "_fecal")) %>%
-  merge(., homoHet_key, by.x = c("locus", "hair"), by.y = c("locus", "geno")) %>%
-  dplyr::rename("callType_hair" = "callType") %>%
-  mutate(
-    bf_misType = case_when(
-      bfMatch == TRUE ~ NA,
-      callType_blood == "het" & callType_fecal %in% c("hom1", "hom2") ~ "type1",
-      callType_blood %in% c("hom1", "hom2") & callType_fecal == "het" ~ "type1",
-      .default = "type2"
-    )
-  ) %>%
-  relocate(bf_misType, .after = bfMatch) %>%
-  mutate(
-    bh_misType = case_when(
-      bhMatch == TRUE ~ NA,
-      callType_blood == "het" & callType_hair %in% c("hom1", "hom2") ~ "type1",
-      callType_blood %in% c("hom1", "hom2") & callType_hair == "het" ~ "type1",
-      .default = "type2"
-    )
-  ) %>%
-  relocate(bh_misType, .after = bhMatch) %>%
-  mutate(
-    fh_misType = case_when(
-      fhMatch == TRUE ~ NA,
-      callType_fecal == "het" & callType_hair %in% c("hom1", "hom2") ~ "type1",
-      callType_fecal %in% c("hom1", "hom2") & callType_hair == "het" ~ "type1",
-      .default = "type2"
-    )
-  ) %>%
-  relocate(fh_misType, .after = fhMatch) %>%
-  relocate(locus, animalID, species, blood, fecal, hair)
-
-temp2 <- temp %>%
-  filter(bfMatch == FALSE)
-
-table(temp2$bf_misType)
-```
 
 
 
