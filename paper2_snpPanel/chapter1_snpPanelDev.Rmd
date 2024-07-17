@@ -2058,8 +2058,35 @@ get_gtseqRatio <- function(readCounts) {
 }
 ```
 
-
 **function to assign gtseq genos**
+
+NOTE that the different versions of the GTseq_Genotyper script assign HET using different allele ratios - I've submitted an issue to the GitHub page, but in the meantime, the differences are outlined below and I've created separate genotyping functions to reflect the ratios in each script.
+
+specs_v2 - GTseq-Pipeline/GTseq_Genotyper_v2.pl (lines 120-124)
+* (ratio >= 10) >> A1HOM
+* (ratio <= 0.1) >> A2HOM
+* (ratio <= 0.2) >> NA
+* (ratio <= 5) >> HET
+
+specs_v3a - GTseq-Pipeline/GTseq_Genotyper_v3.pl (lines 201-210)
+* (ratio >= 10) >> A1HOM
+* (ratio < 10) &&  (ratio > 5) >> NA
+* (ratio <= 0.1) >> A2HOM
+* (ratio <= 0.2) >> NA
+* (ratio <= 2) >> HET
+
+specs_v3b - GTseek_utils/GTseq_Genotyper_v3.pl (lines 201-210)
+* (ratio >= 10) >> A1HOM
+* (ratio < 10) &&  (ratio > 5) >> NA
+* (ratio <= 0.1) >> A2HOM
+* (ratio <= 0.5) >> NA
+* (ratio <= 2) >> HET
+
+| callType | specs_v2  | specs_v3a | specs_v3b |
+| -------- | --------- | --------- | --------- |
+| A1HOM    | [10, inf) | [10, inf) | [10, inf) |
+| A2HOM    | [0, 0.1]  | [0, 0.1]  | [0, 0.1]  |
+| HET      | (0.2, 5]  | (0.2, 2]  | (0.5, 2]  |
 
 ```{r}
 ## based on GTseq_Genotyper_v2.pl
@@ -2079,8 +2106,8 @@ get_gtseqGenos_v2 <- function(ratio, Allele1, Allele2) {
   return(result)
 }
 
-## based on GTseq_Genotyper_v3.pl (the one I used for running gtseq pipeline)
-get_gtseqGenos_v3 <- function(ratio, Allele1, Allele2) {
+## based on GTseq-Pipeline/GTseq_Genotyper_v3.pl (the one I used for running gtseq pipeline)
+get_gtseqGenos_v3a <- function(ratio, Allele1, Allele2) {
   
   # round ratio to 3 places
   ratio <- round(ratio, 3)
@@ -2091,6 +2118,24 @@ get_gtseqGenos_v3 <- function(ratio, Allele1, Allele2) {
     (ratio < 10 & ratio > 5) ~ NA_character_,
     ratio <= 0.1 ~ str_c(Allele2, Allele2, sep = ","),
     ratio <= 0.2 ~ NA_character_,
+    ratio <= 2 ~ str_c(Allele1, Allele2, sep = ","),
+    TRUE ~ NA_character_  # Default case
+  )
+  return(result)
+}
+
+## based on GTseq-Pipeline/GTseq_Genotyper_v3.pl (the one I used for running gtseq pipeline)
+get_gtseqGenos_v3b <- function(ratio, Allele1, Allele2) {
+  
+  # round ratio to 3 places
+  ratio <- round(ratio, 3)
+  
+  result <- case_when(
+    is.na(ratio) ~ NA_character_,
+    ratio >= 10 ~ str_c(Allele1, Allele1, sep = ","),
+    (ratio < 10 & ratio > 5) ~ NA_character_,
+    ratio <= 0.1 ~ str_c(Allele2, Allele2, sep = ","),
+    ratio <= 0.5 ~ NA_character_,
     ratio <= 2 ~ str_c(Allele1, Allele2, sep = ","),
     TRUE ~ NA_character_  # Default case
   )
@@ -2138,27 +2183,32 @@ get_callType_gs <- function(a1Counts, a2Counts, geno, Allele1, Allele2) {
 #### compare
 
 ```{r}
-compare_gtseq.score <- tamRun4_ill_gtscore_alleleReads_l %>%
+compare_gtseq.score <- 
+  # allele reads
+  tamRun4_ill_gtscore_alleleReads_l %>%
   merge(., tamRun4_ill_gtseq_alleleReads_l, by = c("sampleID_ill", "animalID", "locus")) %>%
   
   separate(readCounts_gr, into = c("a1Counts_gr", "a2Counts_gr"), sep = ",", remove = F) %>%
   separate(readCounts_gs, into = c("a1Counts_gs", "a2Counts_gs"), sep = ",", remove = F) %>%
   
+  # allele key
   merge(., tamRun4_primerProbeFile[, c("Locus", "Allele1", "Allele2")], by.x = "locus", by.y = "Locus") %>%
   
-  # calculate allele ratios for gtscore & gtseq allele reads
+  # allele ratios for gtscore & gtseq allele reads
   mutate(
     ratio_gr = get_gtseqRatio(readCounts_gr),
     ratio_gs = get_gtseqRatio(readCounts_gs)
   ) %>%
   
+  # genos assigned w/gtscore & gtseq pipelines
   merge(., tamRun4_ill_gtscore0x_genos_l, by = c("sampleID_ill", "animalID", "locus")) %>%
   merge(., tamRun4_ill_gtseq_genos_l, by = c("sampleID_ill", "animalID", "locus")) %>%
   
-  # assign genos using gtseq ratios + gtseq genotypers v2 & v3
+  # genos assigned w/my version of gtseq functions
   mutate(
     genos_v2 = get_gtseqGenos_v2(ratio_gs, Allele1, Allele2),
-    genos_v3 = get_gtseqGenos_v3(ratio_gs, Allele1, Allele2)
+    genos_v3a = get_gtseqGenos_v3a(ratio_gs, Allele1, Allele2),
+    genos_v3b = get_gtseqGenos_v3b(ratio_gs, Allele1, Allele2)
   ) %>%
   
   # matchCompare across pipeline combos
@@ -2171,19 +2221,35 @@ compare_gtseq.score <- tamRun4_ill_gtscore_alleleReads_l %>%
     )
   ) %>%
   mutate(
-    genoMatch_gs.v3 = case_when(
-      is.na(genos_gs) & !is.na(genos_v3) ~ "missing_gs",
-      !is.na(genos_gs) & is.na(genos_v3) ~ "missing_v3",
-      genos_gs == genos_v3 ~ "TRUE",
-      genos_gs != genos_v3 ~ "FALSE"
+    genoMatch_gs.v3a = case_when(
+      is.na(genos_gs) & !is.na(genos_v3a) ~ "missing_gs",
+      !is.na(genos_gs) & is.na(genos_v3a) ~ "missing_v3a",
+      genos_gs == genos_v3a ~ "TRUE",
+      genos_gs != genos_v3a ~ "FALSE"
     )
   ) %>%
   mutate(
-    genoMatch_v2.v3 = case_when(
-      is.na(genos_v2) & !is.na(genos_v3) ~ "missing_v2",
-      !is.na(genos_v2) & is.na(genos_v3) ~ "missing_v3",
-      genos_v2 == genos_v3 ~ "TRUE",
-      genos_v2 != genos_v3 ~ "FALSE"
+    genoMatch_gs.v3b = case_when(
+      is.na(genos_gs) & !is.na(genos_v3b) ~ "missing_gs",
+      !is.na(genos_gs) & is.na(genos_v3b) ~ "missing_v3b",
+      genos_gs == genos_v3b ~ "TRUE",
+      genos_gs != genos_v3b ~ "FALSE"
+    )
+  ) %>%
+  mutate(
+    genoMatch_v2.v3a = case_when(
+      is.na(genos_v2) & !is.na(genos_v3a) ~ "missing_v2",
+      !is.na(genos_v2) & is.na(genos_v3a) ~ "missing_v3a",
+      genos_v2 == genos_v3a ~ "TRUE",
+      genos_v2 != genos_v3a ~ "FALSE"
+    )
+  ) %>%
+  mutate(
+    genoMatch_v2.v3b = case_when(
+      is.na(genos_v2) & !is.na(genos_v3b) ~ "missing_v2",
+      !is.na(genos_v2) & is.na(genos_v3b) ~ "missing_v3b",
+      genos_v2 == genos_v3b ~ "TRUE",
+      genos_v2 != genos_v3b ~ "FALSE"
     )
   ) %>%
   mutate(
@@ -2195,11 +2261,19 @@ compare_gtseq.score <- tamRun4_ill_gtscore_alleleReads_l %>%
     )
   ) %>%
   mutate(
-    genoMatch_gr.v3 = case_when(
-      is.na(genos_gr) & !is.na(genos_v3) ~ "missing_gr",
-      !is.na(genos_gr) & is.na(genos_v3) ~ "missing_v3",
-      genos_gr == genos_v3 ~ "TRUE",
-      genos_gr != genos_v3 ~ "FALSE"
+    genoMatch_gr.v3a = case_when(
+      is.na(genos_gr) & !is.na(genos_v3a) ~ "missing_gr",
+      !is.na(genos_gr) & is.na(genos_v3a) ~ "missing_v3a",
+      genos_gr == genos_v3a ~ "TRUE",
+      genos_gr != genos_v3a ~ "FALSE"
+    )
+  ) %>%
+  mutate(
+    genoMatch_gr.v3b = case_when(
+      is.na(genos_gr) & !is.na(genos_v3b) ~ "missing_gr",
+      !is.na(genos_gr) & is.na(genos_v3b) ~ "missing_v3b",
+      genos_gr == genos_v3b ~ "TRUE",
+      genos_gr != genos_v3b ~ "FALSE"
     )
   ) %>%
   mutate(
@@ -2212,13 +2286,15 @@ compare_gtseq.score <- tamRun4_ill_gtscore_alleleReads_l %>%
     callType_gr = get_callType_gr(a1Counts_gr, a2Counts_gr, genos_gr, Allele1, Allele2),
     callType_gs = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_gs, Allele1, Allele2),
     callType_v2 = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v2, Allele1, Allele2),
-    callType_v3 = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3, Allele1, Allele2)
+    callType_v3a = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3a, Allele1, Allele2),
+    callType_v3b = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3b, Allele1, Allele2)
   )
 
-table(compare_gtseq.score$callType_gr)
-table(compare_gtseq.score$genoMatch_gs.v3)
+table(compare_gtseq.score$genoMatch_gs.v3a)
+table(compare_gtseq.score$genoMatch_gs.v3b)
 table(compare_gtseq.score$genoMatch_gr.v2)
-table(compare_gtseq.score$genoMatch_gr.v3)
+table(compare_gtseq.score$genoMatch_gr.v3a)
+table(compare_gtseq.score$genoMatch_gr.v3b)
 ```
 
 #### plots
@@ -2238,9 +2314,16 @@ ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Co
        y = "allele2Counts") +
   theme_Publication()
 
-ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Counts_gs), color = callType_v3, shape = callType_v3)) +
+ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Counts_gs), color = callType_v3a, shape = callType_v3a)) +
   geom_point() +
-  labs(title = "gtseq_v3",
+  labs(title = "gtseq_v3a",
+       x = "allele1Counts",
+       y = "allele2Counts") +
+  theme_Publication()
+
+ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Counts_gs), color = callType_v3b, shape = callType_v3b)) +
+  geom_point() +
+  labs(title = "gtseq_v3b",
        x = "allele1Counts",
        y = "allele2Counts") +
   theme_Publication()
