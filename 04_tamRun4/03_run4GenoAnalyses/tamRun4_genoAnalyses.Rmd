@@ -4325,7 +4325,7 @@ pp_fullSet <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.
                 "allele2" = "Allele2")
 
 # Genotypes
-genos_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+genos_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
   rownames_to_column("locus") %>%
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   column_to_rownames("locus") %>%
@@ -4347,7 +4347,7 @@ genos_ill_gtscore_l <- genos_ill_gtscore %>%
 
 ```{r}
 # Allele reads
-readCounts_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore_ill/ill_fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
+readCounts_ill_gtscore <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
   rownames_to_column("locus") %>%
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   column_to_rownames("locus")
@@ -4430,7 +4430,7 @@ create scatterplot of number of allele reads for allele1 vs. allele2
 # Genotypes
 genos_ill_gtseq <- 
   # need read_csv vs. read.csv here
-  read_csv("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
+  read_csv("./04_tamRun4/00_illumina/04_run4GTseq/genos/ill_tamRun4_compiledGenos_gtseq.csv") %>%
   as.data.frame() %>%
   mutate(Sample = sub("-", "\\.", Sample)) %>%
   dplyr::rename_all(funs(make.names(.))) %>%
@@ -4481,7 +4481,7 @@ done
 **Import all csv files as one dataframe & reformat**
 
 ```{r}
-fileNames <- dir("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/genos_csv", full.names = T)
+fileNames <- dir("./04_tamRun4/00_illumina/04_run4GTseq/genos/genos_csv", full.names = T)
 
 readCounts_gtseq.list <- lapply(fileNames, function(file.name) {
   df <- read.csv(file.name, skip = 1, header = F)
@@ -4490,7 +4490,7 @@ readCounts_gtseq.list <- lapply(fileNames, function(file.name) {
   })
 
 readCounts_ill_gtseq <- rlist::list.rbind(readCounts_gtseq.list) %>%
-  rename("locus" = "V1",
+  dplyr::rename("locus" = "V1",
          "allele1_counts" = "V2",
          "allele2_counts" = "V3",
          "a1.a2_ratio" = "V4",
@@ -4504,7 +4504,7 @@ readCounts_ill_gtseq <- rlist::list.rbind(readCounts_gtseq.list) %>%
          "sampleID" = "file.name") %>%
   mutate(
     readCounts = str_c(sub(".*=", "", allele1_counts), ",", sub(".*=", "", allele2_counts)),
-    sampleID = sub("./04_tamRun4/00_illumina/04_run4GTseq_ill/genos/genos_csv/", "", sampleID),
+    sampleID = sub("./04_tamRun4/00_illumina/04_run4GTseq/genos/genos_csv/", "", sampleID),
     sampleID = sub(".csv", "", sampleID),
     sampleID = gsub("-", "\\.", sampleID)
     ) %>%

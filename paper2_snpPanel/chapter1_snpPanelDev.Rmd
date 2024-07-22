@@ -1627,8 +1627,6 @@ tamRun4_readCounts_ill_gtscore <- read.delim("./04_tamRun4/00_illumina/03_run4GT
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   column_to_rownames("locus")
 
-tamRun4_readCounts_ill_gtseq <- read.delim("./04_tamRun4/00_illumina/04_run4GTseq/ill_gtseq_alleleReads.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
-
 # nanopore
 tamRun4_readCounts_ont_gtscore <- read.delim("./04_tamRun4/01_nanopore/03_run4GTscore/ont_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
   rownames_to_column("locus") %>%
@@ -1969,29 +1967,41 @@ tamRun4_ill_gtscore_sampleSum %>%
   theme_Publication()
 ```
 
-## 7.3 Geno consistency
+# 8 GTseq vs. GTscore
 
-### GTseq vs. GTscore
+## 8.1 Data
 
-#### data
+### Allele reads
 
 ```{r}
-# allele reads
-tamRun4_ill_gtscore_alleleReads_l <- tamRun4_readCounts_ill_gtscore %>%
+# gtscore
+tamRun4_readCounts_ill_gtscore_l <- tamRun4_readCounts_ill_gtscore %>%
   rownames_to_column("locus") %>%
   pivot_longer(!locus,
                names_to = "sampleID_ill",
                values_to = "readCounts_gr") %>%
-  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
+  arrange(sampleID_ill, locus)
 
-tamRun4_ill_gtseq_alleleReads_l <- tamRun4_readCounts_ill_gtseq %>%
-  rownames_to_column("locus") %>%
-  pivot_longer(!locus,
-               names_to = "sampleID_ill",
+# gtseq
+tamRun4_readCounts_ill_gtseq <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readCounts.csv") %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  dplyr::rename("sampleID_ill" = "Sample")
+
+tamRun4_readCounts_ill_gtseq_l <- tamRun4_readCounts_ill_gtseq %>%
+  select(-c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
+  pivot_longer(!sampleID_ill,
+               names_to = "locus",
                values_to = "readCounts_gs") %>%
-  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
+  mutate(readCounts_gs = gsub("/", ",", readCounts_gs)) %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
+  arrange(sampleID_ill, locus)
+```
 
-# genos
+### Genos
+
+```{r}
+# gtscore
 tamRun4_ill_gtscore0x_genos_l <- tamRun4_genos_ill_gtscore0x %>%
   mutate(across(everything(), as.character)) %>%
   mutate(across(everything(), na_if, "0")) %>%
@@ -1999,31 +2009,204 @@ tamRun4_ill_gtscore0x_genos_l <- tamRun4_genos_ill_gtscore0x %>%
   pivot_longer(!locus,
                names_to = "sampleID_ill",
                values_to = "genos_gr") %>%
-  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
+  arrange(sampleID_ill, locus)
 
-tamRun4_ill_gtseq_genos_l <- tamRun4_genos_ill_gtseq %>%
+# gtseq
+tamRun4_genos_ill_gtseq <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_compiledGenos.csv") %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  dplyr::rename("sampleID_ill" = "Sample")
+
+tamRun4_genos_ill_gtseq_l <- tamRun4_genos_ill_gtseq %>%
+  select(-c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
+  pivot_longer(!sampleID_ill,
+               names_to = "locus",
+               values_to = "genos_gs") %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
+  arrange(sampleID_ill, locus)
+```
+
+## 8.2 General metrics
+
+```{r}
+# total reads
+sum(tamRun4_ill_gtscore_sampleSum_fullSet$Total.Reads) # 31663938
+sum(tamRun4_readCounts_ill_gtseq$Raw.Reads) # 31663938
+
+# total on-target reads
+sum(tamRun4_ill_gtscore_sampleSum_fullSet$Primer.Probe.Reads) # 10727250
+sum(tamRun4_readCounts_ill_gtseq$On.Target.Reads) # 10786814
+
+seqScore_otReads <- tamRun4_ill_gtscore_sampleSum_fullSet %>%
+  select(Sample, Primer.Probe.Reads) %>%
+  merge(., tamRun4_readCounts_ill_gtseq[, c("sampleID_ill", "On.Target.Reads")], by.x = "Sample", by.y = "sampleID_ill") %>%
+  dplyr::rename("otReads_gr" = "Primer.Probe.Reads",
+                "otReads_gs" = "On.Target.Reads") %>%
+  mutate(
+    diff_gr.gs = otReads_gr - otReads_gs,
+    diffProp_gr.gs = diff_gr.gs/otReads_gr
+  )
+
+mean(seqScore_otReads$diffProp_gr.gs)*100
+min(seqScore_otReads$diffProp_gr.gs)*100
+max(seqScore_otReads$diffProp_gr.gs)*100
+```
+
+## 8.3 Geno success
+
+
+# 9 Geno concordance
+
+## 9.1 Baseline genos
+
+First want to get some baseline genotypes to compare against - to do this, going to use genos from hair samples that match across runs, specifically runs 3 and 5
+
+#### data
+
+```{r}
+# tamRun5 data
+tamRun5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+tamRun5_hairSamples <- tamRun5_md %>%
+  filter(sampleType == "hair") %>%
+  filter(animalID %in% tamRun4_md$animalID)
+
+tamRun5_readCounts_hair <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  select(tamRun5_hairSamples$sampleID) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "readCounts_run5.gr") %>%
+  merge(., tamRun5_md[, c("sampleID", "animalID")], by = "sampleID")
+
+tamRun5_genos0x_hair <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  select(tamRun5_hairSamples$sampleID) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  pivot_longer(!locus,
+               names_to = "sampleID",
+               values_to = "genos_run5.gr") %>%
+  merge(., tamRun5_md[, c("sampleID", "animalID")], by = "sampleID")
+  
+
+# tamRun4 data
+## gtscore
+tamRun4_hairSamples <- tamRun4_md %>%
+  filter(sampleType == "hair")
+
+tamRun4_ill_gtscore_readCounts_hair <- tamRun4_readCounts_ill_gtscore %>%
+  select(tamRun4_hairSamples$sampleID_ill) %>%
   rownames_to_column("locus") %>%
   pivot_longer(!locus,
                names_to = "sampleID_ill",
-               values_to = "genos_gs") %>%
+               values_to = "readCounts_run4.gr") %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
+
+tamRun4_ill_gtscore_genos0x_hair <- tamRun4_genos_ill_gtscore0x %>%
+  select(tamRun4_hairSamples$sampleID_ill) %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID_ill",
+               values_to = "genos_run4.gr") %>%
   merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill")
 ```
 
 #### functions
 
-odd discrepancy - in Campbell et al. 2015, they say that genotypes are assigned as follows:
+```{r}
+get_readSum <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+```
 
-	* allele ratios > 10 = homozygous for allele 1
-	* allele ratios < 0.1 = homozygous for allele 2
-	* allele ratios b/t 0.2 & 5.0 = heterozygous
-	* total read counts < 10 = NA
-	* allele ratios b/t 0.1 & 0.2 or 5.0 & 10.0 = NA
 
-However, in GTseq_Genotyper.V3.pl, there's no line accounting for ratios in the range (2, 5]; instead, genotypes are assigned as follows:
+#### compare genos
 
--   allele ratios >= 10 = homozygous for allele 1
--   allele ratios <= 0.1 = homozygous for allele 2
--   heterozygotes are assigned to ratios (0.1, 0.2] 
+```{r}
+genoCompare_baseGenos <- tamRun4_ill_gtscore_genos0x_hair %>%
+  merge(., tamRun5_genos0x_hair, by = c("animalID", "locus"), all.x = T) %>%
+  #mutate(across(everything(), na_if, "0")) %>%
+  mutate(across(everything(), \(x) na_if(x, "0"))) %>%
+  mutate(
+    genoMatch = genos_run4.gr == genos_run5.gr
+  ) %>%
+  merge(., tamRun4_ill_gtscore_readCounts_hair, by = c("animalID", "locus"), all.x = T) %>%
+  merge(., tamRun5_readCounts_hair, by = c("animalID", "locus"), all.x = T) %>%
+  select(!starts_with("sampleID")) %>%
+  merge(., tamRun4_primerProbeFile[, c("Locus", "Allele1", "Allele2")], by.x = "locus", by.y = "Locus") %>%
+  relocate(animalID, locus, Allele1, Allele2) %>%
+  mutate(
+    readSum_run4.gr = get_readSum(readCounts_run4.gr),
+    readSum_run5.gr = get_readSum(readCounts_run5.gr)
+  )
+
+ggplot(genoCompare_baseGenos, aes(x = as.numeric(readSum_run4.gr), y = as.numeric(readSum_run5.gr), color = genoMatch)) +
+  geom_point(alpha = 0.5) +
+  theme_Publication()
+
+
+
+
+temp <- genoCompare_baseGenos %>%
+  filter(readSum_run4.gr >= 30) %>%
+  filter(readSum_run5.gr >= 30) %>%
+  group_by(animalID) %>%
+  summarise(
+    genoMismatch = sum(genoMatch == FALSE, na.rm = T),
+    genoMatch = sum(genoMatch == TRUE, na.rm = T)
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    genoTotal = genoMismatch + genoMatch,
+    propMismatch = genoMismatch/genoTotal
+  )
+
+temp2 <- genoCompare_baseGenos %>%
+  filter(readSum_run4.gr >= 30) %>%
+  filter(readSum_run5.gr >= 30) %>%
+  group_by(locus) %>%
+  summarise(
+    genoMismatch = sum(genoMatch == FALSE, na.rm = T),
+    genoMatch = sum(genoMatch == TRUE, na.rm = T)
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    genoTotal = genoMismatch + genoMatch,
+    propMismatch = genoMismatch/genoTotal
+  )
+```
+
+
+**START HERE** for the code above, adjust so that 1) readCount cols come after locus, 2) add the possible alleles for each locus so that 3) can produce gtseq genos (will need to write a small function for this to turn gtseq ratios into genotypes)
+
+
+
+
+
+
+# XXXXXXXXXXXXXXXXXXXXXX
+## Functions
+
+### GTseq genos
+
+There are a few different versions of genotyping scripts for GTseq, with each basing their genotype assignments on slightly different allele ratios. I've outlined the details of these discrepancies below and have created separate functions for each (easier than running the full GTseq script).
+
+GTseq_Genotyper versions:
+
+-   specs_v2 = GitHub/GTseq-Pipeline/GTseq_Genotyper_v2.pl
+-   specs_v3a = GitHub/GTseq-Pipeline/GTseq_Genotyper_v3.pl
+-   specs_3b = GitHub/GTseek_utils/GTseq_Genotyper_v3.pl
+-   specs_3c = (my files)/GTseek_Git/GTseq_Genotyper_v3.pl
+
+    -   Nate Campbell sent this version to me via email
+    
+**NOTE** that versions 2, 3a, and 3b all use **allele1Counts/allele2Counts** to assign genotypes, whereas version 3c uses allele2 percentage to assign genotypes via **allele2Counts/(allele1Counts + allele2Counts)**
+
+| callType | specs_v2  | specs_v3a | specs_v3b | specs_v3b   |
+| -------- | --------- | --------- | --------- | ----------- |
+| A1HOM    | [10, inf) | [10, inf) | [10, inf) | [0%, 10%]   |
+| A2HOM    | [0, 0.1]  | [0, 0.1]  | [0, 0.1]  | [90%, 100%] |
+| HET      | (0.2, 5]  | (0.2, 2]  | (0.5, 2]  | [30%, 70%]  |
+
 
 **function to get allele ratios for gtseq geno assignments**
 
@@ -2124,7 +2307,7 @@ get_gtseqGenos_v3a <- function(ratio, Allele1, Allele2) {
   return(result)
 }
 
-## based on GTseq-Pipeline/GTseq_Genotyper_v3.pl (the one I used for running gtseq pipeline)
+## based on GTseek_utils/GTseq_Genotyper_v3.pl
 get_gtseqGenos_v3b <- function(ratio, Allele1, Allele2) {
   
   # round ratio to 3 places
@@ -2138,6 +2321,25 @@ get_gtseqGenos_v3b <- function(ratio, Allele1, Allele2) {
     ratio <= 0.5 ~ NA_character_,
     ratio <= 2 ~ str_c(Allele1, Allele2, sep = ","),
     TRUE ~ NA_character_  # Default case
+  )
+  return(result)
+}
+
+## based on GTseq_Genotyper_v3.pl emailed to me by Nate on 18-July-2024
+get_gtseqGenos_v3c <- function(a1Counts, a2Counts, Allele1, Allele2) {
+  
+  # calculate allele2 percentage
+  per_a2 <- case_when(
+    as.numeric(a1Counts) + as.numeric(a2Counts) >= 10 ~ (as.numeric(a2Counts)/(as.numeric(a1Counts) + as.numeric(a2Counts)))*100,
+    .default = NA
+  )
+  
+  result <- case_when(
+    is.na(per_a2) ~ NA_character_,
+    per_a2 <= 10 ~ str_c(Allele1, Allele1, sep = ","),
+    per_a2 >= 90 ~ str_c(Allele2, Allele2, sep = ","),
+    (per_a2 >=30 & per_a2 <= 70) ~ str_c(Allele1, Allele2, sep = ","),
+    .default = NA_character_
   )
   return(result)
 }
@@ -2180,7 +2382,7 @@ get_callType_gs <- function(a1Counts, a2Counts, geno, Allele1, Allele2) {
 }
 ```
 
-#### compare
+## Compare
 
 ```{r}
 compare_gtseq.score <- 
@@ -2208,8 +2410,17 @@ compare_gtseq.score <-
   mutate(
     genos_v2 = get_gtseqGenos_v2(ratio_gs, Allele1, Allele2),
     genos_v3a = get_gtseqGenos_v3a(ratio_gs, Allele1, Allele2),
-    genos_v3b = get_gtseqGenos_v3b(ratio_gs, Allele1, Allele2)
+    genos_v3b = get_gtseqGenos_v3b(ratio_gs, Allele1, Allele2),
+    genos_v3c = get_gtseqGenos_v3c(a1Counts_gs, a2Counts_gs, Allele1, Allele2)
   ) %>%
+  
+  # TEST - success; matchCompare does indeed work
+#  mutate(
+#    genos_v2 = case_when(
+#      sampleID_ill == "tamRun4.002" & locus == "INDID_190" ~ "B,B",
+#      .default = genos_v2
+#    )
+#  ) %>%
   
   # matchCompare across pipeline combos
   mutate(
@@ -2277,6 +2488,14 @@ compare_gtseq.score <-
     )
   ) %>%
   mutate(
+    genoMatch_gr.v3c = case_when(
+      is.na(genos_gr) & !is.na(genos_v3c) ~ "missing_gr",
+      !is.na(genos_gr) & is.na(genos_v3c) ~ "missing_v3c",
+      genos_gr == genos_v3c ~ "TRUE",
+      genos_gr != genos_v3c ~ "FALSE"
+    )
+  ) %>%
+  mutate(
     ratio_gr = round(ratio_gr, 3),
     ratio_gs = round(ratio_gs, 3)
     ) %>%
@@ -2287,17 +2506,41 @@ compare_gtseq.score <-
     callType_gs = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_gs, Allele1, Allele2),
     callType_v2 = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v2, Allele1, Allele2),
     callType_v3a = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3a, Allele1, Allele2),
-    callType_v3b = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3b, Allele1, Allele2)
+    callType_v3b = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3b, Allele1, Allele2),
+    callType_v3c = get_callType_gs(a1Counts_gs, a2Counts_gs, genos_v3c, Allele1, Allele2)
   )
+
 
 table(compare_gtseq.score$genoMatch_gs.v3a)
 table(compare_gtseq.score$genoMatch_gs.v3b)
 table(compare_gtseq.score$genoMatch_gr.v2)
 table(compare_gtseq.score$genoMatch_gr.v3a)
 table(compare_gtseq.score$genoMatch_gr.v3b)
+table(compare_gtseq.score$genoMatch_gr.v3c)
+
+# can see that some loci have more "noCall" than others
+temp <- compare_gtseq.score %>%
+  filter(callType_v3c == "noCall") %>%
+  group_by(locus) %>%
+  summarise(
+    count_noCall = n()
+  ) %>%
+  arrange(desc(count_noCall))
 ```
 
-#### plots
+## Results
+
+```{r}
+# on-target readSum gtscore
+sum(as.numeric(compare_gtseq.score$a1Counts_gr), na.rm = T) + sum(as.numeric(compare_gtseq.score$a2Counts_gr), na.rm = T)
+
+sum(as.numeric(compare_gtseq.score$a1Counts_gs), na.rm = T) + sum(as.numeric(compare_gtseq.score$a2Counts_gs), na.rm = T)
+
+10727250 - 10786814
+```
+
+
+## plots
 
 ```{r}
 ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gr), y = as.numeric(a2Counts_gr), color = callType_gr, shape = callType_gr)) +
@@ -2324,6 +2567,13 @@ ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Co
 ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Counts_gs), color = callType_v3b, shape = callType_v3b)) +
   geom_point() +
   labs(title = "gtseq_v3b",
+       x = "allele1Counts",
+       y = "allele2Counts") +
+  theme_Publication()
+
+ggplot(compare_gtseq.score, aes(x = as.numeric(a1Counts_gs), y = as.numeric(a2Counts_gs), color = callType_v3c, shape = callType_v3c)) +
+  geom_point() +
+  labs(title = "gtseq_v3c",
        x = "allele1Counts",
        y = "allele2Counts") +
   theme_Publication()

@@ -9,17 +9,129 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Overview
+# 1 Overview
 
-## General info
-
-This document outlines data analysis for tamGenetics_run4 ILLUIMINA sequences using the "GTseq pipeline" ([GitHub link](https://github.com/GTseq/GTseq-Pipeline)) created by Nate Campbell.
+This document outlines data analysis for tamGenetics_run4 ILLUMINA sequences using the "GTseq pipeline" ([GitHub link](https://github.com/GTseq/GTseq-Pipeline)) created by Nate Campbell. **NOTE however, that scripts on the GitHub page are out of date; Nate sent me his updated scripts on 18-July-2024, which I'll be using to redo my original analyses below. These updated scripts are located in /project_scripts/GTseek_Git**
 
 In using this pipeline, I primarily followed the steps outlined in "GTseq_Pipeline.txt". Note, however, that while the perl scripts are taken directly from the originals, I've added information below on how to run each as a loop to allow analysis of all sample files at once, as this was not included in the original GTseq pipeline. I've also included descriptions of each script taken from various locations on the GTseq GitHub page, with additional information added where needed for further clarification.
 
-## About the data
+# 2 Packages
+
+```{r}
+library(phylotools)
+library(seqinr)
+library(tidyverse)
+```
+
+# 3 Data
 
 The sequencing data used in this pipeline is from the full set of hair and blood samples and includes data from two MiSeq runs of this library. There are a total of **96 samples**, including 30 blood, 30 fecal, 30 hair (15 each of LWED and SIMP) as well as 6 negative controls.
+
+# 4 Pipeline
+
+## 4.1 GTseq_HashSeqs.pl
+
+First use the GTseq_HashSeqs.pl script on plate .fastq files. This script collects and counts unique reads within the fastq file and reduces the compute time for the GTseq_SeqTest.pl script.
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq
+
+for i in ./../02_run4Interleaved/tamRun4*; do perl ./../../../project_scripts/GTseek_Git/GTseq_HashSeqs.pl $i > ./hashSeqs/$(basename "${i/.fastq/.hash}"); done
+```
+
+## 4.2 GTseq_SeqTest
+
+### Create locusInfo_seqTest file
+
+I already created the GTseq-formatted version of the primer-probe file in tamRun5_gtseqPipeline.Rmd; I copied it into the 04_run4GTseq_ill directory to make things easier. **HOWEVER** apparently the new version of the SeqTest script wants this to be comma-separated instead of tab-separated--
+
+```{r, eval = F}
+locusInfo_seqTest <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/primerProbe_snpPanel_v3_gtseq.txt", sep = "\t", header = F)
+
+write.table(locusInfo_seqTest, "./04_tamRun4/00_illumina/04_run4GTseq/locusInfo_seqTest.csv", col.names = F, row.names = F, sep = ",", quote = F)
+```
+
+### Run script
+
+**NOTE** there are some weird errors in the updated SeqTest script Nate sent me; I modified a few lines so that it would run. Also, there's a line in the script that for forward-primer counts, it changes 0 to 0.1 -- not sure what the purpose of this is?? 
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq
+
+for i in ./hashSeqs/tamRun4*; do perl ./../../../project_scripts/GTseek_Git/GTseq_SeqTest_v3_rvModified.pl primerProbe_snpPanel_v3_gtseq.csv $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
+```
+
+## 4.3 GTseq_Genotyper_v3.pl
+
+Specifically using the GTseek_Git version of GTseq_Genotyper_v3.pl
+
+### Create locusInfo_genotyper file (csv)
+
+I created this file in tamRun5_gtseqPipline.Rmd as well and copied it into the 04_run4GTseq directory. 
+
+0 Locus Name,
+1 Allele1,
+2 Allele2,
+3 ProbeSeq1,
+4 ProbeSeq2,
+5 FWD_Primer,
+6 A1_correction,
+7 A2_correction
+
+```{r, eval = F}
+locusInfo_genotyper <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/locusInfo_snpPanel_v3_gtseq.csv", sep = ",", header = F)
+
+write.table(locusInfo_genotyper, "./04_tamRun4/00_illumina/04_run4GTseq/locusInfo_genotyper.csv", col.names = F, row.names = F, sep = ",", quote = F)
+```
+
+### Run script
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq
+
+for i in ./../02_run4Interleaved/tamRun4*; do perl ./../../../project_scripts/GTseek_Git/GTseq_Genotyper_v3.pl locusInfo_snpPanel_v3_gtseq.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
+
+# testing w/tamRun4-005
+perl ./../../../project_scripts/GTseek_Git/GTseq_Genotyper_v3_rvModified.pl locusInfo_snpPanel_v3_gtseq.csv ./../02_run4Interleaved/tamRun4-005.fastq > sample.genos
+```
+
+**Some things to note** - when running this script, a few fastq files throw the following warning (line numbers are different depending on the fastq file; the one below is for tamRun4-005.fastq specifically):
+
+substr outside of string at ./../../../project_scripts/GTseek_Git/GTseq_Genotyper_v3_rvModified.pl line 129, <FASTQ> line 2571092.
+Use of uninitialized value $fuzzy_str in numeric gt (>) at ./../../../project_scripts/GTseek_Git/GTseq_Genotyper_v3_rvModified.pl line 130, <FASTQ> line 2571092.
+
+## 4.4 GTseq_GenoCompile_v3.2.pl
+
+### perSample
+
+#### readCounts
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq/genos
+
+perl ./../../../../project_scripts/GTseek_Git/GTseq_GenoCompile_v3.2.pl A > ./../gtseq_readCounts.csv
+```
+
+#### readSums
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq/genos
+
+perl ./../../../../project_scripts/GTseek_Git/GTseq_GenoCompile_v3.2.pl C > ./../gtseq_readSums.csv
+```
+
+#### genos
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq/genos
+
+perl ./../../../../project_scripts/GTseek_Git/GTseq_GenoCompile_v3.2.pl > ./../gtseq_compiledGenos.csv
+```
+
+
+
+
+
 
 # Step 1: Split raw fastq sequence file into individual fastq files using dual index sequences
 
@@ -36,9 +148,9 @@ While this step is listed as optional, I think it's important to complete it; do
 First use the GTseq_HashSeqs.pl script on plate .fastq files. This script collects and counts unique reads within the fastq file and reduces the compute time for the GTseq_SeqTest.pl script.
 
 ```{bash, eval = F}
-cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq_ill
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq
 
-for i in ./../02_run4Interleaved_ill/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_HashSeqs.pl $i > ./hashSeqs/$(basename "${i/.fastq/.hash}"); done
+for i in ./../02_run4Interleaved/tamRun4*; do perl ./../../../project_scripts/GTseq/GTseq_HashSeqs.pl $i > ./hashSeqs/$(basename "${i/.fastq/.hash}"); done
 ```
 
 ## 2.2 GTseq_SeqTest.pl
@@ -52,15 +164,15 @@ Note: The script checks for both the supplied sequence and the reverse complemen
 I already created the GTseq-formatted version of the primer-probe file in tamRun5_gtseqPipeline.Rmd; I copied it into the 04_run4GTseq_ill directory to make things easier. The file can be viewed below:
 
 ```{r, eval = F}
-pp_gtseq_seqTest <- read.table("./04_tamRun4/00_illumina/04_run4GTseq_ill/primerProbe_snpPanel.v3_gtseq.txt", sep = "\t", header = F)
+pp_gtseq_seqTest <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/primerProbe_snpPanel_v3_gtseq.txt", sep = "\t", header = F)
 ```
 
 ### Run GTseq_SeqTest.pl
 
 ```{bash, eval = F}
-cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq_ill
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/04_tamRun4/00_illumina/04_run4GTseq
 
-for i in ./hashSeqs/tamRun4*; do perl ./../../../GTseq_sourceScripts/GTseq_SeqTest.pl primerProbe_snpPanel.v3_gtseq.txt $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
+for i in ./hashSeqs/tamRun4*; do perl ./../../../project_scripts/GTseek_Git/GTseq_SeqTest_v3.pl primerProbe_snpPanel.v3_gtseq.txt $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
 ```
 
 # Step 3: Genotype individuals
@@ -141,7 +253,6 @@ cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru
 
 # test
 perl GTseq_GenoCompile_Counts.pl > Library_Counts.csv
-
 ```
 
 # Step 6 (optional but highly recommended): Generate summary figures for library using the GTseq_SummaryFigures_v3.py script
