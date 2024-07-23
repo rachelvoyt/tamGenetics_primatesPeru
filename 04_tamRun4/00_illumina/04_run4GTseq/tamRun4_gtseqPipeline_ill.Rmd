@@ -67,16 +67,7 @@ Specifically using the GTseek_Git version of GTseq_Genotyper_v3.pl
 
 ### Create locusInfo_genotyper file (csv)
 
-I created this file in tamRun5_gtseqPipline.Rmd as well and copied it into the 04_run4GTseq directory. 
-
-0 Locus Name,
-1 Allele1,
-2 Allele2,
-3 ProbeSeq1,
-4 ProbeSeq2,
-5 FWD_Primer,
-6 A1_correction,
-7 A2_correction
+I created this file in tamRun5_gtseqPipline.Rmd as well and copied it into the 04_run4GTseq directory.
 
 ```{r, eval = F}
 locusInfo_genotyper <- read.table("./04_tamRun4/00_illumina/04_run4GTseq/locusInfo_snpPanel_v3_gtseq.csv", sep = ",", header = F)
@@ -128,10 +119,116 @@ cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru
 perl ./../../../../project_scripts/GTseek_Git/GTseq_GenoCompile_v3.2.pl > ./../gtseq_compiledGenos.csv
 ```
 
+# 5 Subsets & summaries (my scripts)
+
+## 5.1 Data
+
+### gtseq output
+
+```{r}
+tamRun4_md <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
+
+locusInfo_genotyper <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/locusInfo_genotyper.csv", header = F) %>%
+  dplyr::rename("locus" = "V1",
+                "allele1" = "V2",
+                "allele2" = "V3",
+                "probe1" = "V4",
+                "probe2" = "V5",
+                "primer" = "V6") %>%
+  arrange(locus)
+
+gtseq_compiledGenos <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_compiledGenos.csv")
+
+gtseq_readCounts <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readCounts.csv")
+
+gtseq_readSums <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readSums.csv")
+
+# gtscore data for reference
+gtscore_sampleSum <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_sampleSummary.csv")
+```
+
+### sample/loci sets
+
+```{r}
+# loci sets
+loci_fullSet <- locusInfo_genotyper
+
+loci_dualSet <- locusInfo_genotyper %>%
+  filter(!str_detect(locus, "LWED")) %>%
+  filter(!str_detect(locus, "SIMP"))
+
+loci_lwedSet <- locusInfo_genotyper %>%
+  filter(!str_detect(locus, "SIMP"))
+
+loci_simpSet <- locusInfo_genotyper %>%
+  filter(!str_detect(locus, "LWED"))
+
+loci_lwedSpec <- locusInfo_genotyper %>%
+  filter(str_detect(locus, "LWED"))
+
+loci_simpSpec <- locusInfo_genotyper %>%
+  filter(str_detect(locus, "SIMP"))
+
+# sample sets
+lwedSamples <- tamRun4_md %>%
+  filter(str_detect(sampleID_ill_md, "lwed"))
+
+simpSamples <- tamRun4_md %>%
+  filter(str_detect(sampleID_ill_md, "simp"))
+
+posSamples <- tamRun4_md %>%
+  filter(!str_detect(sampleID_ill_md, "Neg"))
+```
+
+### functions
+
+```{r}
 
 
+get_genoRate <- function(df, lociSet) {
+  
+  temp <- df %>%
+    select(c(sampleIDlociSet$locus)) %>%
+    mutate(across(everything(), \(x) na_if(x, "0")))
+}
+```
+
+**^^START HERE^^**
+
+## 5.2 master_sampleSummary
+
+```{r}
+master_sampleSum <- gtseq_readSums %>%
+  select(-c(Raw.Reads, X.On.Target, X.GT, IFI)) %>%
+  dplyr::rename("sampleID" = "Sample",
+                "otReads_fullSet" = "On.Target.Reads") %>%
+  mutate(
+    sampleID = gsub("-", "\\.", sampleID)
+  ) %>%
+  mutate_at(vars(loci_fullSet$locus), as.numeric) %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "sampleID_ill_md")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  relocate(sampleID, sampleID_ill_md) %>%
+  dplyr::rename("sampleID_md" = "sampleID_ill_md") %>%
+  # on-target reads
+  mutate(
+    otReads_dualSet = rowSums(select(., loci_dualSet$locus)),
+    otReads_lwedSet = rowSums(select(., loci_lwedSet$locus)),
+    otReads_simpSet = rowSums(select(., loci_simpSet$locus)),
+    otReads_lwedSpec = rowSums(select(., loci_lwedSpec$locus)),
+    otReads_simpSpec = rowSums(select(., loci_simpSpec$locus)),
+  ) %>%
+  relocate(c(otReads_dualSet, otReads_lwedSet, otReads_simpSet, otReads_lwedSpec, otReads_simpSpec), .after = otReads_fullSet) %>%
+
+  # geno success
+  mutate(
+    genoRate_fullSet
+    genoRate_dualSet
+  )
+
+```
 
 
+# XXXXXXXXXXXXXXXXXXX
 
 # Step 1: Split raw fastq sequence file into individual fastq files using dual index sequences
 
