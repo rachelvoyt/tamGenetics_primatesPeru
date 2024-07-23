@@ -127,3 +127,21 @@ md_illONT_samplesAll <- merge(md_ill_samplesAll, md_ont_samplesAll[, c("sampleID
 write.csv(md_illONT_samplesAll, "./04_tamRun4/tamRun4_metadata_illONT.csv", row.names = F)
 ```
 
+## add sampleID_md
+
+```{r}
+md_illONT_samplesAll <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
+
+tamRun4_md <- md_illONT_samplesAll %>%
+  mutate(
+    sampleID_ill_md = case_when(
+      str_detect(sampleID_unique, "xtnNeg") ~ str_c("s", str_sub(sampleID_ill, -3, -1), "_", "xtnNeg_xtnNeg_xtnNeg"),
+      str_detect(sampleID_unique, "pcr1Neg") ~ str_c("s", str_sub(sampleID_ill, -3, -1), "_", "pcr1Neg_pcr1Neg_pcr1Neg"),
+      .default = str_c("s", str_sub(sampleID_ill, -3, -1), "_", tolower(species), "_", animalID, "_", sampleType)
+    )
+  ) %>%
+  relocate(sampleID_ill_md, .after = sampleID_ill)
+
+write.csv(tamRun4_md, "./04_tamRun4/tamRun4_metadata_illONT.csv", row.names = F)
+```
+
