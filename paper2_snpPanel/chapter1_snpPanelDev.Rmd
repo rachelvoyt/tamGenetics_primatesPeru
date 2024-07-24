@@ -1716,6 +1716,8 @@ tamRun4_ill_gtscore_sampleSum_fullSet <- read.csv("./04_tamRun4/00_illumina/03_r
   merge(., tamRun4_md[, c("sampleID_ill", "species")], by.x = "Sample", by.y = "sampleID_ill") %>%
   relocate(species, .after = Sample)
 
+
+
 # nanopore
 ```
 
@@ -1971,6 +1973,25 @@ tamRun4_ill_gtscore_sampleSum %>%
 
 ## 8.1 Data
 
+### Summaries
+
+```{r}
+# gtseq
+tamRun4_ill_gtseq_sampleSum <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/summaryFiles/tamRun4_master_sampleSummary.csv") %>%
+  filter(!str_detect(sampleID_md, "Neg"))
+
+# gtscore
+tamRun4_ill_gtscore_indivSum_posDual <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_GTscore_individualSummary.txt", sep = "\t") %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
+
+tamRun4_ill_gtscore0x_sampleSum_posDual <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_singleSNP_sampleSummary_0x.csv") %>%
+  dplyr::rename("sampleID" = "sample")
+
+tamRun4_ill_gtscore10x_sampleSum_posDual <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_posDual_singleSNP_sampleSummary_10x.csv") %>%
+  dplyr::rename("sampleID" = "sample")
+```
+
 ### Allele reads
 
 ```{r}
@@ -1996,7 +2017,22 @@ tamRun4_readCounts_ill_gtseq_l <- tamRun4_readCounts_ill_gtseq %>%
   mutate(readCounts_gs = gsub("/", ",", readCounts_gs)) %>%
   merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
   arrange(sampleID_ill, locus)
+
+gtseq_readSums <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readSums.csv") %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
 ```
+
+```{r}
+temp <- gtseq_readSums %>%
+  column_to_rownames("sampleID") %>%
+  select(-c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
+  select(-contains(c("LWED", "SIMP"))) %>%
+  mutate(
+    mean_readSum = rowMeans(.)
+  )
+```
+
 
 ### Genos
 
@@ -2008,51 +2044,99 @@ tamRun4_ill_gtscore0x_genos_l <- tamRun4_genos_ill_gtscore0x %>%
   rownames_to_column("locus") %>%
   pivot_longer(!locus,
                names_to = "sampleID_ill",
-               values_to = "genos_gr") %>%
+               values_to = "genos_gr0x") %>%
   merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
-  arrange(sampleID_ill, locus)
+  dplyr::rename("sampleID" = "sampleID_ill") %>%
+  arrange(sampleID, locus)
+
+tamRun4_ill_gtscore10x_genos_l <- tamRun4_genos_ill_gtscore10x %>%
+  mutate(across(everything(), as.character)) %>%
+  mutate(across(everything(), na_if, "0")) %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(!locus,
+               names_to = "sampleID_ill",
+               values_to = "genos_gr10x") %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
+  dplyr::rename("sampleID" = "sampleID_ill") %>%
+  arrange(sampleID, locus)
 
 # gtseq
 tamRun4_genos_ill_gtseq <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_compiledGenos.csv") %>%
   mutate(Sample = gsub("-", "\\.", Sample)) %>%
-  dplyr::rename("sampleID_ill" = "Sample")
+  dplyr::rename("sampleID" = "Sample")
 
 tamRun4_genos_ill_gtseq_l <- tamRun4_genos_ill_gtseq %>%
   select(-c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
-  pivot_longer(!sampleID_ill,
+  pivot_longer(!sampleID,
                names_to = "locus",
                values_to = "genos_gs") %>%
-  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by = "sampleID_ill") %>%
-  arrange(sampleID_ill, locus)
+  merge(., tamRun4_md[, c("sampleID_ill", "animalID")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  mutate(genos_gs = gsub("00", NA, genos_gs))
 ```
 
-## 8.2 General metrics
+## 8.2 Comparison df
+
+```{r}
+compare_scoreSeq <- tamRun4_ill_gtscore_indivSum_posDual %>%
+  select(sampleID, Primer.Probe.Reads) %>%
+  merge(., tamRun4_ill_gtscore0x_sampleSum_posDual[, c("sampleID", "GenotypeRate")], by = "sampleID") %>%
+  merge(., tamRun4_ill_gtscore10x_sampleSum_posDual[, c("sampleID", "GenotypeRate")], by = "sampleID") %>%
+  dplyr::rename("otReads_gr" = "Primer.Probe.Reads",
+                "genoRate_gr0x" = "GenotypeRate.x",
+                "genoRate_gr10x" = "GenotypeRate.y") %>%
+  merge(., tamRun4_ill_gtseq_sampleSum[, c("sampleID", "otReads_dualSet", "genoRate_dualSet")], by = "sampleID") %>%
+  dplyr::rename("otReads_gs" = "otReads_dualSet",
+                "genoRate_gs" = "genoRate_dualSet") %>%
+  mutate(
+    otReads_pDiff = ((otReads_gs - otReads_gr)/otReads_gr)*100,
+    genoRate_diff_gs.0x = (genoRate_gs - genoRate_gr0x)*100,
+    genoRate_diff_gs.10x = (genoRate_gs - genoRate_gr10x)*100
+  ) %>%
+  relocate(sampleID, otReads_pDiff, genoRate_diff_gs.0x, genoRate_diff_gs.10x, otReads_gr, otReads_gs)
+```
+
+## 8.3 General metrics
 
 ```{r}
 # total reads
 sum(tamRun4_ill_gtscore_sampleSum_fullSet$Total.Reads) # 31663938
 sum(tamRun4_readCounts_ill_gtseq$Raw.Reads) # 31663938
 
-# total on-target reads
-sum(tamRun4_ill_gtscore_sampleSum_fullSet$Primer.Probe.Reads) # 10727250
-sum(tamRun4_readCounts_ill_gtseq$On.Target.Reads) # 10786814
-
-seqScore_otReads <- tamRun4_ill_gtscore_sampleSum_fullSet %>%
-  select(Sample, Primer.Probe.Reads) %>%
-  merge(., tamRun4_readCounts_ill_gtseq[, c("sampleID_ill", "On.Target.Reads")], by.x = "Sample", by.y = "sampleID_ill") %>%
-  dplyr::rename("otReads_gr" = "Primer.Probe.Reads",
-                "otReads_gs" = "On.Target.Reads") %>%
-  mutate(
-    diff_gr.gs = otReads_gr - otReads_gs,
-    diffProp_gr.gs = diff_gr.gs/otReads_gr
-  )
-
-mean(seqScore_otReads$diffProp_gr.gs)*100
-min(seqScore_otReads$diffProp_gr.gs)*100
-max(seqScore_otReads$diffProp_gr.gs)*100
+data.frame(
+  sum_otReads_gtscore = sum(compare_scoreSeq$otReads_gr),
+  sum_otReads_gtseq = sum(compare_scoreSeq$otReads_gs),
+  mean_pDiff_otReads = mean(compare_scoreSeq$otReads_pDiff),
+  min_pDiff_otReads = min(compare_scoreSeq$otReads_pDiff),
+  max_pDiff_otReads = max(compare_scoreSeq$otReads_pDiff),
+  mean_diff_genoRate_gs.0x = mean(compare_scoreSeq$genoRate_diff_gs.0x),
+  mean_diff_genoRate_gs.10x = mean(compare_scoreSeq$genoRate_diff_gs.10x)
+)
 ```
 
-## 8.3 Geno success
+## 8.4 Geno concordance
+
+```{r}
+genoCompare_scoreSeq <- tamRun4_ill_gtscore0x_genos_l %>%
+  merge(., tamRun4_ill_gtscore10x_genos_l, by = c("sampleID", "locus", "animalID")) %>%
+  merge(., tamRun4_genos_ill_gtseq_l, by = c("sampleID", "locus", "animalID")) %>%
+  mutate(
+    genos_gr0x = gsub(",", "", genos_gr0x),
+    genos_gr10x = gsub(",", "", genos_gr10x)
+  ) %>%
+  filter(!str_detect(locus, "LWED")) %>%
+  filter(!str_detect(locus, "SIMP")) %>%
+  mutate(
+    match_gr0x.gs = genos_gr0x == genos_gs,
+    match_gr10x.gs = genos_gr10x == genos_gs
+  )
+
+data.frame(
+  common_gr0x.gs = sum(!is.na(genoCompare_scoreSeq$match_gr0x.gs)),
+  match_gr0x.gs = sum(genoCompare_scoreSeq$match_gr0x.gs == TRUE, na.rm = T),
+  common_gr10x.gs = sum(!is.na(genoCompare_scoreSeq$match_gr10x.gs)),
+  match_gr10x.gs = sum(genoCompare_scoreSeq$match_gr10x.gs == TRUE, na.rm = T)
+)
+```
 
 
 # 9 Geno concordance

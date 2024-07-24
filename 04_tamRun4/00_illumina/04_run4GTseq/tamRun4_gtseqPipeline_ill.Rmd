@@ -137,11 +137,17 @@ locusInfo_genotyper <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/locusInfo
                 "primer" = "V6") %>%
   arrange(locus)
 
-gtseq_compiledGenos <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_compiledGenos.csv")
+gtseq_compiledGenos <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_compiledGenos.csv") %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
 
-gtseq_readCounts <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readCounts.csv")
+gtseq_readCounts <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readCounts.csv") %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
 
-gtseq_readSums <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readSums.csv")
+gtseq_readSums <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_readSums.csv") %>%
+  dplyr::rename("sampleID" = "Sample") %>%
+  mutate(sampleID = gsub("-", "\\.", sampleID))
 
 # gtscore data for reference
 gtscore_sampleSum <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_sampleSummary.csv")
@@ -180,36 +186,14 @@ posSamples <- tamRun4_md %>%
   filter(!str_detect(sampleID_ill_md, "Neg"))
 ```
 
-### functions
-
-```{r}
-
-
-get_genoRate <- function(df, lociSet) {
-  
-  temp <- df %>%
-    select(c(sampleIDlociSet$locus)) %>%
-    mutate(across(everything(), \(x) na_if(x, "0")))
-}
-```
-
-**^^START HERE^^**
-
 ## 5.2 master_sampleSummary
 
+### prep dataframes
+
 ```{r}
-master_sampleSum <- gtseq_readSums %>%
+df_otReads <- gtseq_readSums %>%
   select(-c(Raw.Reads, X.On.Target, X.GT, IFI)) %>%
-  dplyr::rename("sampleID" = "Sample",
-                "otReads_fullSet" = "On.Target.Reads") %>%
-  mutate(
-    sampleID = gsub("-", "\\.", sampleID)
-  ) %>%
-  mutate_at(vars(loci_fullSet$locus), as.numeric) %>%
-  merge(., tamRun4_md[, c("sampleID_ill", "sampleID_ill_md")], by.x = "sampleID", by.y = "sampleID_ill") %>%
-  relocate(sampleID, sampleID_ill_md) %>%
-  dplyr::rename("sampleID_md" = "sampleID_ill_md") %>%
-  # on-target reads
+  dplyr::rename("otReads_fullSet" = "On.Target.Reads") %>%
   mutate(
     otReads_dualSet = rowSums(select(., loci_dualSet$locus)),
     otReads_lwedSet = rowSums(select(., loci_lwedSet$locus)),
@@ -217,15 +201,41 @@ master_sampleSum <- gtseq_readSums %>%
     otReads_lwedSpec = rowSums(select(., loci_lwedSpec$locus)),
     otReads_simpSpec = rowSums(select(., loci_simpSpec$locus)),
   ) %>%
-  relocate(c(otReads_dualSet, otReads_lwedSet, otReads_simpSet, otReads_lwedSpec, otReads_simpSpec), .after = otReads_fullSet) %>%
+  select(c(sampleID, contains("otReads")))
 
-  # geno success
+df_genoRate <- gtseq_compiledGenos %>%
+  select(-c(Raw.Reads, On.Target.Reads, X.On.Target, X.GT, IFI)) %>%
   mutate(
-    genoRate_fullSet
-    genoRate_dualSet
-  )
-
+    genoRate_fullSet = rowSums(select(., loci_fullSet$locus) != "00")/nrow(loci_fullSet),
+    genoRate_dualSet = rowSums(select(., loci_dualSet$locus) != "00")/nrow(loci_dualSet),
+    genoRate_lwedSet = rowSums(select(., loci_lwedSet$locus) != "00")/nrow(loci_lwedSet),
+    genoRate_simpSet = rowSums(select(., loci_simpSet$locus) != "00")/nrow(loci_simpSet),
+    genoRate_lwedSpec = rowSums(select(., loci_lwedSpec$locus) != "00")/nrow(loci_lwedSpec),
+    genoRate_simpSpec = rowSums(select(., loci_simpSpec$locus) != "00")/nrow(loci_simpSpec)
+  ) %>%
+  select(c(sampleID, contains("genoRate")))
 ```
+
+### master_sampleSummary
+
+```{r}
+master_sampleSum <- gtseq_readSums %>%
+  select(sampleID) %>%
+  merge(., tamRun4_md[, c("sampleID_ill", "sampleID_ill_md")], by.x = "sampleID", by.y = "sampleID_ill") %>%
+  dplyr::rename("sampleID_md" = "sampleID_ill_md") %>%
+  merge(., df_otReads, by = "sampleID") %>%
+  merge(., df_genoRate, by = "sampleID")
+
+write.csv(master_sampleSum, "./04_tamRun4/00_illumina/04_run4GTseq/summaryFiles/tamRun4_master_sampleSummary.csv", row.names = F)
+```
+
+## 5.3 master_locusSummary
+
+### prep dataframes
+
+
+### master_locusSummary
+
 
 
 # XXXXXXXXXXXXXXXXXXX
