@@ -1,5 +1,5 @@
 ######################
-### ASSIGN SEX ###
+##### ASSIGN SEX #####
 ######################
 
 assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSex) {
