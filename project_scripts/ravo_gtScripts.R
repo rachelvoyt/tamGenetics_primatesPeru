@@ -2,15 +2,19 @@
 ### ASSIGN SPECIES ###
 ######################
 
-# data formatting should be as follows:
-## genoFile: rownames = loci; colnames = sampleIDs; alleles separated by comma; non-genotyped alleles can be in any format (e.g., NA, "0", "0,0")
-## mdFile: should include a column for "species" and "sampleID"
-## sampleID_colName: specify column name for sampleID
+# input data should be formatted as follows:
+## 1) genoFile:
+### - rownames = loci
+### - colnames = sampleIDs
+### - alleles separated by comma
+### - non-genotyped alleles can be in any format (e.g., NA, "0", "0,0")
+## 2) mdFile: should include a column for "species" and "sampleID"
+## 3) sampleID_colName: specify column name for sampleID
 
 assignSpecies <- function(genoFile, mdFile, sampleID_colName) {
   
   # import speciesKey
-  speciesKeyFile <- read.csv("./tamAnalyses_generalFiles/speciesKey.csv")
+  speciesKeyFile <- read.csv("./project_data/speciesKey.csv")
   
   # ensure sampleID colname is in correct format
   if(missing(sampleID_colName)) {
@@ -55,8 +59,7 @@ assignSpecies <- function(genoFile, mdFile, sampleID_colName) {
         spAssigned != mdSpecies ~ FALSE
       )
     ) %>%
-    relocate(mdSpecies, .after = sampleID) %>%
-    relocate(mdMatch, .after = spAssigned)
+    relocate(c(mdMatch, mdSpecies), .after = sampleID)
   
   return(result)
 }
@@ -65,12 +68,22 @@ assignSpecies <- function(genoFile, mdFile, sampleID_colName) {
 ### ASSIGN SEX ###
 ##################
 
-assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSex) {
+# Input data should be formatted as follows:
+## 1) genoFile:
+### - rownames = loci
+### - colnames = sampleIDs
+### - alleles separated by comma
+### - non-genotyped alleles can be in any format (e.g., NA, "0", "0,0")
+## 2) mdFile: should include a column for "species" and "sampleID"
+## 3) sampleID_colName: specify column name for sampleID ("colName")
+## 4) exclude_nonTargetSp: specify ("yes" or "no") whether to include genos for sex loci that are specific to the non-target species 
+
+assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSp) {
   
   # import sexKey
-  sexKeyFile <- read.csv("./tamAnalyses_generalFiles/sexKey.csv") %>%
+  sexKeyFile <- read.csv("./project_data/sexKey.csv") %>%
     mutate(
-      exclude_ntSex = exclude_nonTargetSex
+      exclude_ntSex = exclude_nonTargetSp
     )
   
   # ensure sampleID colname is in correct format
@@ -107,6 +120,7 @@ assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSex) 
     mutate(
       totalGenos_sex = (rowSums(. == "F", na.rm = TRUE) + rowSums(. == "M", na.rm = TRUE)),
       possibleGenos_sex = case_when(
+        exclude_nonTargetSp == "no" ~ 11,
         rownames(.) %in% mdFile[mdFile$species=="LWED", "sampleID"] ~ 7,
         rownames(.) %in% mdFile[mdFile$species=="SIMP", "sampleID"] ~ 9,
         .default = 11
@@ -131,8 +145,7 @@ assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSex) 
         .default = FALSE
       )
     ) %>%
-    relocate(mdSex, .after = sampleID) %>%
-    relocate(mdMatch, .after = sexAssigned)
+    relocate(c(mdMatch, mdSex), .after = sampleID)
   
   return(result)
 }
@@ -205,19 +218,129 @@ downsample_alleleReads <- function(alleleReads_file, n_reads, n_iterations) {
   return(ds_alleleReads)
 }
 
+####################
+### GENO SUCCESS ###
+####################
+
+# Input data should be formatted as follows:
+## 1) genoFile:
+### - rownames = loci
+### - colnames = sampleIDs
+### - alleles separated by comma
+### - non-genotyped alleles can be in any format (e.g., NA, "0", "0,0")
+## 2) mdFile: should include a column for "species" and "sampleID"
+## 3) sampleID_colName: specify column name for sampleID ("colName")
+## 4) exclude_nonTargetSp: specify ("yes" or "no") whether to include genos for sex loci that are specific to the non-target species 
+
+get_genoSuccess <- function(genoFile,
+                            lociFile,
+                            mdFile,
+                            by = c("bySample", "byLocus"),
+                            sampleID_colName,
+                            exclude_nonTargetSp = c("yes", "no")) {
+  
+  # ensure sampleID colname is in correct format
+  if(missing(sampleID_colName)) {
+    "sampleID"
+  } else {
+    colnames(mdFile)[colnames(mdFile) == sampleID_colName] <- "sampleID"
+  }
+  
+  # species-specific loci sets & sample lists
+  lociList_dual <- lociFile %>%
+    filter(!str_detect(Locus, "LWED")) %>%
+    filter(!str_detect(Locus, "SIMP"))
+  
+  lociList_lwed <- lociFile %>%
+    filter(!str_detect(Locus, "SIMP"))
+  
+  lociList_simp <- lociFile %>%
+    filter(!str_detect(Locus, "LWED"))
+  
+  lociList_lwedSpec <- lociFile %>%
+    filter(str_detect(Locus, "LWED"))
+  
+  lociList_simpSpec <- lociFile %>%
+    filter(str_detect(Locus, "SIMP"))
+  
+  
+  sampleList_lwed <- mdFile %>%
+    filter(species == "LWED") %>%
+    select(sampleID)
+  
+  sampleList_simp <- mdFile %>%
+    filter(species == "SIMP") %>%
+    select(sampleID)
+  
+  sampleList_pos <- mdFile %>%
+    filter(species %in% c("LWED", "SIMP")) %>%
+    select(sampleID)
+  
+  # genoSuccess byLocus
+  if(by == "byLocus") {
+    genoSuccess_byLocus <- genoFile %>%
+      rownames_to_column("locus") %>%
+      mutate(
+        totalGenos = case_when(
+          exclude_nonTargetSp == "yes" & locus %in% lociList_lwedSpec$Locus ~ rowSums(!is.na(select(., sampleList_lwed$sampleID))),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_simpSpec$Locus ~ rowSums(!is.na(select(., sampleList_simp$sampleID))),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_dual$Locus ~ rowSums(!is.na(select(., sampleList_pos$sampleID))),
+          .default = rowSums(!is.na(select(., -locus)))
+        ),
+        possibleGenos = case_when(
+          exclude_nonTargetSp == "yes" & locus %in% lociList_lwedSpec$Locus ~ nrow(sampleList_lwed),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_simpSpec$Locus ~ nrow(sampleList_simp),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_dual$Locus ~ nrow(sampleList_pos),
+          .default = nrow(mdFile)
+        ),
+        genoSuccess = totalGenos / possibleGenos
+      ) %>%
+      select(locus, totalGenos, possibleGenos, genoSuccess)
+    
+    return(genoSuccess_byLocus)
+    
+  }
+  
+  # genoSuccess_bySample
+  if(by == "bySample") {
+    genoSuccess_bySample <- genoFile %>%
+      t() %>%
+      as.data.frame() %>%
+      rownames_to_column("sampleID") %>%
+      mutate(
+        totalGenos = case_when(
+          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_lwed$sampleID ~ rowSums(!is.na(select(., lociList_lwed$Locus))),
+          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_simp$sampleID ~ rowSums(!is.na(select(., lociList_simp$Locus))),
+          .default = rowSums(!is.na(select(., -sampleID)))
+        ),
+        possibleGenos = case_when(
+          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_lwed$sampleID ~ nrow(lociList_lwed),
+          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_simp$sampleID ~ nrow(lociList_simp),
+          .default = nrow(lociFile)
+        ),
+        genoSuccess = totalGenos / possibleGenos
+      ) %>%
+      select(sampleID, totalGenos, possibleGenos, genoSuccess)
+    
+    return(genoSuccess_bySample)
+    
+  }
+  
+}
+
 ################################
 ### GTSEQ PIPELINE FUNCTIONS ###
 ################################
 
-# get_gtseqGeno_v2 - based on GTseq_Genotyper_v2.pl
+# 1) get_gtseqGenos_v2 - based on GTseq_Genotyper_v2.pl
 ## Inputs:
 ### - "readCounts" column name; readCounts should be formatted as "x,x"
 ### - "locus" column name; loci names should match those in the lociInfo file
 ### - "lociInfo" dataframe; with columns Locus, Allele1, Allele2
 
-get_gtseqGeno_v2 <- function(readCounts, locus, lociInfo) {
+get_gtseqGenos_v2 <- function(readCounts, locus, lociInfo) {
   
-  # Process a single read count and compute genotype
+  # Get allele ratio and genotype for one entry
   getRatio_and_assignGeno <- function(rc, locus) {
     if (is.na(rc)) {
       return(NA_character_)
