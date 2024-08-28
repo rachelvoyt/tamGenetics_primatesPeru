@@ -332,13 +332,88 @@ get_genoSuccess <- function(genoFile,
 ### GTSEQ PIPELINE FUNCTIONS ###
 ################################
 
+
+get_gtseqGenos_v2 <- function(readCounts_df, lociInfo, mdFile, sampleID_colName = NULL, exclude_nonTargetSp = c("yes", "no")) {
+  
+  names(lociInfo) <- tolower(names(lociInfo))
+  
+  # ensure sampleID colname is in correct format
+  if(missing(sampleID_colName)) {
+    "sampleID"
+  } else {
+    colnames(mdFile)[colnames(mdFile) == sampleID_colName] <- "sampleID"
+  }
+  
+  # species sample lists
+  sampleList_lwed <- mdFile %>%
+    filter(species == "LWED") %>%
+    select(sampleID)
+  
+  sampleList_simp <- mdFile %>%
+    filter(species == "SIMP") %>%
+    select(sampleID)
+  
+  # assign genos
+  geno_df <- readCounts_df %>%
+    rownames_to_column("locus") %>%
+    pivot_longer(!locus,
+                 names_to = "sampleID",
+                 values_to = "readCounts") %>%
+    # calculate allele ratios
+    separate(readCounts, into = c("a1", "a2")) %>%
+    mutate(
+      a1 = as.numeric(a1),
+      a2 = as.numeric(a2),
+      
+      a1 = case_when(
+        a1 == 0 ~ 0.1,
+        .default = a1
+      ),
+      a2 = case_when(
+        a2 == 0 ~ 0.1,
+        .default = a2
+      ),
+      
+      ratio = case_when(
+        a1 + a2 < 10 ~ NA,
+        .default = round(a1 / a2, 3)
+      )
+    ) %>%
+    # assign genos
+    merge(., lociInfo[, c("locus", "allele1", "allele2")], by = "locus") %>%
+    mutate(
+      genos = case_when(
+        ratio >= 10 ~ str_c(allele1, allele1, sep = ","),
+        ratio <= 0.1 ~ str_c(allele2, allele2, sep = ","),
+        ratio <= 0.2 ~ NA_character_,
+        ratio <= 5 ~ str_c(allele1, allele2, sep = ","),
+        TRUE ~ NA_character_  # Default case
+      )
+    ) %>%
+    select(sampleID, locus, genos) %>%
+    # exclude non-target species if indicated
+    mutate(
+      genos = case_when(
+        exclude_nonTargetSp == "yes" & sampleID %in% sampleList_lwed$sampleID & str_detect(locus, "(?i)simp") ~ NA,
+        exclude_nonTargetSp == "yes" & sampleID %in% sampleList_simp$sampleID & str_detect(locus, "(?i)lwed") ~ NA,
+        .default = genos
+      )
+    ) %>%
+    pivot_wider(names_from = sampleID,
+                values_from = genos) %>%
+    column_to_rownames("locus")
+  
+  return(geno_df)
+  
+}
+
 # 1) get_gtseqGenos_v2 - based on GTseq_Genotyper_v2.pl
 ## Inputs:
 ### - "readCounts" column name; readCounts should be formatted as "x,x"
 ### - "locus" column name; loci names should match those in the lociInfo file
 ### - "lociInfo" dataframe; with columns Locus, Allele1, Allele2
 
-get_gtseqGenos_v2 <- function(readCounts, locus, lociInfo) {
+get_gtseqGenos_v2_OLD <- function(readCounts, locus, lociInfo) {
   
   # Get allele ratio and genotype for one entry
   getRatio_and_assignGeno <- function(rc, locus) {
@@ -387,6 +462,47 @@ get_gtseqGenos_v2 <- function(readCounts, locus, lociInfo) {
   # Apply the processing and genotype determination to each element in readCounts
   mapply(getRatio_and_assignGeno, readCounts, locus)
 }
+
+####################
+### GENO COMPARE ###
+####################
+
+get_genoCompare <- function(genoFile1, genoFile2) {
+  
+  na_values <- c("0", "0,0", "00")
+  
+  genoSet1 <- genoFile1 %>%
+    mutate(across(everything(), \(x) as.character(x))) %>%
+    rownames_to_column("locus") %>%
+    pivot_longer(!locus,
+                 names_to = "sampleID",
+                 values_to = "genos1") %>%
+    mutate(genos1 = case_when(
+      genos1 %in% na_values ~ NA,
+      .default = genos1
+    ))
+  
+  genoSet2 <- genoFile2 %>%
+    mutate(across(everything(), \(x) as.character(x))) %>%
+    rownames_to_column("locus") %>%
+    pivot_longer(!locus,
+                 names_to = "sampleID",
+                 values_to = "genos2") %>%
+    mutate(genos2 = case_when(
+      genos2 %in% na_values ~ NA,
+      .default = genos2
+    ))
+  
+  genoCompare <- genoSet1 %>%
+    merge(., genoSet2, by = c("sampleID", "locus")) %>%
+    mutate(
+      match = genos1 == genos2
+    )
+  
+  return(genoCompare)
+  
+}
+
 
 ########################
 ### LITTLE FUNCTIONS ###

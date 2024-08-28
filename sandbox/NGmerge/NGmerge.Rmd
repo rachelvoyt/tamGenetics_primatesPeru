@@ -13,6 +13,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Trying out NGmerge for interleaving instead
 
+I used BBMap's "reformat.sh" command to interleave reads. However, another option is to *merge* paired-end reads, which "allows for error correction and accurate determination of read coverage" (Gaspar, 2018). 
+
+Citation:
+[Gaspar, John M. 2018. NGmerge: Merging paired-end reads via novel empirically-derived models of sequencing errors. BMC Bioinformatics 19(536).](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-018-2579-2)
+
 # 2 Packages
 
 ## 2.1 NGmerge

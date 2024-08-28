@@ -1,0 +1,101 @@
+---
+title: "gtseqPipeline_tamRun3"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+There's a version of this in the gtscore_vs_gtseq directory, but I'm redoing this one here so it's handy in the main tamRun3 directory. I'll be running analyses for both tamRun3a and tamRun3b.
+
+To align with previous analyses, I'll be using the GTseq_Genotyper_v2.pl script (Nate sent me updated versions of a bunch of scripts (now in /project_scripts/GTseek_Git), but they use different cutoffs for the allele ratios)
+
+# 2 Packages
+
+```{r}
+library(phylotools)
+library(seqinr)
+library(tidyverse)
+```
+
+# 3 Pipeline
+
+## 3.1 GTseq_HashSeqs.pl
+
+First use the GTseq_HashSeqs.pl script on plate .fastq files. This script collects and counts unique reads within the fastq file and reduces the compute time for the GTseq_SeqTest.pl script.
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/05_run3GTseq
+
+for i in ./../02_run3Interleaved/tamRun3*; do perl ./../../project_scripts/GTseq/GTseq_HashSeqs.pl $i > ./hashSeqs/$(basename "${i/.fastq/.hash}"); done
+```
+
+## 3.2 GTseq_SeqTest
+
+### Create locusInfo_seqTest file
+
+I already created the GTseq-formatted version of the primer-probe file as part of /gtscore_vs_gtseq/gtseqPipeline_tamRun3.Rmd (primerProbe_gtseq.txt); I copied it into the current directory to have it handy and renamed it to "locusInfo_seqTest".
+
+```{r, eval = F}
+locusInfo_seqTest <- read.table("./03_tamRun3/05_run3GTseq/locusInfo_seqTest.txt", sep = "\t", header = F)
+
+temp <- locusInfo_seqTest %>%
+  filter(str_detect(V2, "\\["))
+```
+
+### Run script **START HERE**
+
+Output has four columns:
+  
+  1. Locus
+  2. Forward-primer count
+  3. Probe count
+  4. Both count
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/05_run3GTseq
+
+for i in ./hashSeqs/tamRun3*; do perl ./../../project_scripts/GTseq/GTseq_SeqTest.pl locusInfo_seqTest.txt $i > ./seqTest/$(basename "${i/.hash/.seqtest.csv}"); done
+```
+
+## 3.3 GTseq_Genotyper_v2.pl
+
+### Create locusInfo_genotyper file (csv)
+
+I also created this file as part of /gtscore_vs_gtseq/gtseqPipeline_tamRun3.Rmd (locusInfo_gtseq.csv); I copied it into the current directory to have it handy and renamed it to "locusInfo_genotyper.csv".
+
+```{r, eval = F}
+locusInfo_genotyper <- read.table("./03_tamRun3/05_run3GTseq/locusInfo_genotyper.csv", sep = ",", header = F)
+```
+
+### Run script
+
+genotyper_v2 is unhappy with tamRun3.434 for whatever reason - I don't feel like figuring out the issue, so just going to use the GTseq version of GTseq_Genotyper_v3.pl but modified to use v2 allele ratio cutoffs
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/05_run3GTseq
+
+for i in ./../02_run3Interleaved/tamRun3*; do perl ./../../project_scripts/GTseq/GTseq_Genotyper_v3_rvModified.pl locusInfo_genotyper.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
+```
+
+## 3.4 GTseq_genoCompile
+
+```{bash, eval = F}
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/05_run3GTseq/genos
+
+# numeric genos
+perl ./../../../project_scripts/GTseq/GTseq_GenoCompile_v3.pl N > ./../tamRun3ab_numericGenos.csv
+
+# readSums
+perl ./../../../project_scripts/GTseq/GTseq_GenoCompile_v3.pl C > ./../tamRun3ab_readSums.csv
+
+# genos
+perl ./../../../project_scripts/GTseq/GTseq_GenoCompile_v3.pl > ./../tamRun3ab_compiledGenos.csv
+```
+
+

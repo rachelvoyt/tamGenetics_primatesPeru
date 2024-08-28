@@ -115,6 +115,7 @@ cd 00_Run4Seqs
 
 # Move all .gz files out of their individual folders and into the current directory & remove empty folders
 mv */* ./
+find -empty -delete
 
 # Extract all files
 gunzip -r .
