@@ -1382,6 +1382,7 @@ str_c(run3_md %>%
   distinct() %>%
   nrow(), " unique LWED")
 ```
+
 ```{r}
 str_c(run3_md %>%
   filter(species == "SIMP") %>%
@@ -1390,6 +1391,7 @@ str_c(run3_md %>%
   distinct() %>%
   nrow(), " unique SIMP")
 ```
+
 ### Loci metadata
 
 **Data**
@@ -1861,7 +1863,7 @@ run3_sampleList_pos <- run3_md %>%
   filter(!str_detect(sampleType, "Neg"))
 
 ## gtseq = 7133024
-run4_readCounts_gtseq %>%
+run3a_readCounts_gtseq %>%
   rownames_to_column("locus") %>%
   pivot_longer(!locus,
                names_to = "sampleID",
@@ -1896,15 +1898,15 @@ Comparing a vs. b runs:
 
 gtseq:
   genosCommon genosMatch genosMismatch propMismatch
-1       37152      36874           278  0.007482773
+1       37152      36874           278  0.007482773 -> 0.75%
 
 gtscore0x:
   genosCommon genosMatch genosMismatch propMismatch
-1       48603      46882          1721   0.03540934
+1       48603      46882          1721   0.03540934 -> 3.5%
 
 gtscore10x:
   genosCommon genosMatch genosMismatch propMismatch
-1       38353      37735           618   0.01611347
+1       38353      37735           618   0.01611347 > 1.6%
 
 ```{r}
 # gtseq a vs. b - propMismatch = 0.007482773
