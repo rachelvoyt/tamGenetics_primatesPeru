@@ -788,6 +788,8 @@ run1_simpLoci <- run1_primerProbeFile %>%
 
 ### Genos
 
+Genos assigned using GTseq_Genotyper_v2.pl
+
 ```{r}
 # gtseq
 run1_genos_gtseq <- 
@@ -871,9 +873,27 @@ run1_sampleSum_gtscore_fullSet <- read.csv("./00_tamRun1/04_run1GTscore_bp3error
 ### totalReads
 
 ```{r}
+# gtseq
 sum(run1_sampleSum_gtseq$Raw.Reads) # 1885084
+
+# gtscore
 sum(run1_sampleSum_gtscore_fullSet$Total.Reads) # 1885084
 ```
+
+### otReads
+
+```{r}
+run1_otReads_gtseq <- run1_sampleSum_gtseq %>%
+  filter(!str_detect(sampleID_md, "Neg")) %>%
+  summarise(otReads = sum(On.Target.Reads))
+
+run1_totalReads_gtseq <- run1_sampleSum_gtseq %>%
+  filter(!str_detect(sampleID_md, "Neg")) %>%
+  summarise(otReads = sum(Raw.Reads))
+
+(run1_otReads_gtseq / run1_totalReads_gtseq)*100
+```
+
 
 ### bySample
 

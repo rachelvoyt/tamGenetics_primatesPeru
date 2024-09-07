@@ -14,36 +14,23 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # 1 Overview
 
+This Rmd file contains the analyses used in the demography chapter of my dissertation. Data used is from tamRun5, hair samples only.
+
 # 2 Packages
 
 ```{r}
 library(tidyverse)
+source("project_scripts/ravo_gtScripts.R") # for my custom functions
 ```
 
 # 3 Data
 
-## md_tamRun5
+## 3.1 Capture data
 
-Latest version of md_tamRun5 (from metadataReconciliation.Rmd file)
+Capture data includes all records of individual captures from 2009-2019.
 
-```{r}
-# latest updated version of md_tamRun5 from metadataReconciliation.Rmd
-md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
-
-md_tamRun5_hairSamples <- md_tamRun5_v5 %>%
-  filter(sampleType == "hair")
-
-md_tamRun5_hairSamples %>%
-  get_dupes(animalID)
-
-md_tamRun5_bloodSamples <- md_tamRun5_v5 %>%
-  filter(sampleType == "blood")
-```
-
-## capData_byIndiv
-
-Latest version of capData_byIndiv (from
-tamGenetics_paper3_dataOrganization) 1) filter to first capture for each
+Use the latest version of capData_byIndiv (from
+tamGenetics_paper3_dataOrganization), then 1) filter to first capture for each
 animalID 2) filter again to animalIDs in tamRun5
 
 **note** exclude those in capData w/"UNK" animalID; did a lot of digging
@@ -55,24 +42,28 @@ juv as listed in capData)
 
 ```{r}
 # latest updated version of capData_byIndiv from current rmd
-capData_byIndiv_v5 <- read.csv("./paper3_demographics/dataOrganization/captureData_byIndividual_v5.csv") %>%
+capData_byIndiv <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v5.csv") %>%
   filter(as.character(animalID) != "UNK") %>%
   mutate(
     ageClass = case_when(
       rowID == 1 ~ "adult",
       .default = ageClass
     )
-  )
-
-# species subsets
-capData_byIndiv_lwed <- capData_byIndiv_v5 %>%
-  filter(species == "LWED")
-capData_byIndiv_simp <- capData_byIndiv_v5 %>%
-  filter(species == "SIMP")
+  ) %>%
+  # filter to 2009-2019 records only
+  filter(rowID < 617)
 
 # filter to first capture for each animalID
-capData_byIndiv_firstEntry <- capData_byIndiv_v5[match(unique(capData_byIndiv_v5$animalID), capData_byIndiv_v5$animalID),] %>%
+capData_byIndiv_firstEntry <- capData_byIndiv[match(unique(capData_byIndiv$animalID), capData_byIndiv$animalID),] %>%
   select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+
+# species subsets
+capData_byIndiv_lwed <- capData_byIndiv_firstEntry %>%
+  filter(species == "LWED")
+capData_byIndiv_simp <- capData_byIndiv_firstEntry %>%
+  filter(species == "SIMP")
+
+
 
 # filter animalIDs in tamRun5
 ## full set
@@ -87,6 +78,27 @@ capData_byIndiv_firstEntry_tamRun5Hair <- capData_byIndiv_firstEntry %>%
 capData_byIndiv_firstEntry_tamRun5Blood <- capData_byIndiv_firstEntry %>%
   filter(animalID %in% md_tamRun5_bloodSamples$animalID)
 ```
+
+## Genetic sample metadata
+
+Latest version of md_tamRun5 (from metadataReconciliation.Rmd file); hair samples only
+
+```{r}
+# latest updated version of md_tamRun5 from metadataReconciliation.Rmd
+run5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+run5_md_hair <- run5_md %>%
+  filter(sampleType == "hair")
+
+run5_hairDups <- run5_md_hair %>%
+  get_dupes(animalID)
+
+table(run5_md_hair$species)
+```
+
+
+
+
 
 # 4 Population overview
 
