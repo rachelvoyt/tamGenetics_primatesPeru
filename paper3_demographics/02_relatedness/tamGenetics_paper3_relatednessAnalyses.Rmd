@@ -207,7 +207,7 @@ seems like the best bet.
 
 One error that I caught: - csv.pl has a typo in line 164; the original
 has "death_col =", but should be "death ="; the github version looks
-like it was corrected
+like it was corrected (switched it out for this version)
 
 Step 1: Download the latest stable source code from SourceForge.net
 ([link](http://sourceforge.net/projects/franzpedigree/files/))
@@ -266,8 +266,8 @@ sudo make install # need sudo or won't install correctly
 
 # x thinking spot
 
-How to differentiate b/t parent-offspring vs. sibling relationship when both individuals in a dyad were captured as adults/subadults? 
-
+How to differentiate b/t parent-offspring vs. sibling relationship when
+both individuals in a dyad were captured as adults/subadults?
 
 let's also look at geno success across hair samples
 
@@ -289,23 +289,25 @@ genoSuccess_byLocus_lwedHair_indidOnly <- genoSuccess_byLocus_lwedHair_indidOnly
 
 # 4 Data
 
-## 4.1 md_tamRun5 & sampleLists
+## 4.1 md_run5 & sampleLists
+
+In tamRun5, we have the following for hair samples:
+
+-   LWED
+    -   n_total = 137 >> 134 minus dups (n_f = 64, n_m = 70)
+-   SIMP
+    -   n_total = 100 >> 99 minus dups (n_f = 47, n_m = 52)
 
 Be sure to use the latest updated metadata file from
 metadataReconciliation.Rmd - this md file also includes alternate
 animalIDs & associated metadata for all samples with capData metadata
 issues.
 
-In tamRun5, we have the following for hair samples:
-
--   LWED
-    -   n_total = 137 (w/one duplicate indiv) (n_f = 64, n_m = 71)
--   SIMP
-    -   n_total = 99 (n_f = 47, n_m = 52)
+**Datasets**
 
 ```{r}
-# tamRun5
-md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+# full set
+md_run5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
   # add unique sampleID w/animalID + sampleType
   mutate(
     sampleID_unique = str_c(animalID, sampleType, sep = "_"),
@@ -315,68 +317,63 @@ md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>
     ) %>%
   relocate(c(sampleID_unique, sampleID_franz))
 
-md_tamRun5_bloodSamples <- md_tamRun5_v5 %>%
-  filter(sampleType == "blood")
-
-md_tamRun5_hairSamples <- md_tamRun5_v5 %>%
+# hair
+md_run5_hair <- md_run5 %>%
   filter(sampleType == "hair")
 
-# tamRun4
-md_tamRun4 <- read.csv("./04_tamRun4/illONT_tamRun4_metadata.csv")
-
-# quick check to make sure md_tamRun4 has the updated metadata -- looks good (one extra row for env_301 for animalID 91/34, but not an issue for tamRun4)
-temp <- md_tamRun4 %>%
-  filter(sampleType %in% c("blood", "hair")) %>%
-  select(sampleID_ill, sampleID_unique, sampleName) %>%
-  merge(., md_tamRun5_v5[, c("sampleID_unique", "sampleName")], by = "sampleName", all.x = T) %>%
-  dplyr::rename("sampleID_unique4" = "sampleID_unique.x",
-                "sampleID_unique5" = "sampleID_unique.y") %>%
-  mutate(
-    match = case_when(
-      sampleID_unique4 == sampleID_unique5 ~ "yes",
-      .default = "no"
-    )
-  )
-```
-
-Below I'm creating LWED and SIMP sample lists that include their
-sampleID as well as the sampleID that I'm using for FRANz, which
-includes both their animalID and sequencing ID
-
-```{r}
-# LWED samples
-md_tamRun5_hairSamples_lwed <- md_tamRun5_hairSamples %>%
+md_run5_lwedHair <- md_run5_hair %>%
   filter(species == "LWED")
 
-sampleList_lwedHair <- md_tamRun5_hairSamples_lwed %>%
-  select(c("sampleID_unique", "sampleID_franz", "sampleID"))
-
-sampleList_lwedBlood <- md_tamRun5_bloodSamples %>%
-  filter(species == "LWED") %>%
-  select(c("sampleID_unique", "sampleID_franz", "sampleID"))
-
-# SIMP samples
-md_tamRun5_hairSamples_simp <- md_tamRun5_hairSamples %>%
+md_run5_simpHair <- md_run5_hair %>%
   filter(species == "SIMP")
 
-sampleList_simpHair <- md_tamRun5_hairSamples_simp %>%
+# simplified sample lists
+sampleList_lwedHair <- md_run5_lwedHair %>%
   select(c("sampleID_unique", "sampleID_franz", "sampleID"))
 
-sampleList_simpBlood <- md_tamRun5_bloodSamples %>%
-  filter(species == "SIMP") %>%
+sampleList_simpHair <- md_run5_simpHair %>%
   select(c("sampleID_unique", "sampleID_franz", "sampleID"))
+```
+
+**Metrics**
+
+```{r}
+## n = 4 dups (animalID 191_simp, 200_lwed, 26_lwed, 27_lwed)
+md_run5_hair %>%
+  get_dupes(animalID)
+
+# minus dups, have lwedF = 64, lwedM = 70, simpF = 47, simpM = 52
+md_run5_hair %>%
+  select(animalID, species, sex) %>%
+  distinct() %>%
+  group_by(species, sex) %>%
+  summarise(
+    count = n()
+  )
+
+## n = 46 previously extracted (lwed = 36, simp = 10)
+temp <- md_run5_hair %>%
+  filter(str_detect(xtnLoc, "tx"))
+
+table(temp$species)
 ```
 
 ## 4.2 capData
 
 Import latest cleaned version of capData_byIndiv (v5)
 
-From 2009 to 2019, we have the following: - LWED - n = 145 total
-captured - n_f = 68 - n_m = 77 - SIMP - n = 102 total captured - n_f =
-48 - n_m = 54
+From 2009 to 2019, we have the following:
+
+-   LWED
+    -   n = 145 total captured (n_f = 68, n_m = 77)
+-   SIMP
+    -   n = 102 total captured (n_f = 48, n_m = 54)
+
+**Datasets**
 
 ```{r}
-capData_byIndiv_v5 <- read.csv("./paper3_demographics/dataOrganization/captureData_byIndividual_v5.csv") %>%
+# full set
+capData_byIndiv <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v5.csv") %>%
   mutate(
     captureYear = str_sub(captureDate, 1, 4),
     captureYear = as.numeric(captureYear)
@@ -389,49 +386,64 @@ capData_byIndiv_v5 <- read.csv("./paper3_demographics/dataOrganization/captureDa
     )
   )
 
-# filter to first capture for each animalID
-capData_byIndiv_firstEntry <- capData_byIndiv_v5[match(unique(capData_byIndiv_v5$animalID), capData_byIndiv_v5$animalID),] %>%
-  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+# up to 2019 captures only
+## fullSet
+capData_2009to2019_byIndiv <- capData_byIndiv %>%
+  filter(as.numeric(rowID) <= 613) %>%
+  # ditch indiv w/UNK animalID (should be "2", but pending response from Gideon for what to do w/this record) %>%
+  filter(rowID != 611)
 
-# filter animalIDs in tamRun5
-## full set
-capData_byIndiv_firstEntry_tamRun5 <- capData_byIndiv_firstEntry %>%
-  filter(animalID %in% md_tamRun5_v5$animalID)
-
-# 2009 to 2019 only
-capData_2009to2019_lwed <- capData_byIndiv_v5 %>%
-  # up to 2019 only
-  filter(rowID <= 613) %>%
+## species subsets
+capData_2009to2019_lwed <- capData_2009to2019_byIndiv %>%
   filter(species == "LWED")
 
-capData_2009to2019_simp <- capData_byIndiv_v5 %>%
-  # up to 2019 only
-  filter(rowID <= 613) %>%
+capData_2009to2019_simp <- capData_2009to2019_byIndiv %>%
   filter(species == "SIMP")
+
+# filter to first capture for each animalID
+capData_2009to2019_firstEntry <- capData_2009to2019_byIndiv[match(unique(capData_2009to2019_byIndiv$animalID), capData_2009to2019_byIndiv$animalID),] %>%
+  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+
+# filter animalIDs in tamRun5 hair
+capData_2009to2019_firstEntry_run5 <- capData_2009to2019_firstEntry %>%
+  filter(animalID %in% md_run5_hair$animalID)
+```
+
+**Metrics**
+
+  species sex count
+1    LWED   F    68
+2    LWED   M    77
+3    SIMP   F    48
+4    SIMP   M    54
+
+```{r}
+# lwed 145; simp 102
+table(capData_2009to2019_firstEntry$species)
+
+# lwedF = 68, lwedM = 77, simpF = 48, simpM = 54
+capData_2009to2019_firstEntry %>%
+  group_by(species, sex) %>%
+  summarise(
+    count = n()
+  ) %>%
+  as.data.frame()
 ```
 
 ## 4.3 Birth/death data
 
-Load in latest birthDeath file from tamGenetics_paper3_dataOrganization
+Load in latest birthDeath file from
+/paper3_demographics/tamGenetics_paper3_dataOrganization
 
 ```{r}
-birthYear_capData_tamRun5_v3 %>%
-  filter(animalID %in% md_tamRun5_hairSamples_simp$animalID) %>%
-  select(animalID, birthYear_est) %>%
-  na.omit() %>%
-  distinct() %>%
-  nrow()
-```
+birthYear_capData_run5 <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/birthAssignments_capData_tamRun5_v3.csv")
 
-```{r}
-birthYear_capData_tamRun5_v3 <- read.csv("./paper3_demographics/dataOrganization/birthAssignments_capData_tamRun5_v3.csv")
-
-birthYear_knownOnly <- birthYear_capData_tamRun5_v3 %>%
+birthYear_run5_knownOnly <- birthYear_capData_run5 %>%
   select(animalID, birthYear_est) %>%
   na.omit() %>%
   distinct()
 
-deathYear_capData_tamRun5_v1 <- read.csv("./paper3_demographics/dataOrganization/deathAssignments_capData_tamRun5_v1.csv")
+deathYear_capData_run5 <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/deathAssignments_capData_tamRun5_v1.csv")
 ```
 
 ## 4.4 Loci lists
@@ -486,7 +498,7 @@ genos0x_run5.3_simpHair_indidOnly <- genos0x_run5.3_hair %>%
 
 ```{r}
 # geno file w/o coverage cutoff
-genos0x_tamRun5 <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+genos0x_run5 <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
   rownames_to_column("locus") %>%
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   column_to_rownames("locus") %>%
@@ -495,11 +507,11 @@ genos0x_tamRun5 <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResult
   mutate(across(everything(), ~ gsub("0", "0,0", .)))
 
 ## Species subsets + hair + INDID/LWED-SIMP only
-genos0x_tamRun5_lwedHair_indidOnly <- genos0x_tamRun5 %>%
+genos0x_run5_lwedHair_indidOnly <- genos0x_run5 %>%
   filter(rownames(.) %in% sampleList_lwedHair$sampleID) %>%
   select(all_of(lociList_lwed))
 
-genos0x_tamRun5_simpHair_indidOnly <- genos0x_tamRun5 %>%
+genos0x_run5_simpHair_indidOnly <- genos0x_run5 %>%
   filter(rownames(.) %in% sampleList_simpHair$sampleID) %>%
   select(all_of(lociList_simp))
 ```
@@ -553,21 +565,21 @@ days/4.2 months) F10/117 allonursed infants
 ```{r}
 # LWED
 ## n = 63 LWED tamRun5 hair samples w/birthYear_est
-md_tamRun5_hairSamples %>%
+md_run5_hair %>%
   filter(species == "LWED") %>%
   filter(animalID %in% birthYear_knownOnly$animalID) %>%
   nrow()
 
 ## n = 7 LWED tamRun5 blood samples w/birthYear_est & no hair sample
-md_tamRun5_bloodSamples %>%
+md_run5_blood %>%
   filter(species == "LWED") %>%
-  filter(!animalID %in% md_tamRun5_hairSamples$animalID) %>%
+  filter(!animalID %in% md_run5_hair$animalID) %>%
   filter(animalID %in% birthYear_knownOnly$animalID) %>%
   nrow()
 
 # SIMP
 ## n = 53 SIMP tamRun5 hair samples w/birthYear_est
-md_tamRun5_hairSamples %>%
+md_run5_hair %>%
   filter(species == "SIMP") %>%
   filter(animalID %in% birthYear_knownOnly$animalID) %>%
   nrow()
@@ -604,8 +616,10 @@ have nipple measurements that year?
 
 My df of females vs. parity based on nipple length:
 
+***may need to change this; can't really determine parityYear unless there are records from the previous year saying that indiv was primiparous***
+
 ```{r}
-capData_parity <- capData_byIndiv_v5 %>%
+capData_parity <- capData_byIndiv %>%
   filter(sex == "F") %>%
   select(animalID, animalName1, animalName2, species, captureDate, ageClass, nippleL_length, nippleR_length) %>%
   arrange(as.numeric(animalID), captureDate) %>%
@@ -649,8 +663,12 @@ capData_parity <- capData_byIndiv_v5 %>%
 
 capData_parity_firstEntry <- capData_parity[match(unique(capData_parity$animalID), capData_parity$animalID),] %>%
   mutate(
-    year_parityStart = str_sub(captureDate, 1, 4),
-    year_parityStart = as.numeric(year_parityStart) - 1 # since would've conceived year prior
+    parityYear = str_sub(captureDate, 1, 4)#,
+    #parityYear = as.numeric(parityYear) - 1 # since would've conceived year prior
+  ) %>%
+  merge(., birthYear_run5_knownOnly, by = "animalID", all.x = T) %>%
+  mutate(
+    parityAge = as.numeric(parityYear) - as.numeric(birthYear_est)
   )
 ```
 
@@ -658,13 +676,12 @@ capData_parity_firstEntry <- capData_parity[match(unique(capData_parity$animalID
     birth before; animalID 136 born in 2014
 -   RPS/34 noted as might still be nursing in 2017-06-11
 
-
 # 5 FRANz settings
 
 ## 5.1 femrepro, malerepro
 
 Using 1:15 since studies have found that some saddlebacks at least have
-concieved prior to 2 years old
+conceived prior to 2 years old
 
 ## 5.2 N & Nmax
 
@@ -698,14 +715,14 @@ can again specify Nfmax and Nmmax.
 We can estimate *N* for FRANz by estimating abundance via the POPAN
 formulation (Schwarz & Arnason 1996) of the Jolly-Seber mark-recapture
 model. Note that Jolly-Seber models make the following assumptions (from
-Schwarz & Arnason xxxx):
+Schwarz & Arnason 2021 in Program MARK book):
 
 1)  indivs retain their tags throughout experiment
 2)  tags are read properly
 3)  sampling is instantaneous
 4)  survival probabilities are same for all indivs (marked and unmarked)
     b/t each pair of sampling occasions (homogeneous survival)
-5)  catchability is same for all indivs (marked and unmakred) at each
+5)  catchability is same for all indivs (marked and unmarked) at each
     sampling event (homogeneous catchability) ((most crucial assumption
     for JS models))
 6)  study area is constant - if study area changes over time, then pop
@@ -728,6 +745,10 @@ the data.
 capHist_2009to2019 <- capData_byIndiv_v5 %>%
   # ensure order is correct
   arrange(rowID) %>%
+  
+  # filter to 2009-2019 only
+  filter(as.numeric(rowID) < 614) %>%
+  
   select(animalID, captureDate) %>%
   filter(animalID != "UNK") %>%
   mutate(
@@ -743,8 +764,10 @@ capHist_2009to2019 <- capData_byIndiv_v5 %>%
   # remove duplicates, which may occur when individuals are caught multiple times in an event
   # For example, your event may be a year and an individual may be caught multiple times in a year.
   distinct() %>%
+  
   # spread out data. The fill = 0 adds rows for combinations of id and event where individuals were not observerd
   spread(captureYear, detect, fill = 0) %>% 
+  
   # For every individual....
   group_by(animalID) %>%
   # Paste together 0's and 1's
@@ -761,14 +784,28 @@ capHist_2009to2019 <- capData_byIndiv_v5 %>%
   )
 
 
-# species subsets
+# species/sex subsets
 ## lwed
 capHist_2009to2019_lwed <- capHist_2009to2019 %>%
   filter(animalID %in% capData_2009to2019_lwed$animalID)
 
+capHist_2009to2019_lwedF <- capHist_2009to2019_lwed %>%
+  filter(sex == "F") %>%
+  select(-sex)
+capHist_2009to2019_lwedM <- capHist_2009to2019_lwed %>%
+  filter(sex == "M") %>%
+  select(-sex)
+
 ## simp
 capHist_2009to2019_simp <- capHist_2009to2019 %>%
   filter(animalID %in% capData_2009to2019_simp$animalID)
+
+capHist_2009to2019_simpF <- capHist_2009to2019_simp %>%
+  filter(sex == "F") %>%
+  select(-sex)
+capHist_2009to2019_simpM <- capHist_2009to2019_simp %>%
+  filter(sex == "M") %>%
+  select(-sex)
 ```
 
 #### Run model
@@ -782,6 +819,8 @@ overlapping function names)
 detach("package:RMark", unload=TRUE)
 library(marked)
 ```
+
+##### Full population
 
 **LWED**
 
@@ -860,10 +899,13 @@ lwed2009to2019.js.predicted <- predict(lwed2009to2019.js.models[[1]]) # [[1]] ju
 lwed2009to2019.js.predicted
 ```
 
-Output shows: - survival b/t capture events = 0.69 - detection prob =
-0.78 - prob of entry = 0.07 each capture event - number of unmarked
-indiv is about 8, making the super populat \~7 + 145 marked indiv =
-\~152
+Output shows:
+
+-   survival b/t capture events = 0.69
+-   detection prob = 0.78
+-   prob of entry = 0.07 each capture event
+-   number of unmarked indiv is about 8, making the super population
+    \~7 + 145 marked indiv = \~152
 
 **SIMP**
 
@@ -947,32 +989,272 @@ Output shows: - survival b/t capture events = 0.75 - detection prob =
 indiv is about 8, making the super populat \~6 + 102 marked indiv =
 \~108
 
+##### Females
+
+**LWED**
+
+```{r}
+# 1. process data
+lwedF2009to2019.js.proc <- process.data(capHist_2009to2019_lwedF,
+                                        model = "JS")
+
+# 2. make design data
+lwedF2009to2019.js.ddl <- make.design.data(lwedF2009to2019.js.proc)
+
+fit.js.lwedF2009to2019.models <- function(){
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  # p formulas
+  p.dot <- list(formula=~1)
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.dot <- list(formula=~1)
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.dot <- list(formula=~1)
+  cml <- create.model.list(c("Phi","p", "pent", "N"))
+  results <- crm.wrapper(cml,
+                         data = lwedF2009to2019.js.proc,
+                         ddl = lwedF2009to2019.js.ddl,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# Run function
+lwedF2009to2019.js.models <- fit.js.lwedF2009to2019.models()
+
+# Display model table
+lwedF2009to2019.js.models
+```
+
+Look at estimates of top model (row number on left of model table, or
+using name)
+
+```{r}
+lwedF2009to2019.js.models[[1]]  # or dipper.js.models[["Phi.dot.p.dot.pent.dot.N.dot"]] or dipper.js.models$Phi.dot.p.dot.pent.dot.N.dot
+```
+
+Estimate number of unmarked indivs
+
+```{r}
+# The estimates above are not on probability scale (or in individuals for N)
+# (e.g. Phi, p on logit scale, pent on mlogit scale)
+# Predict (real) values using top model
+lwedF2009to2019.js.predicted <- predict(lwedF2009to2019.js.models[[1]]) # [[1]] just calls the model row according to the model table.
+
+# Look at predictions of real parameters
+lwedF2009to2019.js.predicted
+```
+
+**SIMP**
+
+```{r}
+# 1. process data
+simpF2009to2019.js.proc <- process.data(capHist_2009to2019_simpF,
+                                        model = "JS")
+
+# 2. make design data
+simpF2009to2019.js.ddl <- make.design.data(simpF2009to2019.js.proc)
+
+fit.js.simpF2009to2019.models <- function(){
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  # p formulas
+  p.dot <- list(formula=~1)
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.dot <- list(formula=~1)
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.dot <- list(formula=~1)
+  cml <- create.model.list(c("Phi","p", "pent", "N"))
+  results <- crm.wrapper(cml,
+                         data = simpF2009to2019.js.proc,
+                         ddl = simpF2009to2019.js.ddl,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# Run function
+simpF2009to2019.js.models <- fit.js.simpF2009to2019.models()
+
+# Display model table
+simpF2009to2019.js.models
+```
+
+Look at estimates of top model (row number on left of model table, or
+using name)
+
+```{r}
+simpF2009to2019.js.models[[1]]  # or dipper.js.models[["Phi.dot.p.dot.pent.dot.N.dot"]] or dipper.js.models$Phi.dot.p.dot.pent.dot.N.dot
+```
+
+Estimate number of unmarked indivs
+
+```{r}
+# The estimates above are not on probability scale (or in individuals for N)
+# (e.g. Phi, p on logit scale, pent on mlogit scale)
+# Predict (real) values using top model
+simpF2009to2019.js.predicted <- predict(simpF2009to2019.js.models[[1]]) # [[1]] just calls the model row according to the model table.
+
+# Look at predictions of real parameters
+simpF2009to2019.js.predicted 
+```
+
+##### Males
+
+**LWED**
+
+```{r}
+# 1. process data
+lwedM2009to2019.js.proc <- process.data(capHist_2009to2019_lwedM,
+                                        model = "JS")
+
+# 2. make design data
+lwedM2009to2019.js.ddl <- make.design.data(lwedM2009to2019.js.proc)
+
+fit.js.lwedM2009to2019.models <- function(){
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  # p formulas
+  p.dot <- list(formula=~1)
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.dot <- list(formula=~1)
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.dot <- list(formula=~1)
+  cml <- create.model.list(c("Phi","p", "pent", "N"))
+  results <- crm.wrapper(cml,
+                         data = lwedM2009to2019.js.proc,
+                         ddl = lwedM2009to2019.js.ddl,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# Run function
+lwedM2009to2019.js.models <- fit.js.lwedM2009to2019.models()
+
+# Display model table
+lwedM2009to2019.js.models
+```
+
+Look at estimates of top model (row number on left of model table, or
+using name)
+
+```{r}
+lwedM2009to2019.js.models[[1]]  # or dipper.js.models[["Phi.dot.p.dot.pent.dot.N.dot"]] or dipper.js.models$Phi.dot.p.dot.pent.dot.N.dot
+```
+
+Estimate number of unmarked indivs
+
+```{r}
+# The estimates above are not on probability scale (or in individuals for N)
+# (e.g. Phi, p on logit scale, pent on mlogit scale)
+# Predict (real) values using top model
+lwedM2009to2019.js.predicted <- predict(lwedM2009to2019.js.models[[1]]) # [[1]] just calls the model row according to the model table.
+
+# Look at predictions of real parameters
+lwedM2009to2019.js.predicted
+```
+
+**SIMP**
+
+```{r}
+# 1. process data
+simpM2009to2019.js.proc <- process.data(capHist_2009to2019_simpM,
+                                        model = "JS")
+
+# 2. make design data
+simpM2009to2019.js.ddl <- make.design.data(simpM2009to2019.js.proc)
+
+fit.js.simpM2009to2019.models <- function(){
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  # p formulas
+  p.dot <- list(formula=~1)
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.dot <- list(formula=~1)
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.dot <- list(formula=~1)
+  cml <- create.model.list(c("Phi","p", "pent", "N"))
+  results <- crm.wrapper(cml,
+                         data = simpM2009to2019.js.proc,
+                         ddl = simpM2009to2019.js.ddl,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# Run function
+simpM2009to2019.js.models <- fit.js.simpM2009to2019.models()
+
+# Display model table
+simpM2009to2019.js.models
+```
+
+Look at estimates of top model (row number on left of model table, or
+using name)
+
+```{r}
+simpM2009to2019.js.models[[1]]  # or dipper.js.models[["Phi.dot.p.dot.pent.dot.N.dot"]] or dipper.js.models$Phi.dot.p.dot.pent.dot.N.dot
+```
+
+Estimate number of unmarked indivs
+
+```{r}
+# The estimates above are not on probability scale (or in individuals for N)
+# (e.g. Phi, p on logit scale, pent on mlogit scale)
+# Predict (real) values using top model
+simpM2009to2019.js.predicted <- predict(simpM2009to2019.js.models[[1]]) # [[1]] just calls the model row according to the model table.
+
+# Look at predictions of real parameters
+simpM2009to2019.js.predicted 
+```
+
 #### Assign N
 
 Number of hair samples in tamRun5 vs. numbers from capData:
 
 -   LWED
-    -   N_est = 152 in superpopulation (based on JS model above)
     -   n_capData = 145 marked individuals (n_fem = 68, n_male = 77)
-    -   n_hair = 138 (females = 64; males = 74)
+    -   n_hair = 137 (females = 64; males = 70)
 -   SIMP
-    -   N_est = 108 in superpopulation (based on JS model above)
     -   n_capData = 102 (n_fem = 48, n_male = 54)
     -   n_hair = 99 (females = 47, males = 52)
 
-Probably not the right way to go about this, but for Nf/Nm estimates I'm
-going to 1) calculate the proportion of females/males and 2) multiple
-that by N_est to get the estimated total number of mothers/fathers in
-the population for FRANz
+Using output from JS models for estimates of unmarked females & males for each species added to capData numbers
 
 ```{r}
-# LWED
-(77/(68+77))*152 # est Nf (Nfathers) = 81
-(68/(68+77))*152 # est Nm (Nmothers) = 71
+# model estimates of unmarked indivs:
+lwedF2009to2019.js.predicted # N_est = 4.83
+lwedM2009to2019.js.predicted # N_est = 5.44
 
-# SIMP
-(54/(48+54))*108 # est Nfathers = 57
-(48/(48+54))*108 # est Nmothers = 51
+simpF2009to2019.js.predicted # N_est = 3.78
+simpM2009to2019.js.predicted # N_est = 6.27
+
+round(68 + 4.83) # 73 LWED_F superpop (Nm)
+round(77 + 5.44) # 82 LWED_M superpop (Nf)
+
+round(48 + 3.78) # 52 SIMP_F superpop (Nm)
+round(54 + 6.27) # 60 SIMP_M superpop (Nf)
 ```
 
 ## 5.3 pedigreein
@@ -1440,30 +1722,53 @@ max(qc_seqRunDiffs_10x_hairData$discrepancyRate) # 0.090
 
 From franz.man:
 
-Fullsib relationships are very informative and reduce the candidate parents tremendously. FRANz can identify highly probable fullsibs in t he data with the --fullsibtest option. If it is very unlikely that your data contains many fullsibs, you should not turn this on. False positives can decrease the accuracy of the reconstruction. As we have already said, true positives can greatly enhance the accuracy, but if there are no fullsibs, you can only lose.
+Fullsib relationships are very informative and reduce the candidate
+parents tremendously. FRANz can identify highly probable fullsibs in t
+he data with the --fullsibtest option. If it is very unlikely that your
+data contains many fullsibs, you should not turn this on. False
+positives can decrease the accuracy of the reconstruction. As we have
+already said, true positives can greatly enhance the accuracy, but if
+there are no fullsibs, you can only lose.
 
-This feature is still experimental and the default parameters are very arbitrary. The number of false negatives will be high, as this feature is designed to only support the parentage inference. If fullsib inference is your main interest, then you have to set reasonable parameters manually.
+This feature is still experimental and the default parameters are very
+arbitrary. The number of false negatives will be high, as this feature
+is designed to only support the parentage inference. If fullsib
+inference is your main interest, then you have to set reasonable
+parameters manually.
 
-Important: --Nmax and --fullsib test together will currently produce biased estimates of N when many fullsibs are detected. Use --N instead or compare the influence of --fullsibtest on the estimated sampling rates.
+Important: --Nmax and --fullsib test together will currently produce
+biased estimates of N when many fullsibs are detected. Use --N instead
+or compare the influence of --fullsibtest on the estimated sampling
+rates.
 
-**--fullsibtest** - Detect siblings. This turns our fullsib heuristic as described in [RSK09] on or off (default --nofull-sibtest). Please read the section FULLSIB before turning this on!
+**--fullsibtest** - Detect siblings. This turns our fullsib heuristic as
+described in [RSK09] on or off (default --nofull-sibtest). Please read
+the section FULLSIB before turning this on!
 
 **-- fullsibparental** - Detect fullsib also in the parental generation?
 
-**--fullsibpvth** - The p-Value threshold of the sibling filter. For 0, 1 or 2 common "compatible parental genotypes". Such sampled genotypes are compatible to an offspring genotype according the Mendelian laws and the typing error rate. Default is 0.001, 0.001, 0.05. This means that if individual A and B have no common compatible parental genotypes, a threshold of 0.001 is used. The idea behind these different thresholds is that if A and B have a common compatible parent pair, this is an additional hint that A and B are fullsibs. So we should use a less conservative p-Value threshold (0.05).
+**--fullsibpvth** - The p-Value threshold of the sibling filter. For 0,
+1 or 2 common "compatible parental genotypes". Such sampled genotypes
+are compatible to an offspring genotype according the Mendelian laws and
+the typing error rate. Default is 0.001, 0.001, 0.05. This means that if
+individual A and B have no common compatible parental genotypes, a
+threshold of 0.001 is used. The idea behind these different thresholds
+is that if A and B have a common compatible parent pair, this is an
+additional hint that A and B are fullsibs. So we should use a less
+conservative p-Value threshold (0.05).
 
-**--fullsibH0** - Defines the null hypotheses (PO,HS,U) and their prior probabilities. Examples:
-0,0,1 : FS vs. Unrelated.
-1,2,1*: FS vs. PO, 2xHS(HS,Aunt/Uncle), U.
-2,4,1#: FS vs. 2xPO (PO and OP),4xHS(HS,Aunt/Uncle,Grandparent/-child), U.
-*:default with age data, #: default without age data
+**--fullsibH0** - Defines the null hypotheses (PO,HS,U) and their prior
+probabilities. Examples: 0,0,1 : FS vs. Unrelated. 1,2,1*: FS vs. PO,
+2xHS(HS,Aunt/Uncle), U. 2,4,1#: FS vs. 2xPO (PO and
+OP),4xHS(HS,Aunt/Uncle,Grandparent/-child), U.* :default with age
+data,#: default without age data
 
 ## 5.x FRANz code
 
 Starting code
 
 ```{bash}
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 81 --Nm 71 --typingerror 0.01 --fullsibtest --pout "lwed.er01_" --siblingsout "lwed.er01_" --pedigreeout "lwed.er01_" genos_lwedHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 81 --Nm 71 --typingerror 0.01 --fullsibtest --pout "lwed.er01_" --siblingsout "lwed.er01_" --pedigreeout "lwed.er01_" genos_lwedHair_franz.dat
 
 FRANz --Nfmax 2 --Nmmax 5 --femrepro 1:30 --malerepro 1:30 --updatefreqs genoFile_franz.dat
 ```
@@ -1507,8 +1812,8 @@ The csv file can include the following columns:
 
 ```{r}
 # LWED
-genos0x_lwed_forFRANz <- names(genos0x_tamRun5_lwedHair_indidOnly) %>%
-  map_dfc(~ genos0x_tamRun5_lwedHair_indidOnly %>%
+genos0x_lwed_forFRANz <- names(genos0x_run5_lwedHair_indidOnly) %>%
+  map_dfc(~ genos0x_run5_lwedHair_indidOnly %>%
             select(all_of(.x)) %>%
             separate(.x,
                      into = paste0(.x, c("a", "b")),
@@ -1518,16 +1823,16 @@ genos0x_lwed_forFRANz <- names(genos0x_tamRun5_lwedHair_indidOnly) %>%
   rownames_to_column("sampleID") %>%
   
   # add sampleID_franz, sex, & animalID (animalID is just for merging birthYear)
-  merge(., md_tamRun5_v5[, c("sampleID", "sampleID_franz", "animalID", "sex")], by = "sampleID") %>%
+  merge(., md_run5[, c("sampleID", "sampleID_franz", "animalID", "sex")], by = "sampleID") %>%
   relocate(c(sampleID_franz, sex)) %>%
   
   # add birthYear
-  merge(., birthYear_capData_tamRun5_v3[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  merge(., birthYear_capData_run5[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
   dplyr::rename("birthYear" = "birthYear_est") %>%
   relocate(birthYear, .before = "sex") %>%
   
   # add deathYear
-  merge(., deathYear_capData_tamRun5_v1[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  merge(., deathYear_capData_run5[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
   dplyr::rename("deathYear" = "deathYear_est") %>%
   relocate(deathYear, .before = "sex") %>%
   
@@ -1545,8 +1850,8 @@ genos0x_lwed_forFRANz <- names(genos0x_tamRun5_lwedHair_indidOnly) %>%
   
 
 # SIMP
-genos0x_simp_forFRANz <- names(genos0x_tamRun5_simpHair_indidOnly) %>%
-  map_dfc(~ genos0x_tamRun5_simpHair_indidOnly %>%
+genos0x_simp_forFRANz <- names(genos0x_run5_simpHair_indidOnly) %>%
+  map_dfc(~ genos0x_run5_simpHair_indidOnly %>%
             select(all_of(.x)) %>%
             separate(.x,
                      into = paste0(.x, c("a", "b")),
@@ -1556,16 +1861,16 @@ genos0x_simp_forFRANz <- names(genos0x_tamRun5_simpHair_indidOnly) %>%
   rownames_to_column("sampleID") %>%
   
   # add sampleID_franz, sex, & animalID (animalID is just for merging birthYear)
-  merge(., md_tamRun5_v5[, c("sampleID", "sampleID_franz", "animalID", "sex")], by = "sampleID") %>%
+  merge(., md_run5[, c("sampleID", "sampleID_franz", "animalID", "sex")], by = "sampleID") %>%
   relocate(c(sampleID_franz, sex)) %>%
   
   # add birthYear
-  merge(., birthDeath_capData_tamRun5_v3[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  merge(., birthYear_capData_run5[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
   dplyr::rename("birthYear" = "birthYear_est") %>%
   relocate(birthYear, .before = "sex") %>%
   
   # add deathYear
-  merge(., deathYear_capData_tamRun5_v1[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  merge(., deathYear_capData_run5[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
   dplyr::rename("deathYear" = "deathYear_est") %>%
   relocate(deathYear, .before = "sex") %>%
   
@@ -1630,30 +1935,40 @@ perl ./franz_sourceScripts/csv_modified.pl --in ./simp/franz_run1/genos0x_simpHa
 
 Settings:
 
--   femrepro & malerepro 1:15
--   Nf = 81
--   Nm = 71
+PRIOR INFORMATION
+
+-   femrepro & malerepro 2:30
+-   Nf = 82
+-   Nm = 73
+
+PARENTAGE
+
 -   typingerror
     -   run1a = 0.01
     -   run1b = 0.03
     -   run1c = 0.05
     -   run1d = 0.1
--   fullsibtest heuristic algorithm
+
+FULLSIB
+
+-   fullsibtest
+-   fullsibparental
+
 
 ```{bash}
 cd lwed/franz_run1
 
 # typingerror 0.01
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 81 --Nm 71 --typingerror 0.01 --fullsibtest --pout "lwed_er0.01_parentage" --siblingsout "lwed_er0.01_siblings" --pedigreeout "lwed_er0.01_pedigree" genos0x_lwedHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 82 --Nm 73 --typingerror 0.01 --fullsibtest --pout "lwed_er0.01_parentage" --siblingsout "lwed_er0.01_siblings" --pedigreeout "lwed_er0.01_pedigree" genos0x_lwedHair_franz.dat
 
 # typingerror 0.03
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 81 --Nm 71 --typingerror 0.03 --fullsibtest --pout "lwed_er0.03_parentage" --siblingsout "lwed_er0.03_siblings" --pedigreeout "lwed_er0.03_pedigree" genos0x_lwedHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 82 --Nm 73 --typingerror 0.03 --fullsibtest --pout "lwed_er0.03_parentage" --siblingsout "lwed_er0.03_siblings" --pedigreeout "lwed_er0.03_pedigree" genos0x_lwedHair_franz.dat
 
 # typingerror 0.05
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 81 --Nm 71 --typingerror 0.05 --fullsibtest --pout "lwed_er0.05_parentage" --siblingsout "lwed_er0.05_siblings" --pedigreeout "lwed_er0.05_pedigree" genos0x_lwedHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 82 --Nm 73 --typingerror 0.05 --fullsibtest --pout "lwed_er0.05_parentage" --siblingsout "lwed_er0.05_siblings" --pedigreeout "lwed_er0.05_pedigree" genos0x_lwedHair_franz.dat
 
 # typingerror 0.1
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 81 --Nm 71 --typingerror 0.1 --fullsibtest --pout "lwed_er0.1_parentage" --siblingsout "lwed_er0.1_siblings" --pedigreeout "lwed_er0.1_pedigree" genos0x_lwedHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 82 --Nm 73 --typingerror 0.1 --fullsibtest --pout "lwed_er0.1_parentage" --siblingsout "lwed_er0.1_siblings" --pedigreeout "lwed_er0.1_pedigree" genos0x_lwedHair_franz.dat
 ```
 
 ### SIMP
@@ -1661,8 +1976,8 @@ FRANz --femrepro 1:15 --malerepro 1:15 --Nf 81 --Nm 71 --typingerror 0.1 --fulls
 Settings:
 
 -   femrepro & malerepro 1:15
--   Nf = 57
--   Nm = 51
+-   Nf = 60
+-   Nm = 52
 -   typingerror
     -   run1a = 0.01
     -   run1b = 0.03
@@ -1674,16 +1989,16 @@ Settings:
 cd ./../../simp/franz_run1
 
 # typingerror 0.01
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 57 --Nm 51 --typingerror 0.01 --fullsibtest --pout "simp_er0.01_parentage" --siblingsout "simp_er0.01_siblings" --pedigreeout "simp_er0.01_pedigree" genos0x_simpHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 60 --Nm 52 --typingerror 0.01 --fullsibtest --pout "simp_er0.01_parentage" --siblingsout "simp_er0.01_siblings" --pedigreeout "simp_er0.01_pedigree" genos0x_simpHair_franz.dat
 
 # typingerror 0.03
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 57 --Nm 51 --typingerror 0.03 --fullsibtest --pout "simp_er0.03_parentage" --siblingsout "simp_er0.03_siblings" --pedigreeout "simp_er0.03_pedigree" genos0x_simpHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 60 --Nm 52 --typingerror 0.03 --fullsibtest --pout "simp_er0.03_parentage" --siblingsout "simp_er0.03_siblings" --pedigreeout "simp_er0.03_pedigree" genos0x_simpHair_franz.dat
 
 # typingerror 0.05
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 57 --Nm 51 --typingerror 0.05 --fullsibtest --pout "simp_er0.05_parentage" --siblingsout "simp_er0.05_siblings" --pedigreeout "simp_er0.05_pedigree" genos0x_simpHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 60 --Nm 52 --typingerror 0.05 --fullsibtest --pout "simp_er0.05_parentage" --siblingsout "simp_er0.05_siblings" --pedigreeout "simp_er0.05_pedigree" genos0x_simpHair_franz.dat
 
 # typingerror 0.10
-FRANz --femrepro 1:15 --malerepro 1:15 --Nf 57 --Nm 51 --typingerror 0.1 --fullsibtest --pout "simp_er0.10_parentage" --siblingsout "simp_er0.10_siblings" --pedigreeout "simp_er0.10_pedigree" genos0x_simpHair_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 60 --Nm 52 --typingerror 0.1 --fullsibtest --pout "simp_er0.10_parentage" --siblingsout "simp_er0.10_siblings" --pedigreeout "simp_er0.10_pedigree" genos0x_simpHair_franz.dat
 ```
 
 ## 5.3 Results
@@ -1712,22 +2027,22 @@ colnames_parentage <- c("offspring",
                         "parentage_mlPedigree")
 
 # individual results
-po_lwed_run1a <- read.csv("./paper3_demographics/franz/lwed/franz_run1/lwed_er0.01_parentage.csv", na.strings = c("", "NA")) %>%
+po_lwed_run1a <- read.csv("./paper3_demographics/02_relatedness/franz/lwed/franz_run1/lwed_er0.01_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1a")
 
-po_lwed_run1b <- read.csv("./paper3_demographics/franz/lwed/franz_run1/lwed_er0.03_parentage.csv", na.strings = c("", "NA")) %>%
+po_lwed_run1b <- read.csv("./paper3_demographics/02_relatedness/franz/lwed/franz_run1/lwed_er0.03_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1b")
 
-po_lwed_run1c <- read.csv("./paper3_demographics/franz/lwed/franz_run1/lwed_er0.05_parentage.csv", na.strings = c("", "NA")) %>%
+po_lwed_run1c <- read.csv("./paper3_demographics/02_relatedness/franz/lwed/franz_run1/lwed_er0.05_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1c")
 
-po_lwed_run1d <- read.csv("./paper3_demographics/franz/lwed/franz_run1/lwed_er0.10_parentage.csv", na.strings = c("", "NA")) %>%
+po_lwed_run1d <- read.csv("./paper3_demographics/02_relatedness/franz/lwed/franz_run1/lwed_er0.10_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1d")
@@ -1762,10 +2077,10 @@ po_lwed_run1abcd <- rbind(po_lwed_run1a, po_lwed_run1b, po_lwed_run1c, po_lwed_r
   merge(., birthYear_knownOnly[, c("animalID", "birthYear_est")], by.x = "offspring_animalID", by.y = "animalID", all.x = T) %>%
   
   # add sex for parents 1 & 2
-  merge(., md_tamRun5_hairSamples[, c("animalID", "sex")], by.x = "parent1_animalID", by.y = "animalID", all.x = T) %>%
+  merge(., md_run5_hair[, c("animalID", "sex")], by.x = "parent1_animalID", by.y = "animalID", all.x = T) %>%
   relocate(sex, .after = parent1_animalID) %>%
   dplyr::rename("parent1_sex" = "sex") %>%
-  merge(., md_tamRun5_hairSamples[, c("animalID", "sex")], by.x = "parent2_animalID", by.y = "animalID", all.x = T) %>%
+  merge(., md_run5_hair[, c("animalID", "sex")], by.x = "parent2_animalID", by.y = "animalID", all.x = T) %>%
   relocate(sex, .after = parent2_animalID) %>%
   dplyr::rename("parent2_sex" = "sex") %>%
   
@@ -1778,22 +2093,22 @@ po_lwed_run1abcd <- rbind(po_lwed_run1a, po_lwed_run1b, po_lwed_run1c, po_lwed_r
 
 ```{r}
 # individual dfs
-po_simp_run1a <- read.csv("./paper3_demographics/franz/simp/franz_run1/simp_er0.01_parentage.csv", na.strings = c("", "NA")) %>%
+po_simp_run1a <- read.csv("./paper3_demographics/02_relatedness/franz/simp/franz_run1/simp_er0.01_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1a")
 
-po_simp_run1b <- read.csv("./paper3_demographics/franz/simp/franz_run1/simp_er0.03_parentage.csv", na.strings = c("", "NA")) %>%
+po_simp_run1b <- read.csv("./paper3_demographics/02_relatedness/franz/simp/franz_run1/simp_er0.03_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1b")
 
-po_simp_run1c <- read.csv("./paper3_demographics/franz/simp/franz_run1/simp_er0.05_parentage.csv", na.strings = c("", "NA")) %>%
+po_simp_run1c <- read.csv("./paper3_demographics/02_relatedness/franz/simp/franz_run1/simp_er0.05_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1c")
 
-po_simp_run1d <- read.csv("./paper3_demographics/franz/simp/franz_run1/simp_er0.10_parentage.csv", na.strings = c("", "NA")) %>%
+po_simp_run1d <- read.csv("./paper3_demographics/02_relatedness/franz/simp/franz_run1/simp_er0.10_parentage.csv", na.strings = c("", "NA")) %>%
   rownames_to_column("temp") %>%
   `colnames<-`(colnames_parentage) %>%
   mutate(franzRun = "run1d")
@@ -1828,10 +2143,10 @@ po_simp_run1abcd <- rbind(po_simp_run1a, po_simp_run1b, po_simp_run1c, po_simp_r
   merge(., birthYear_knownOnly[, c("animalID", "birthYear_est")], by.x = "offspring_animalID", by.y = "animalID", all.x = T) %>%
   
   # add sex for parents 1 & 2
-  merge(., md_tamRun5_hairSamples[, c("animalID", "sex")], by.x = "parent1_animalID", by.y = "animalID", all.x = T) %>%
+  merge(., md_run5_hair[, c("animalID", "sex")], by.x = "parent1_animalID", by.y = "animalID", all.x = T) %>%
   relocate(sex, .after = parent1_animalID) %>%
   dplyr::rename("parent1_sex" = "sex") %>%
-  merge(., md_tamRun5_hairSamples[, c("animalID", "sex")], by.x = "parent2_animalID", by.y = "animalID", all.x = T) %>%
+  merge(., md_run5_hair[, c("animalID", "sex")], by.x = "parent2_animalID", by.y = "animalID", all.x = T) %>%
   relocate(sex, .after = parent2_animalID) %>%
   dplyr::rename("parent2_sex" = "sex") %>%
   
@@ -1868,11 +2183,12 @@ po_lwed_run1abcd_mothers <- rbind(po_lwed_run1abcd_mat1,
     )
 ```
 
-**Compare assignments b/t error rates**
+**Compare assignments b/t error rates** [[START HERE]]
 
-42 offspring (animalID 200 has two entries) had maternity assigned in at least one of the run1 sets
+42 offspring (animalID 200 has two entries) had maternity assigned in at
+least one of the run1 sets
 
-3 of these had > 1 unique maternity assignment
+3 of these had \> 1 unique maternity assignment
 
 ```{r}
 po_lwed_run1_matCompare <- po_lwed_run1abcd_mothers %>%
@@ -1892,7 +2208,9 @@ po_lwed_run1_matCompare <- po_lwed_run1abcd_mothers %>%
 
 **Confirm assignments for pedigree.dat**
 
-Below I'm adding the following variables as checks to determine whether it's reasonable to confirm maternity assignments and thus use them to create a pedigree.dat file for franz_run2:
+Below I'm adding the following variables as checks to determine whether
+it's reasonable to confirm maternity assignments and thus use them to
+create a pedigree.dat file for franz_run2:
 
 -   offspring_birthYear
 -   parent_birthYear
@@ -1901,10 +2219,12 @@ Below I'm adding the following variables as checks to determine whether it's rea
 -   offspring_groupName (groupName in offspring_birthYear)
 -   parent_groupName (groupName in year offspring_birthYear - 1)
 
-I'm considering the maternity assignment as "confirmed" enough to go into the pedigree.dat file if the following are true:
+I'm considering the maternity assignment as "confirmed" enough to go
+into the pedigree.dat file if the following are true:
 
--   totalMat > 1 (more than 1 maternity assigned across run1 typingerror conditions)
--   offspring_birthYear - parent_parityStart > 0
+-   totalMat \> 1 (more than 1 maternity assigned across run1
+    typingerror conditions)
+-   offspring_birthYear - parent_parityStart \> 0
 -   offspring_groupName == parent_groupName
 
 ```{r}
@@ -2002,7 +2322,7 @@ po_simp_run1abcd_mothers <- rbind(po_simp_run1abcd_mat1,
 
 23 offspring had maternity assigned in at least one of the run1 sets
 
-3 of these had > 1 unique maternity assignment
+3 of these had \> 1 unique maternity assignment
 
 ```{r}
 po_simp_run1_matCompare <- po_simp_run1abcd_mothers %>%
@@ -2029,7 +2349,9 @@ po_simp_run1_matCompare <- po_simp_run1abcd_mothers %>%
 
 **Confirm assignments for pedigree.dat**
 
-Below I'm adding the following variables as checks to determine whether it's reasonable to confirm maternity assignments and thus use them to create a pedigree.dat file for franz_run2:
+Below I'm adding the following variables as checks to determine whether
+it's reasonable to confirm maternity assignments and thus use them to
+create a pedigree.dat file for franz_run2:
 
 -   offspring_birthYear
 -   parent_birthYear
@@ -2038,10 +2360,12 @@ Below I'm adding the following variables as checks to determine whether it's rea
 -   offspring_groupName (groupName in offspring_birthYear)
 -   parent_groupName (groupName in year offspring_birthYear - 1)
 
-I'm considering the maternity assignment as "confirmed" enough to go into the pedigree.dat file if the following are true:
+I'm considering the maternity assignment as "confirmed" enough to go
+into the pedigree.dat file if the following are true:
 
--   totalMat > 1 (more than 1 maternity assigned across run1 typingerror conditions)
--   offspring_birthYear - parent_parityStart > 0
+-   totalMat \> 1 (more than 1 maternity assigned across run1
+    typingerror conditions)
+-   offspring_birthYear - parent_parityStart \> 0
 -   offspring_groupName == parent_groupName
 
 ```{r}
@@ -2151,8 +2475,8 @@ po_lwed_run1_patComp <- po_lwed_run1abcd_fathers %>%
 
 ## 5.4 franz_run1_pedigree.dat
 
-Use confirmed maternity assignments to create pedigree.dat file for franz_run2
-
+Use confirmed maternity assignments to create pedigree.dat file for
+franz_run2
 
 # XXXXXXXXXXXXXXXXXXXXXXXXX
 
@@ -2383,8 +2707,6 @@ po_simp_v2 %>%
 ```
 
 #### Interpret franz results
-
-
 
 #### Maternity checks
 
@@ -3115,7 +3437,8 @@ library(sequoia)
 ## 5.1 Format genos
 
 Load in original genotypes, subset to hair samples + INDID loci for each
-species set, and reformat so that columns = loci & rows = samples; remove commas b/t alleles
+species set, and reformat so that columns = loci & rows = samples;
+remove commas b/t alleles
 
 Sequoia requires genotypes to be in a numeric matrix GenoM with one line
 per individual and one column per SNP, with each SNP coded as 0, 1, 2
@@ -3138,21 +3461,19 @@ genos_lwedHair_seq <- sequoia::GenoConvert(
   OutFormat = "seq")
 ```
 
-**for tamRun5.3 seqs**
-GenoConvert gives the following warnings:
+**for tamRun5.3 seqs** GenoConvert gives the following warnings:
 
-! There are 1 monomorphic (fixed) SNPs, these will be excluded
-! There are 11 SNPs scored for <50% of individuals
-✖ There are 19 individuals scored for <5% of SNPs, these WILL BE IGNORED
-✖ In addition, there are 23 individuals scored for <20% of SNPs,it is advised to treat their assignments with caution
-ℹ After exclusion, There are  116  individuals and  153  SNPs.
+! There are 1 monomorphic (fixed) SNPs, these will be excluded ! There
+are 11 SNPs scored for \<50% of individuals ✖ There are 19 individuals
+scored for \<5% of SNPs, these WILL BE IGNORED ✖ In addition, there are
+23 individuals scored for \<20% of SNPs,it is advised to treat their
+assignments with caution ℹ After exclusion, There are 116 individuals
+and 153 SNPs.
 
 **After exclusion, we have the following to work with for LWED
 samples:** - **116 out of 137 LWED samples** - **153 out of 154 SNPs**
 
-
-**for tamRun5 seqs only**
-GenoConvert gives the following warnings:
+**for tamRun5 seqs only** GenoConvert gives the following warnings:
 
 -   There are 4 SNPs scored for \<5% of individuals, these will be
     excluded
@@ -3181,21 +3502,18 @@ genos_simpHair_seq <- sequoia::GenoConvert(
   OutFormat = "seq")
 ```
 
-**for tamRun5.3 seqs**
-GenoConvert gives the following warnings:
-! There are 4 monomorphic (fixed) SNPs, these will be excluded
-! There are 9 SNPs scored for <50% of individuals
-✖ There are 8 individuals scored for <5% of SNPs, these WILL BE IGNORED
-✖ In addition, there are 15 individuals scored for <20% of SNPs,it is advised to treat their assignments with caution
-ℹ After exclusion, There are  91  individuals and  150  SNPs.
+**for tamRun5.3 seqs** GenoConvert gives the following warnings: ! There
+are 4 monomorphic (fixed) SNPs, these will be excluded ! There are 9
+SNPs scored for \<50% of individuals ✖ There are 8 individuals scored
+for \<5% of SNPs, these WILL BE IGNORED ✖ In addition, there are 15
+individuals scored for \<20% of SNPs,it is advised to treat their
+assignments with caution ℹ After exclusion, There are 91 individuals and
+150 SNPs.
 
 **After exclusion, we have the following to work with for SIMP
 samples:** - **91 out of 99 SIMP samples** - **150 out of 154 SNPs**
 
-
-
-**for tamRun5 seqs only**
-GenoConvert gives the following warnings:
+**for tamRun5 seqs only** GenoConvert gives the following warnings:
 
 -   There are 6 SNPs scored for \<5% of individuals, these will be
     excluded
@@ -3245,7 +3563,6 @@ of 3-5 columns:
         year is unknown. Ignored when BirthYear is non-missing.
 -   **BY.max (optional)**
     -   Latest year in which individual may have been born
-
 
 ## 6.2 Data
 
@@ -3300,24 +3617,30 @@ as follows:
 
 # 7 Duplicate check
 
-couple notes on variables returned in sequoia dupCheck:
--   Mismatch = # of mismatching genotypes (out of commonGenos)
--   SnpdBoth = # of common genotypes
--   LLR = log-likelihood ratio
+couple notes on variables returned in sequoia dupCheck: - Mismatch = \#
+of mismatching genotypes (out of commonGenos) - SnpdBoth = \# of common
+genotypes - LLR = log-likelihood ratio
 
 ## 7.1 LWED
 
 **tamRun5.3**
 
-dupCheck is saying all 116 indivs are likely dups, but the dup df they're showing isn't very convincing of that
+dupCheck is saying all 116 indivs are likely dups, but the dup df
+they're showing isn't very convincing of that
 
 **tamRun5 only**
 
-Duplicate check returns "There were 32 likely duplicate genotypes found, consider removing".
+Duplicate check returns "There were 32 likely duplicate genotypes found,
+consider removing".
 
-However, only one of these pairs has > 10 commonGenos - looks like its suggesting duplicates based off ratios of matched to common only, without considering the actual number of commonGenos. In this way, GTscore's dupCheck algorithm seems MUCH better.
+However, only one of these pairs has \> 10 commonGenos - looks like its
+suggesting duplicates based off ratios of matched to common only,
+without considering the actual number of commonGenos. In this way,
+GTscore's dupCheck algorithm seems MUCH better.
 
-As it is though, sequoia's dupCheck only returns one truly likely duplicate pair: tamRun.211 and tamRun5.264, which was already a known duplicate.
+As it is though, sequoia's dupCheck only returns one truly likely
+duplicate pair: tamRun.211 and tamRun5.264, which was already a known
+duplicate.
 
 ```{r}
 # duplicate check & parentage assignments (takes a few minutes)
@@ -3337,13 +3660,16 @@ parOut_lwed.dupGeno <- parOut_lwed$DupGenotype %>%
 
 **tamRun5.3**
 
-dupCheck is saying 72 indivs are likely dups, but the dup df they're showing isn't very convincing of that
+dupCheck is saying 72 indivs are likely dups, but the dup df they're
+showing isn't very convincing of that
 
 **tamRun5 only**
 
-Duplicate check returns: "There were 3 likely duplicate genotypes found, consider removing"
+Duplicate check returns: "There were 3 likely duplicate genotypes found,
+consider removing"
 
-Again though, there's no more than 10 common genos, so we can't really say that these are actually likely duplicates.
+Again though, there's no more than 10 common genos, so we can't really
+say that these are actually likely duplicates.
 
 ```{r}
 # duplicate check & parentage assignments (takes a few minutes)
@@ -3436,20 +3762,16 @@ str(genoM_lwed2)
 test <- lapply(genoM_lwed2, attributes)
 ```
 
-id          dam         sire        LLRdam      LLRsire     LLRpair
-tamRun5.209 tamRun5.283 tamRun5.218   1.12       -0.57        1.86
-tamRun5.211 tamRun5.283 tamRun5.218   2.15        1.41        4.21
-tamRun5.254 tamRun5.330 tamRun5.339   0.88        1.51        3.29
-tamRun5.261 NA          tamRun5.344 999.00        1.20      999.00
-tamRun5.274 NA          tamRun5.261 999.00        1.86      999.00
-tamRun5.295 tamRun5.314 tamRun5.319   1.59       -0.89        3.50
-tamRun5.301 tamRun5.314 NA            0.95      999.00      999.00
+id dam sire LLRdam LLRsire LLRpair tamRun5.209 tamRun5.283 tamRun5.218
+1.12 -0.57 1.86 tamRun5.211 tamRun5.283 tamRun5.218 2.15 1.41 4.21
+tamRun5.254 tamRun5.330 tamRun5.339 0.88 1.51 3.29 tamRun5.261 NA
+tamRun5.344 999.00 1.20 999.00 tamRun5.274 NA tamRun5.261 999.00 1.86
+999.00 tamRun5.295 tamRun5.314 tamRun5.319 1.59 -0.89 3.50 tamRun5.301
+tamRun5.314 NA 0.95 999.00 999.00
 
-275           210       27 ((same as franz))
-200           210       27 ((same as franz))
-196           14        8 ((same as franz))
-142           NA        11 ((DIFFERENT))
-281           NA        142 ((same as franz, though franz has 2 parents))
+275 210 27 ((same as franz)) 200 210 27 ((same as franz)) 196 14 8
+((same as franz)) 142 NA 11 ((DIFFERENT)) 281 NA 142 ((same as franz,
+though franz has 2 parents))
 
 ## 7.2 SIMP
 

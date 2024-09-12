@@ -14,7 +14,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # 1 Overview
 
-This Rmd file contains the analyses used in the demography chapter of my dissertation. Data used is from tamRun5, hair samples only.
+This Rmd file contains the analyses used in the demography chapter of my
+dissertation. Data used is from tamRun5, hair samples only.
 
 # 2 Packages
 
@@ -30,8 +31,8 @@ source("project_scripts/ravo_gtScripts.R") # for my custom functions
 Capture data includes all records of individual captures from 2009-2019.
 
 Use the latest version of capData_byIndiv (from
-tamGenetics_paper3_dataOrganization), then 1) filter to first capture for each
-animalID 2) filter again to animalIDs in tamRun5
+tamGenetics_paper3_dataOrganization), then 1) filter to first capture
+for each animalID 2) filter again to animalIDs in tamRun5
 
 **note** exclude those in capData w/"UNK" animalID; did a lot of digging
 in tamGenetics_paper3_dataOrganization.Rmd and most likely these entries
@@ -79,9 +80,10 @@ capData_byIndiv_firstEntry_tamRun5Blood <- capData_byIndiv_firstEntry %>%
   filter(animalID %in% md_tamRun5_bloodSamples$animalID)
 ```
 
-## Genetic sample metadata
+## 3.2 Genetic sample metadata
 
-Latest version of md_tamRun5 (from metadataReconciliation.Rmd file); hair samples only
+Latest version of md_tamRun5 (from metadataReconciliation.Rmd file);
+hair samples only
 
 ```{r}
 # latest updated version of md_tamRun5 from metadataReconciliation.Rmd
@@ -95,10 +97,6 @@ run5_hairDups <- run5_md_hair %>%
 
 table(run5_md_hair$species)
 ```
-
-
-
-
 
 # 4 Population overview
 
@@ -339,18 +337,22 @@ capData_byIndiv_firstEntry_tamRun5Hair %>%
         conditional upon animal being released alive at first encounter;
         survival and catchability refer only to those marked animals
 
-Based on Iijima (2020), I want: - **capture-recapture model for open
-population**, where an "open population" is one in which the number of
-individuals can change via natural mortality, birth, and migration
-during the study period - may also benefit from **robust design** where
-multiple surveys are conducted under a constant condition - 1st
-hierarchy of sampling in which variables can change across sampling
-periods - 2nd hierarchy of sampling in which things should remain
-relatively stable
+Based on Iijima (2020), I want:
 
-And based on Sandercock (2020), I may also want: - a multistate model,
-in which detections are coded as dynamic categorical states that
-potentially change b/t consecutive occasions
+-   **capture-recapture model for open population**, where an "open
+    population" is one in which the number of individuals can change via
+    natural mortality, birth, and migration during the study period -
+    may also benefit from **robust design** where multiple surveys are
+    conducted under a constant condition
+-   1st hierarchy of sampling in which variables can change across
+    sampling periods
+-   2nd hierarchy of sampling in which things should remain relatively
+    stable
+
+And based on Sandercock (2020), I may also want:
+
+-   a multistate model, in which detections are coded as dynamic
+    categorical states that potentially change b/t consecutive occasions
 
 **Resources:** - James Paterson has a
 blog(<https://jamesepaterson.github.io/jamespatersonblog/07_creatingcapturehistories>)
@@ -452,7 +454,7 @@ capHist_simp_sex$sex <- as.factor(capHist_simp_sex$sex)
 
 #### run model
 
-Do the thing (following Pateron blog):
+Do the thing (following Paterson blog):
 
 ```{r}
 # Jolly-Seber models (POPAN formulation) are open population models, and 
@@ -738,7 +740,9 @@ model=cjs.hessian(model)
 model # now able to print SE and 95% CI (set hessian = TRUE in call to crm if want to compute it when model is fitted)
 ```
 
-You’ll never fit only one model to data, so the most efficient approach is to call process.data and make.design.data separately and pass the results to crm so they can be used for each fitted model as shown below:
+You'll never fit only one model to data, so the most efficient approach
+is to call process.data and make.design.data separately and pass the
+results to crm so they can be used for each fitted model as shown below:
 
 ```{r}
 dipper.proc=process.data(dipper)
@@ -751,7 +755,13 @@ model=crm(dipper.proc,dipper.ddl,model.parameters=list(Phi=Phi.sex),
           accumulate=FALSE)
 ```
 
-If you fit more than a few models, use crm.wrapper rather than crm. It fits a set of models and returns a list with a model selection table that summarizes the fit of all the models. By default, crm.wrapper stores the model results externally and in the list it only stores the names of the files containing the models. If you set external=FALSE, then it will store the model results in the list as shown in the example below.
+If you fit more than a few models, use crm.wrapper rather than crm. It
+fits a set of models and returns a list with a model selection table
+that summarizes the fit of all the models. By default, crm.wrapper
+stores the model results externally and in the list it only stores the
+names of the files containing the models. If you set external=FALSE,
+then it will store the model results in the list as shown in the example
+below.
 
 ```{r}
 dipper.proc=process.data(dipper)
@@ -832,9 +842,13 @@ names(ddl$p)
 
 ## 6.1 Likely twins
 
-make sure you're using latest version of capData_byIndiv + the first entry from that
+make sure you're using latest version of capData_byIndiv + the first
+entry from that
 
-Based on capData, we have n = 35 likely twin pairs in which both have samples in tamRun5. Of these, n = 25 pairs have both blood and hair samples (and thus can be used for chimerism analyses). Within this set, n = 2 sets have three juveniles vs. two. 
+Based on capData, we have n = 35 likely twin pairs in which both have
+samples in tamRun5. Of these, n = 25 pairs have both blood and hair
+samples (and thus can be used for chimerism analyses). Within this set,
+n = 2 sets have three juveniles vs. two.
 
 ```{r}
 # twinList for all capData
@@ -917,7 +931,6 @@ Export twinList
 ```{r}
 write.csv(capData_twinList, "./paper3_demographics/twinList_capData_2009to2023.csv", row.names = F)
 ```
-
 
 # X Lifespan
 
@@ -1012,9 +1025,6 @@ groupMembership <- capData_byIndiv_v5 %>%
   arrange(as.numeric(animalID)) %>%
   relocate(c(animalID, `2009`, `2010`, `2011`, `2012`, `2013`, `2014`))
 ```
-
-
-
 
 # XXXXXXXXXXX
 
