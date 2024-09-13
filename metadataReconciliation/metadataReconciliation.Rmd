@@ -2452,7 +2452,12 @@ errorChecks_fullList_v5 <- rbind(errorChecks_fullList_v4,
 write.csv(errorChecks_fullList_v5, "./metadataReconciliation/master_metadataReconciliation_actionList_v5.csv", row.names = F)
 ```
 
-## 6.11 Update md_tamRun5_v5
+## 6.8 Update md_tamRun5_v5
+
+```{r}
+errorChecks_fullList_v5 <- read.csv("./metadataReconciliation/master_metadataReconciliation_actionList_v5.csv")
+```
+
 
 ```{r}
 md_tamRun5_v5 <- errorChecks6_actionList %>%
