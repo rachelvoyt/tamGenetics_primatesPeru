@@ -60,7 +60,6 @@ seqNames_to_shortNames <- read.csv("./primers/primers_seqName_to_shortName.csv")
 write.csv(seqNames_to_shortNames, "./project_data/seqNames_to_shortNames.csv", row.names = F)
 ```
 
-
 ## 3.2 Panel v3
 
 ### gtscore
@@ -72,12 +71,17 @@ pp_lwed_v3 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt
 
 pp_simp_v3 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt", header = T)
 
+pp_dual_v3 <- pp_fullSet_v3 %>%
+  filter(!str_detect(Locus, "LWED|SIMP"))
+
 # export to tamAnalyses_generalFiles
 write.table(pp_fullSet_v3, "./tamAnalyses_generalFiles/gtscore/primerProbeFile_panelv3_fullSet.txt", sep = "\t", row.names = F, col.names = T, quote = F)
 
-write.table(pp_lwed_v3, "./tamAnalyses_generalFiles/gtscore/primerProbeFile_panelv3_lwed.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+write.table(pp_lwed_v3, "./project_data/primerProbeFile_panelv3_lwed.txt", sep = "\t", row.names = F, col.names = T, quote = F)
 
-write.table(pp_simp_v3, "./tamAnalyses_generalFiles/gtscore/primerProbeFile_panelv3_simp.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+write.table(pp_simp_v3, "./project_data/primerProbeFile_panelv3_simp.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+
+write.table(pp_dual_v3, "./project_data/primerProbeFile_panelv3_dual.txt", sep = "\t", row.names = F, col.names = T, quote = F)
 ```
 
 ### gtseq
@@ -86,7 +90,7 @@ write.table(pp_simp_v3, "./tamAnalyses_generalFiles/gtscore/primerProbeFile_pane
 pp_fullSet_v3_gtseq <- pp_fullSet_v3 %>%
   select(c(Locus, Allele1, Allele2, Probe1, Probe2, Primer))
 
-write.table(pp_fullSet_v3_gtseq, "./tamAnalyses_generalFiles/gtseq/gtseq_locusInfo_panelv3.csv", col.names = F, row.names = F, sep = ",", quote = F)
+write.table(pp_fullSet_v3_gtseq, "./project_data/gtseq_locusInfo_panelv3.csv", col.names = F, row.names = F, sep = ",", quote = F)
 ```
 
 # 4 Species & sex assignments

@@ -270,11 +270,35 @@ gunzip -r .
 ## 3.3 Merge the two runs
 
 ```{bash}
-# Merge
-for i in tamRun3-*; do f=${i##*tamRun3}; cat $i tamRun3b$f > cat_$i ; done
+# Trim filenames to make them more manageable
+for f in *R1_001.fastq; do g="${f%%_S*}_R1.fastq"; mv "${f}" "${g}"; done
+for f in *R2_001.fastq; do g="${f%%_S*}_R2.fastq"; mv "${f}" "${g}"; done
 
-# Check to see that total runs add up
-for i in tamRun3-*; do f=${i##*tamRun3}; r1=$[$(cat cat_${i} | wc -l)/4 | bc]; echo ${i%_*} concatenated $r1; r2=$[$(cat ${i} | wc -l)/4 + $(cat tamRun3b${f} | wc -l)/4 | bc]; echo ${i%_*} separated $r2; diff=$[${r1}-${r2}]; echo ${i%_*} diff $diff; done
+# Edit first run filenames to be tamRun5a (repeat for runb if needed)
+rename 's/tamRun5/tamRun5a/' *.fastq
+
+# Create tamRun5ab merged fastq files
+for i in tamRun5a-*; do 
+    f=${i##*tamRun5a}; 
+    cat $i tamRun5b$f > tamRun5cat$f; 
+done
+
+# Check to see that total runs in tamRun5cat matches tamRun5a + tamRun5b
+for i in tamRun5a-*; do 
+    f=${i##*tamRun5a}; 
+    
+    # Calculate the number of reads in the concatenated file
+    r1=$(( $(cat tamRun5cat$f | wc -l) / 4 ));
+    echo "${i%_*} concatenated $r1";
+    
+    # Calculate the number of reads in the separate files and sum them
+    r2=$(( $(cat $i | wc -l) / 4 + $(cat tamRun5b$f | wc -l) / 4 ));
+    echo "${i%_*} separated $r2";
+    
+    # Calculate the difference
+    diff=$(( r1 - r2 ));
+    echo "${i%_*} diff $diff";
+done
 ```
 
 ## 3.4 Interleave files
@@ -288,11 +312,6 @@ Note that we have interleaved files for tamRun3, tamRun3b, and the merged versio
 cd ./../
 
 for i in ./00_run5Seqs/*_R1_001.fastq; do name=$(basename $i _R1_001.fastq); reformat.sh in=00_run5Seqs/${name}_R1_001.fastq in2=00_run5Seqs/${name}_R2_001.fastq out=02_run5Interleaved/${name}_interleaved.fastq; done
-
-# Trim filenames to make them more manageable
-cd ./02_run5Interleaved/
-
-for f in *.fastq; do g="${f%%_S*}.fastq"; mv "${f}" "${g}"; done
 ```
 
 # 4 Quality checks
@@ -308,10 +327,11 @@ To get sequence quality scores for each sample, we can use 'fastqc' paired with 
 cd ../01_run5QualityChecks
 conda activate fastqc-env
 
-# Run fastqc
-for i in ../00_run5Seqs/*; do fastqc $i; done
+# Run fastqc & move fastqc files to quality checks folder
+for i in ../00_run5Seqs/tamRun5a*; do fastqc $i; done
+mv ../00_run5Seqs/*fastqc* .
 
-# Move fastqc files to quality checks folder
+for i in ../00_run5Seqs/tamRun5b*; do fastqc $i; done
 mv ../00_run5Seqs/*fastqc* .
 
 # Activate multiqc environment
@@ -410,13 +430,19 @@ Create file for all samples in bash
 ```{bash}
 cd ./../02_run5Interleaved
 
-for i in *fastq; do echo $i; done > ./../03_run5GTscore/sampleFiles_fullSet.txt
+for i in tamRun5a*; do echo $i; done > ./../03_run5GTscore/run5a_sampleFiles_fullSet.txt
+
+for i in tamRun5b*; do echo $i; done > ./../03_run5GTscore/run5b_sampleFiles_fullSet.txt
+
+for i in tamRun5cat*; do echo $i; done > ./../03_run5GTscore/run5cat_sampleFiles_fullSet.txt
 ```
 
 Load into R
 
 ```{r}
-sf_fullSet <- read.table("./05_tamRun5/03_run5GTscore/sampleFiles_fullSet.txt")
+sf_fullSet_a <- read.table("./05_tamRun5/03_run5GTscore/run5a_sampleFiles_fullSet.txt")
+sf_fullSet_b <- read.table("./05_tamRun5/03_run5GTscore/run5b_sampleFiles_fullSet.txt")
+sf_fullSet_cat <- read.table("./05_tamRun5/03_run5GTscore/run5cat_sampleFiles_fullSet.txt")
 ```
 
 ### 5.1.2 Species subsets
@@ -428,16 +454,28 @@ Use md file to create sample file species subsets. Note that we're including the
 lwed <- filter(md_tamRun5_v5, is.na(species) | !species == "SIMP")
 simp <- filter(md_tamRun5_v5, is.na(species) | !species == "LWED")
 
-sf_lwed <- sf_fullSet %>%
+sf_lwed_a <- sf_fullSet_a %>%
+  filter(V1 %in% lwed$sampleFile)
+sf_lwed_b <- sf_fullSet_b %>%
+  filter(V1 %in% lwed$sampleFile)
+sf_lwed_cat <- sf_fullSet_cat %>%
   filter(V1 %in% lwed$sampleFile)
 
-sf_simp <- sf_fullSet %>%
+sf_simp_a <- sf_fullSet_a %>%
+  filter(V1 %in% simp$sampleFile)
+sf_simp_b <- sf_fullSet_b %>%
+  filter(V1 %in% simp$sampleFile)
+sf_simp_cat <- sf_fullSet_cat %>%
   filter(V1 %in% simp$sampleFile)
 
 # Export sample files
-write.table(sf_lwed, file = "./05_tamRun5/03_run5GTscore/sampleFiles_LWED.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_a, file = "./05_tamRun5/03_run5GTscore/run5a_sampleFiles_lwed.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_b, file = "./05_tamRun5/03_run5GTscore/run5b_sampleFiles_lwed.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_lwed_cat, file = "./05_tamRun5/03_run5GTscore/run5cat_sampleFiles_lwed.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 
-write.table(sf_simp, file = "./05_tamRun5/03_run5GTscore/sampleFiles_SIMP.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_simp_a, file = "./05_tamRun5/03_run5GTscore/run5a_sampleFiles_simp.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_simp_b, file = "./05_tamRun5/03_run5GTscore/run5b_sampleFiles_simp.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(sf_simp_cat, file = "./05_tamRun5/03_run5GTscore/run5cat_sampleFiles_simp.txt", sep = "\t", row.names = F, col.names = F, quote = F)
 ```
 
 ## 5.2 Primer probe files
@@ -481,47 +519,31 @@ write.table(pp_simp, "./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt", s
 
 Once the files are created, we can proceed with the first step in the GTscore pipeline - counting amplicon reads. We'll be doing doing this for the full set of data (all samples, all loci) as well as the species subsets of the data to allow for more accurate analyses of loci and sample performance.
 
-## 5.1 Info on AmpliconReadCounter.pl
+## 5.1 tamRun5a
 
-The read counter is written in perl (AmpliconReadCounter.pl), but can be called from R. Running it does the following:
-
-1.  Identifies each unique sequence, then counts the number of times each unique sequence occurs within an individual
-
-2.  Aligns each unique sequence with primer and probe; if the sequence doesn't align, then it is excluded as an off-target sequence and reports by individual and by locus are given.
-
--   Note: By default, all primers are trimmed to the length of the shortest primer to increase speed. Optionally the full length primer can be used for the primer but this may significantly increase run timing depending on variation in primer lengths across loci.
-
-Input flags for this script are:
-
--   --p a tab delimited file containing primer/probe information for each locus
--   --files a text file containing a list of .fastq sequence files to count reads from
-
-Optional flags:
-
--   --prefix optional prefix for output file names
--   --inDir option to specify directory containing sequence data
--   --inputType fq or fastqgz (defaults to fastqgz)
--   --useFullPrimer uses the full primer for counting reads rather than the trimmed primer
--   --alleleOrder order of alleles output in locusTable file. Options are original (matches primer-probe file order) or alphabetical (default)
--   --printMatched outputs matched reads for each individual
--   --printDiscarded outputs discarded reads for each individual
-
-## 5.2 Run AmpliconReadCounterl.pl
-
-To run from the command line, use: perl AmpliconReadCounter.pl -p primerProbeFile.txt --files sampleList.txt. To run from R, use the scripts below.
+(primer-probe file from project_data is the same as in tamRun5 files; just wanted the shorter path)
 
 ```{r count reads for amplicons, eval=FALSE}
-# All samples, all loci
+# all samples, all loci (includes negatives)
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt --files ./05_tamRun5/03_run5GTscore/sampleFiles_fullSet.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix fullSet_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./primerProbeFile_panelv3_fullSet.txt --files ./05_tamRun5/03_run5GTscore/run5a_sampleFiles_fullSet.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5a_fullSet_")
+
+# pos samples (no negs), dual loci
+system2("perl",
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./project_data/primerProbeFile_panelv3_dual.txt --files ./05_tamRun5/03_run5GTscore/run5a_sampleFiles_pos.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5a_posDual_")
+
+# lwed samples, lwed + dual loci
+
+
+
 
 # LWED
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./05_tamRun5/03_run5GTscore/sampleFiles_LWED.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix LWED_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_LWED.txt --files ./05_tamRun5/03_run5GTscore/run5a_sampleFiles_lwed.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5a_lwed_")
 
 # SIMP
 system2("perl",
-        args="./GTscore_sourceScripts/AmpliconReadCounter.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./05_tamRun5/03_run5GTscore/sampleFiles_SIMP.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix SIMP_")
+        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./05_tamRun5/03_run5GTscore/primerProbeFileV3_SIMP.txt --files ./05_tamRun5/03_run5GTscore/run5a_sampleFiles_simp.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5a_simp_")
 ```
 
 AmpliconReadCounter.pl outputs a LocusTable file and an AlleleReads file for single-SNP and haplotype data, plus two summary files.
