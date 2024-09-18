@@ -2773,8 +2773,115 @@ po_simp_run2_fathers <- rbind(po_simp_run2_pat1,
                               po_simp_run2_pat2)
 ```
 
+# 7 CKMRsim
+
+```{r}
+remotes::install_github("eriqande/CKMRsim")
+library(CKMRsim)
+library(tidyverse)
+# the next step tests to see if mendel was already installed.
+# if not, it installs it
+if(system.file("bin", package = "CKMRsim") == "") {
+  install_mendel(Dir = system.file(package = "CKMRsim"))
+}
+```
+
+```{r}
+genos0x_lwed_forCKMR <- names(genos0x_run5_lwedHair_indidOnly) %>%
+  map_dfc(~ genos0x_run5_lwedHair_indidOnly %>%
+            select(all_of(.x)) %>%
+            separate(.x,
+                     into = paste0(.x, c(".1", ".2")),
+                     sep = ",")
+          ) %>%
+  mutate(across(everything(), ~ gsub("0", NA, .))) %>%
+  rownames_to_column("sampleID")
+
+long_genos <- genos0x_lwed_forCKMR %>%
+  rename(Indiv = sampleID) %>%
+  pivot_longer(
+    cols = -Indiv, 
+    names_to = c("Locus", "gene_copy"), 
+    names_sep = "\\.", 
+    values_to = "Allele"
+  )
+```
+
+```{r}
+locus_names <- unique(long_genos$Locus)
+afreqs_ready <- long_genos %>%
+  count(Locus, Allele) %>%  
+  group_by(Locus) %>%
+  mutate(
+    Freq = n / sum(n),
+    Chrom = "Unk",
+    Pos = as.integer(factor(Locus, levels = locus_names))
+  ) %>%
+  ungroup() %>%
+  select(Chrom, Pos, Locus, Allele, Freq) %>%
+  arrange(Pos, desc(Freq)) %>%
+  mutate(AlleIdx = NA,
+         LocIdx = NA) %>%
+  filter(!is.na(Allele)) %>%
+  reindex_markers()
+
+ckmr <- create_ckmr(
+  D = afreqs_ready,
+  kappa_matrix = kappas[c("PO", "FS", "HS", "HAN", "U"), ],
+  ge_mod_assumed = ge_model_TGIE,
+  ge_mod_true = ge_model_TGIE,
+  ge_mod_assumed_pars_list = list(epsilon = 0.005),
+  ge_mod_true_pars_list = list(epsilon = 0.005)
+)
+```
+
+PO = parent-offspring
+FS = full sib
+HS = half sib
+HAN = half aunt-niece (or uncle/niece)
+U = unrelated
+
+```{r}
+# This simulates a large number of pairwise genotype probabilites
+# at each locus
+Qs <- simulate_Qij(
+  ckmr, 
+  calc_relats = c("PO", "FS", "HS", "HAN", "U"),
+  sim_relats = c("PO", "FS", "HS", "HAN", "U") 
+)
 
 
+# In the following, we extract those genotype probabilities in different
+# ways to calculate a variety of different log-likelihood ratios
+# for different relationships.  
+
+# in this particular case, we are looking at log likelihood ratios
+# for the hypothesis of Parent-Offspring vs Unrelated
+PO_U_logls <- extract_logls(
+  Qs,
+  numer = c(PO = 1),
+  denom = c(U = 1)
+)
+
+# And we can plot the distribution of those logl ratios for each
+# of the different true relationships. 
+ggplot(
+  PO_U_logls,
+  aes(x = logl_ratio, fill = true_relat)
+) +
+  geom_density(alpha = 0.25)
+```
+
+They use max_mismatch = 500 out of 2500 total genos (i.e., 20%). 0.2*154 = 30.8
+
+```{r}
+matchers <- find_close_matching_genotypes(
+  LG = long_genos,
+  CK = ckmr,
+  max_mismatch = 31
+)
+matchers
+```
 
 
 # XXXXXXXXXXXXXXXXXXXXXXXXX
