@@ -1700,26 +1700,57 @@ dupTest_spSex_capData_byIndiv_v5 <- capData_byIndiv_v5 %>%
   summarize(n=n())
 ```
 
-### byIndiv
+### Clean step #5: General cleanup
 
-1.  Address all issues noted by MD
-2.  Ensure the following variables are filled in:
-    1.  captureDate
-    2.  captureID
-    3.  species
-    4.  groupName
-    5.  groupID
-    6.  ageClass
-    7.  sex
-    8.  animalName1
-    9.  animalID
-    10. trappingID
-    11. microchip1
-    12. tailPattern
-3.  Address missing data
-4.  Address valid_groupName = FALSE
-5.  Ensure species and sex are consistent per animalID; address
-    inconsistencies
+Mostly just replacing "NULL", "UNK", etc. with NA values, but also:
+
+-   change rowID 1 ageClass to adult (found that was not in fact a
+juv as listed in capData)
+
+```{r}
+capData_byIndiv_v5 <- read.csv("./DISSERTATION/ch2_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v5.csv")
+
+table(capData_byIndiv_v5$ageClass)
+table(capData_byIndiv_v5$ageClass_classifier)
+
+na_list <- c("NULL", "unk", "UNK")
+
+capData_byIndiv_v6 <- capData_byIndiv_v5 %>%
+  # fix ageClass/classifier variables
+  mutate(
+    ageClass_classifier = case_when(
+      ageClass == "old_adult" ~ "adult_old",
+      ageClass == "Young" ~ "adult_young",
+      .default = ageClass_classifier
+    ),
+    ageClass = case_when(
+      ageClass %in% na_list ~ NA,
+      ageClass == "old_adult" ~ "adult",
+      ageClass == "Young" ~ "adult",
+      .default = ageClass
+    )
+  ) %>%
+  # fix age for rowID 1
+  mutate(
+    ageClass = case_when(
+      rowID == 1 ~ "adult",
+      .default = ageClass
+    )
+  )
+
+table(capData_byIndiv_v6$ageClass)
+table(capData_byIndiv_v6$ageClass_classifier)
+```
+
+#### EXPORT
+
+```{r}
+write.csv(capData_byIndiv_v6, "./DISSERTATION/ch2_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v6.csv", row.names = F)
+```
+
+
+
+
 
 ## 4.2 captureData_byGroup
 

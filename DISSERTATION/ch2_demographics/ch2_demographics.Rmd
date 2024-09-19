@@ -20,6 +20,7 @@ dissertation. Data used is from tamRun5, hair samples only.
 # 2 Packages
 
 ```{r}
+library(janitor)
 library(tidyverse)
 source("project_scripts/ravo_gtScripts.R") # for my custom functions
 ```
@@ -35,52 +36,34 @@ tamGenetics_paper3_dataOrganization), then 1) filter to first capture
 for each animalID 2) filter again to animalIDs in tamRun5
 
 **note** exclude those in capData w/"UNK" animalID; did a lot of digging
-in tamGenetics_paper3_dataOrganization.Rmd and most likely these entries
+in ch2_dataOrganization.Rmd and most likely these entries
 need to be ditched
-
-**note2** change rowID 1 ageClass to adult (found that was not in fact a
-juv as listed in capData)
 
 ```{r}
 # latest updated version of capData_byIndiv from current rmd
-capData_byIndiv <- read.csv("./paper3_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v5.csv") %>%
+capData_byIndiv <- read.csv("./DISSERTATION/ch2_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v6.csv") %>%
   filter(as.character(animalID) != "UNK") %>%
-  mutate(
-    ageClass = case_when(
-      rowID == 1 ~ "adult",
-      .default = ageClass
-    )
-  ) %>%
   # filter to 2009-2019 records only
-  filter(rowID < 617)
-
-# filter to first capture for each animalID
-capData_byIndiv_firstEntry <- capData_byIndiv[match(unique(capData_byIndiv$animalID), capData_byIndiv$animalID),] %>%
-  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+  filter(as.numeric(rowID) <= 613)
 
 # species subsets
-capData_byIndiv_lwed <- capData_byIndiv_firstEntry %>%
+capData_byIndiv_lwed <- capData_byIndiv %>%
   filter(species == "LWED")
-capData_byIndiv_simp <- capData_byIndiv_firstEntry %>%
+capData_byIndiv_simp <- capData_byIndiv %>%
   filter(species == "SIMP")
 
+# filter to first capture for each animalID
+capData_byIndiv_firstEntry <- capData_byIndiv[match(unique(capData_byIndiv$animalID), capData_byIndiv$animalID),]
+  #select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
 
-
-# filter animalIDs in tamRun5
-## full set
-capData_byIndiv_firstEntry_tamRun5 <- capData_byIndiv_firstEntry %>%
-  filter(animalID %in% md_tamRun5_v3$animalID)
-
-## hair samples
-capData_byIndiv_firstEntry_tamRun5Hair <- capData_byIndiv_firstEntry %>%
-  filter(animalID %in% md_tamRun5_hairSamples$animalID)
-
-## blood samples
-capData_byIndiv_firstEntry_tamRun5Blood <- capData_byIndiv_firstEntry %>%
-  filter(animalID %in% md_tamRun5_bloodSamples$animalID)
+# species subsets
+capData_byIndiv_firstEntry_lwed <- capData_byIndiv_firstEntry %>%
+  filter(species == "LWED")
+capData_byIndiv_firstEntry_simp <- capData_byIndiv_firstEntry %>%
+  filter(species == "SIMP")
 ```
 
-## 3.2 Genetic sample metadata
+## 3.2 Genetic data
 
 Latest version of md_tamRun5 (from metadataReconciliation.Rmd file);
 hair samples only
@@ -102,99 +85,62 @@ table(run5_md_hair$species)
 
 ## 4.1 capData numbers
 
-From 2009-2019: - LWED - n = 145 total - n = 70 juveniles (born during
-study period) - n = 75 non-juvs - n = 16 distinct groups - SIMP - n =
-103 total - n = 53 juveniles (born during study period) - n = 50
-non-juvs - n = 10 distinct groups
+I just did juveniles vs. non-juveniles here rather than looking at subadult/adult distinctions -- mostly bc I think these are a touch iffy, plus there are some indivs with NA for ageClass
+
+From 2009-2019:
+
+**LWED** - nGroups = 16
+ ageClass  F  M Total
+ juvenile 26 44    70
+   nonJuv 42 33    75
+    Total 68 77   145
+
+**SIMP** - nGroups = 10
+ ageClass  F  M Total
+ juvenile 26 27    53
+   nonJuv 22 27    49
+    Total 48 54   102
 
 ```{r}
 # LWED
-capData_byIndiv_firstEntry_lwed <- capData_byIndiv_firstEntry %>%
-  # lwed only
-  filter(species == "LWED") %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613)
-
-table(capData_byIndiv_firstEntry_lwed$ageClass)
-
-## n = 145 total LWED individuals from 2009-2019
 capData_byIndiv_firstEntry_lwed %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  nrow()
+  mutate(ageClass = case_when(
+    is.na(ageClass) ~ "nonJuv",
+    ageClass != "juvenile" ~ "nonJuv",
+    .default = ageClass
+  )) %>%
+  group_by(ageClass, sex) %>%
+  summarise(
+    count = n()
+  ) %>%
+  pivot_wider(names_from = sex,
+              values_from = count) %>%
+  adorn_totals() %>%
+  mutate(
+    Total = F + M
+  )
 
-## n = 70 juv LWED
-capData_byIndiv_firstEntry_lwed %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  # juvs only
-  filter(ageClass == "juvenile") %>%
-  nrow()
-
-## n = 75 non-juv LWED
-145-70
-
-## n = 33 male non-juv lwed
-capData_byIndiv_firstEntry_lwed %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  # non-juvs only
-  filter(ageClass != "juvenile") %>%
-  # males
-  filter(sex == "M") %>%
-  nrow()
-
-## n = 42 female non-juv lwed
-capData_byIndiv_firstEntry_lwed %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  # non-juvs only
-  filter(ageClass != "juvenile") %>%
-  # males
-  filter(sex == "F") %>%
-  nrow()
-
-## groups
-capData_byIndiv_firstEntry %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  filter(species == "LWED") %>%
-  select(groupName) %>%
-  distinct() %>%
-  nrow()
-
-
+n_distinct(capData_byIndiv_firstEntry_lwed$groupID)
 
 # SIMP
-## n = 103 total SIMP individuals from 2009-2019
-capData_byIndiv_firstEntry %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  # lwed only
-  filter(species == "SIMP") %>%
-  nrow()
+capData_byIndiv_firstEntry_simp %>%
+  mutate(ageClass = case_when(
+    is.na(ageClass) ~ "nonJuv",
+    ageClass != "juvenile" ~ "nonJuv",
+    .default = ageClass
+  )) %>%
+  group_by(ageClass, sex) %>%
+  summarise(
+    count = n()
+  ) %>%
+  pivot_wider(names_from = sex,
+              values_from = count) %>%
+  adorn_totals() %>%
+  mutate(
+    Total = F + M
+  )
 
-## n = 53 juv SIMP
-capData_byIndiv_firstEntry %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  # lwed only
-  filter(species == "SIMP") %>%
-  # juvs only
-  filter(ageClass == "juvenile") %>%
-  nrow()
-
-## n = 50 non-juv SIMP
-103-53
-
-## groups
-capData_byIndiv_firstEntry %>%
-  # filter to 2019 and earlier
-  filter(rowID <= 613) %>%
-  filter(species == "SIMP") %>%
-  select(groupName) %>%
-  distinct() %>%
-  nrow()
+n_distinct(capData_byIndiv_firstEntry_simp$groupID)
 ```
 
 ## 4.2 tamRun5 numbers
@@ -317,6 +263,12 @@ capData_byIndiv_firstEntry_tamRun5Hair %>%
 ## n = 47 non-juv SIMP
 99-52
 ```
+
+
+
+
+
+
 
 # 5 Capture-mark-recapture models
 
