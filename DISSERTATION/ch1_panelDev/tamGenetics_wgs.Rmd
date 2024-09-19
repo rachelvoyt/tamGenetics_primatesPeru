@@ -1,0 +1,148 @@
+---
+title: "tamGenetics_wgs"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+# 2 Packages
+
+## command line packages
+
+Install Miniconda if not already installed (install in home directory! makes things easier)
+
+```{bash}
+# start in your home directory and do the following:
+mkdir conda_install
+cd conda_install/
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+chmod u+x Miniconda3-latest-Linux-x86_64.sh 
+./Miniconda3-latest-Linux-x86_64.sh 
+```
+
+Install mamba
+
+```{bash}
+conda install mamba -n base -c conda-forge
+```
+
+Install software into bioinformatics environment
+
+```{bash}
+mamba create -n bioinf -c bioconda bcftools bwa samtools
+```
+
+## R packages
+
+```{r}
+library(tidyverse)
+```
+
+# 3 Data
+
+There's some kind of issue with locus "SEXID_gatk_filtered_new_non_hom_intervals_CM018939.1_332662-333103_chosen_consensus_modified" -- based on some digging around, I'm *fairly* certain that 333103 is the pre-bp3error stopPos while 333110 is the updated stopPos. 
+
+```{r}
+panel_v3 <- read.table("./project_data/primerProbeFile_panelv3_fullSet.txt", header = T)
+
+# pretty sure this is Sam's file w/the loci info after bp3error interval updates
+samMasterSNP <- read.csv("./primers/26Sep2022_master_SNP_with_replacement_SNPs.csv") %>%
+  mutate(
+    snpID = str_c("chr", chrom_num, ":", start, "-", stop)
+  ) %>%
+  relocate(snpID)
+
+lociInfo <- read.csv("./project_data/seqNames_to_shortNames.csv") %>%
+  select(primerName3, seqID3) %>%
+  dplyr::rename("Locus" = "primerName3") %>%
+  filter(Locus %in% panel_v3$Locus) %>%
+  # extract chr number
+  mutate(
+    temp1 = sub(".*_(CM[0-9]+\\.[0-9]+).*", "\\1", seqID3),
+    temp2 = str_sub(temp1, 7, 8),
+    chr = as.numeric(temp2) - 16,
+    chr = str_c("chr", chr)
+  ) %>%
+  select(-contains("temp")) %>%
+  # extract start/end numbers
+  mutate(
+    beginPos = sub(".*CM[0-9]+\\.[0-9]+[-:.\\_]([0-9]+)-([0-9]+).*", "\\1", seqID3),
+    endPos = sub(".*CM[0-9]+\\.[0-9]+[-:.\\_]([0-9]+)-([0-9]+).*", "\\2", seqID3)
+  ) %>%
+  merge(., panel_v3[, c("Locus", "SNPpos")], by = "Locus") %>%
+  mutate(
+    snpID = str_c(chr, ":", beginPos, "-", endPos)
+  ) %>%
+  # update chr23:332662-333103 to 333110
+  mutate(
+    snpID = case_when(
+      snpID == "chr23:332662-333103" ~ "chr23:332662-333110",
+      .default = snpID
+    ),
+    endPos = case_when(
+      snpID == "chr23:332662-333110" ~ "333110",
+      .default = endPos
+    )
+  ) %>%
+  merge(., samMasterSNP[, c("snpID", "SNP")], by = "snpID", all.x = T)
+```
+
+# 4 Create .list file
+
+Use lociInfo to create .list file for GATK SelectVariants 
+
+```{r}
+listFile <- lociInfo %>%
+  select(chr, beginPos, endPos) %>%
+  mutate(
+    temp = str_c(chr, ":", beginPos, "-", endPos)
+  )
+
+write.table(listFile, "./DISSERTATION/ch1_panelDev/snpList.list", quote = FALSE, row.names = FALSE, col.names = FALSE)
+```
+
+# 5 Extract genos from VCF
+
+```{bash}
+# example
+bcftools query -i 'ID=@NOD2SNPS.txt' -f'[CHROM POS ID REF ALT QUAL %SAMPLE\n][%CHROM %POS %ID %REF %ALT %QUAL %GT\n]' "../Raw Files/annotated.genotypes.vcf" | sed 's|0/1|HET|g' | sed 's|0/0|REF|g' | sed 's|1/1|HOM|g' | sed 's|R/.|HET|g' > next.txt
+
+# mine:
+bcftools query -i 'ID=@NOD2SNPS.txt' -f'[CHROM POS ID REF ALT QUAL %SAMPLE\n][%CHROM %POS %ID %REF %ALT %QUAL %GT\n]' "../Raw Files/annotated.genotypes.vcf" | sed 's|0/1|HET|g' | sed 's|0/0|REF|g' | sed 's|1/1|HOM|g' | sed 's|R/.|HET|g' > next.txt
+```
+
+
+
+
+.vcf.gz = vcf files
+.tbi = indexed file
+
+First need to install miniconda/mamba -- follow https://eriqande.github.io/eca-bioinf-handbook/working-on-remote-servers.html#miniconda
+
+
+
+How to access VCF files on remote server (from youtube video https://www.youtube.com/watch?v=7W7hrWNyCaM):
+
+1. Copy VCF file link
+
+2. Assign the link a variable name for easier manipulation:
+
+```{bash}
+# assign variable name
+link=https://export.uppmax.uu.se/snic2022-6-144/share/tmp_dir_vcfs/interval_1.vcf.gz
+
+# $ indicates that we want the actual value
+bcftools query -l $link
+```
+
+
+
+RESOURCES
+
+reddit thread talking about doing what I think I want to do? https://www.reddit.com/r/bioinformatics/comments/jbw72n/retrieve_samples_with_specific_snps_from_a_vcf/ 
