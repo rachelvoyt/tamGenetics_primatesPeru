@@ -7,6 +7,7 @@
 !*.Rmd
 !*.R
 !*.pl
+!*.sh
 # apply override to all dirs recursively
 !**/
 # then go back and ignore any archived
