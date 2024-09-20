@@ -23,7 +23,7 @@ library(tidyverse)
 
 ## 3.1 seqNames_to_shortNames
 
-typo in some seqID2 names? where seqID1 has "_final_rm400s_", seqID2 has "_finalm400s_" and I'm not sure this is correct? dunno where I originally got seqID2 names
+typo in some seqID2 names? where seqID1 has "*final_rm400s*", seqID2 has "*finalm400s*" and I'm not sure this is correct? dunno where I originally got seqID2 names
 
 species-specific sexid names based on Sam's thesis p. 20
 
@@ -93,6 +93,144 @@ pp_fullSet_v3_gtseq <- pp_fullSet_v3 %>%
 write.table(pp_fullSet_v3_gtseq, "./project_data/gtseq_locusInfo_panelv3.csv", col.names = F, row.names = F, sep = ",", quote = F)
 ```
 
+## 3.3 Complete lociInfo file
+
+Including locus name, chromosome/SNP position info, primers, probes
+
+### Data
+
+**NOTE** - Sam's Master SNP google sheet file has the chromosome and SNP position info, but I'm not sure yet which tab has the correct information after she made post-bp3error adjustments to these numbers. The "Master_SNP_with_replacement_SNPs" tab *should* have the correct values, but some of the snpPos seem outright wrong (e.g., snpPos = 34 or some other tiny number). I tried looking at the "GTseq" tab to see if perhaps those were the correct/updated values? But still not sure.
+
+I've asked Sam to clarify; waiting for response
+
+```{r}
+# final snp panel
+panel_v3 <- read.table("./project_data/primerProbeFile_panelv3_fullSet.txt", header = T)
+colnames(panel_v3) <- tolower(colnames(panel_v3))
+
+# primers for final snp panel -- just need reverse primers here
+primerSet_v3 <- read.csv("./primers/03_lociChoices/primerSet_v3.csv") %>%
+  filter(fwdRev == "rev")
+
+# seqNames_to_shortNames
+seqNames_to_shortNames <- read.csv("./project_data/seqNames_to_shortNames.csv")
+
+#################
+### SAM FILES ###
+#################
+
+# "Master_SNP_with_replacement_SNPs" tab
+samMasterSNP_masterTab <- read_excel("./primers/26Sep2022_masterSNPFile.xlsx", sheet = 2, skip = 1) %>%
+  # clean messy colnames
+  `colnames<-` (c("null", "set", "species", "chr_num", "chr_name", "snpPos", "beginPos", "endPos", "snp_dist_to_start", "length", "snp_dist_to_end", "mfe_p1", "mfe_p2", "bp3index_unique", "passed_inSilico", "notes_inSilico", "snp_not_in_amplicon", "amplicon_contains_other_vars", "other_vars_equallyInformative", "other_vars_lessInformative", "snpPos_old", "notes1", "beginPos_old", "endPos_old")) %>%
+  # remove second row
+  filter(set != "sum") %>%
+  # ditch first col
+  select(-null) %>%
+  # fix E notation
+  mutate(
+    endPos = as.numeric(endPos)
+  ) %>%
+  # create chrID for merging later
+  mutate(
+    chrID = str_c("chr", chr_num, ":", beginPos, "-", endPos)
+  ) %>%
+  relocate(chrID)
+
+# "GTseq" tab
+samMasterSNP_gtseqTab <- read_excel("./primers/26Sep2022_masterSNPFile.xlsx", sheet = 4) %>%
+  # clean messy colnames
+  `colnames<-` (c("set", "species", "chr_num", "chr_name", "snpPos", "beginPos", "endPos", "bp3index_unique", "snpPos_old", "notes1", "bp3_error", "gtseqNotes", "remove_yesNo", "nonInf_yesNo", "notes2")) %>%
+  mutate(
+    endPos = as.numeric(endPos) # ditch E notation
+  ) %>%
+  # create chrID for merging later
+  mutate(
+    chrID = str_c("chr", chr_num, ":", beginPos, "-", endPos)
+  ) %>%
+  relocate(chrID)
+```
+
+### Create lociInfo file
+
+Creating master file with locus info that includes all chromosome/SNP position stuff + the locus short-names, including:
+
+-   seqID
+-   chr_name
+-   chr_num
+-   snpPos_inChr
+-   startPos
+-   endPos
+-   locus
+-   snpPos_inAmp
+-   allele1
+-   allele2
+-   probe1
+-   probe2
+-   primerF
+-   primerR
+
+------------------------------------------------------------------------
+
+There's some kind of issue with locus "SEXID_gatk_filtered_new_non_hom_intervals_CM018939.1_332662-333103_chosen_consensus_modified" -- based on some digging around, I'm *fairly* certain that 333103 is the pre-bp3error stopPos while 333110 is the updated stopPos.
+
+```{r}
+lociInfo <- seqNames_to_shortNames %>%
+  select(primerName3, seqID3) %>%
+  filter(primerName3 %in% panel_v3$locus) %>%
+  dplyr::rename("locus" = "primerName3",
+                "seqID" = "seqID3") %>%
+  
+  # update seqID
+  mutate(
+    seqID = case_when(
+      seqID == "SEXID_gatk_filtered_new_non_hom_intervals_CM018939.1_332662-333103_chosen_consensus_modified" ~ "SEXID_gatk_filtered_new_non_hom_intervals_CM018939.1_332662-333110_chosen_consensus_modified",
+      .default = seqID
+    )
+  ) %>%
+ 
+  # extract chr number
+  mutate(
+    chr_name = sub(".*_(CM[0-9]+\\.[0-9]+).*", "\\1", seqID),
+    chr_num = str_sub(chr_name, 7, 8),
+    chr_num = as.numeric(chr_num) - 16
+  ) %>%
+  
+  # extract start/end numbers
+  mutate(
+    startPos = sub(".*CM[0-9]+\\.[0-9]+[-:.\\_]([0-9]+)-([0-9]+).*", "\\1", seqID),
+    endPos = sub(".*CM[0-9]+\\.[0-9]+[-:.\\_]([0-9]+)-([0-9]+).*", "\\2", seqID)
+  ) %>%
+  mutate(
+    chrID = str_c("chr", chr_num, ":", startPos, "-", endPos)
+  ) %>%
+  
+  # add snpID based on chr_name + snpPos (use gtseq tab for now)
+  merge(., samMasterSNP_gtseqTab[, c("chrID", "snpPos")], by = "chrID", all.x = T, suffixes = c("_masterTab", "_gtseqTab")) %>%
+#  mutate(
+#    snpID = str_c(chr_name, "-", snpPos)
+#  ) %>%
+ 
+  # add ploidy, alleles, probes, and forward primer
+  merge(., panel_v3, by = "locus") %>%
+  
+  # add reverse primer
+  merge(., primerSet_v3[, c("primerName3", "seqPrimer")], by.x = "locus", by.y = "primerName3") %>%
+  
+  dplyr::rename("snpPos_inChr" = "snpPos",
+                "snpPos_inAmp" = "snppos",
+                "primerF" = "primer",
+                "primerR" = "seqPrimer") %>%
+  select(locus, ploidy, snpPos_inAmp, allele1, allele2, probe1, probe2, primerF, primerR, seqID, chr_name, chr_num, snpPos_inChr, startPos, endPos) %>%
+  arrange(locus)
+```
+
+### Export
+
+```{r}
+write.csv(lociInfo, "./project_data/master_lociInfo.csv")
+```
+
 # 4 Species & sex assignments
 
 ## 4.1 Assign species
@@ -104,13 +242,13 @@ speciesKey <- read.csv("./03_tamRun3/04_genoAnalyses/speciesSNP_key_14Dec2022.cs
   arrange(Locus) %>%
   dplyr::rename("locus" = "Locus")
 
-write.csv(speciesKey, "./tamAnalyses_generalFiles/speciesKey.csv", row.names = F)
+write.csv(speciesKey, "./project_data/speciesKey.csv", row.names = F)
 ```
 
 ### Code
 
 ```{r}
-source("./my_sourceScripts/assignSpecies.R")
+source("./project_scripts/ravo_assignSpecies.R")
 ```
 
 ### Test
@@ -142,13 +280,13 @@ sexKey <- read.csv("./03_tamRun3/04_genoAnalyses/sexSNP_key_8Dec2022.csv") %>%
   dplyr::rename("locus" = "Locus") %>%
   arrange(locus)
 
-write.csv(sexKey, "./tamAnalyses_generalFiles/sexKey.csv", row.names = F)
+write.csv(sexKey, "./project_data/sexKey.csv", row.names = F)
 ```
 
 ### Code
 
 ```{r}
-source("./my_sourceScripts/assignSex.R")
+source("./project_scripts/ravo_assignSex.R")
 ```
 
 ### Test
