@@ -228,7 +228,7 @@ lociInfo <- seqNames_to_shortNames %>%
 ### Export
 
 ```{r}
-write.csv(lociInfo, "./project_data/master_lociInfo.csv")
+write.csv(lociInfo, "./project_data/master_lociInfo.csv", row.names = F)
 ```
 
 # 4 Species & sex assignments
