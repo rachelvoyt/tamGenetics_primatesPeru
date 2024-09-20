@@ -1,0 +1,364 @@
+---
+title: "tamGenetics_wgs"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+Note that VCF files are 1-based
+
+## RESOURCES:
+
+-   tabix <https://www.htslib.org/doc/tabix.html>
+
+-   vcftools <https://vcftools.github.io/links.html>
+
+-   GATK tool index <https://gatk.broadinstitute.org/hc/en-us/sections/27007892463131-4-6-0-0-Current?page=2#articles>
+
+-   samtools how to extract stuff from VCFs <https://samtools.github.io/bcftools/howtos/query.html>
+
+-   bcftools documentation <https://samtools.github.io/bcftools/bcftools.html#query>
+
+-   eriqande book <https://eriqande.github.io/eca-bioinf-handbook/handle-vcf.html#bcftools>
+
+-   reddit post <https://www.reddit.com/r/bioinformatics/comments/jbw72n/comment/g94sge1/> - youtube vid <https://www.youtube.com/watch?v=7W7hrWNyCaM>
+
+-   biostars <https://www.biostars.org/p/298361/>
+
+-   biostars (less helpful) <https://www.biostars.org/p/9576200/>
+
+-   pysam maybe helpful code bit? <https://github.com/pysam-developers/pysam/issues/469>
+
+-   <https://speciationgenomics.github.io/filtering_vcfs/>
+
+# 2 Packages
+
+## R packages
+
+```{r}
+library(janitor)
+library(readxl)
+library(tidyverse)
+```
+
+## command line packages
+
+Following <https://eriqande.github.io/eca-bioinf-handbook/working-on-remote-servers.html#miniconda>
+
+Install Miniconda if not already installed (install in home directory! makes things easier)
+
+```{bash}
+# start in your home directory and do the following:
+mkdir conda_install
+
+cd conda_install/
+
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+
+chmod u+x Miniconda3-latest-Linux-x86_64.sh 
+
+./Miniconda3-latest-Linux-x86_64.sh 
+```
+
+Then install mamba
+
+```{bash}
+conda install mamba -n base -c conda-forge
+```
+
+Install software into bioinformatics environment
+
+```{bash}
+mamba create -n bioinf -c bioconda bcftools bwa samtools
+```
+
+# 3 Data
+
+## 3.1 Metadata
+
+```{r}
+md <- read.csv("./samFiles/tamGenetics_wgsMetadata.csv") %>%
+  mutate(
+    species = case_when(
+      species == "Leontocebus weddelli" ~ "lwed",
+      species == "Saguinus imperator" ~ "simp"
+    ),
+    sex = case_when(
+      sex == "Female" ~ "F",
+      sex == "Male" ~ "M"
+    ),
+    animalID_md = str_c(species, sex, animalID, sep = "_")
+  ) %>%
+  relocate(sampleID, animalID, animalID_md)
+```
+
+## 3.2 Loci info
+
+```{r}
+lociInfo <- read.csv("./project_data/master_lociInfo.csv") %>%
+  mutate(
+    snpID = str_c(chr_name, ":", snpPos_inChr)
+  )
+```
+
+# 4 Get VCF genos
+
+## 4.1 Setup
+
+```{bash}
+# 1) activate bioinf environment
+conda activate bioinf
+
+# 2) get in correct directory
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch1_panelDev/00_dataRaw
+```
+
+## 4.2 Create loci ref file
+
+### Check format in VCF files
+
+```{bash}
+# 3) get CHROM and POS for each row of VCF file to check format
+bcftools query -f '%CHROM\t%POS\n' interval_1.vcf.gz
+```
+
+### .txt file for bcftools
+
+```{r}
+lociList_bcftools <- lociInfo %>%
+  select(chr_name, snpPos_inChr) %>%
+  arrange(chr_name, snpPos_inChr)
+
+write.table(lociList_bcftools, "./06_tamRun_wgs/00_data/lociList_bcftools.txt", quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+```
+
+### .list file for GATK SelectVariants
+
+Use lociInfo to create .list file for GATK SelectVariants
+
+```{r}
+lociList_gatk <- lociInfo %>%
+  select(chr_num, startPos, endPos) %>%
+  mutate(
+    temp = str_c(chr_num, ":", startPos, "-", endPos)
+  ) %>%
+  select(temp)
+
+write.table(lociList_gatk, "./06_tamRun_wgs/00_data/lociList_gatk.list", quote = FALSE, row.names = FALSE, col.names = FALSE)
+```
+
+## 4.3 Extract genos from VCF
+
+They literally have an example of what I want on the bcftools documentation page. wowww. <https://samtools.github.io/bcftools/bcftools.html#query>
+
+### Shell script
+
+Wrote a shell script that can access each VCF file on Sam's server and call bcftools query for each:
+
+\*\*note that there are files on the server up to interval_24, but we only have loci on chromosomes 1-23 (maybe saddlebacks and emps only have 23 chromosomes while the common marmoset has 24?? dunno)
+
+```{bash}
+#!/bin/bash
+
+# definitions
+base_url="https://export.uppmax.uu.se/snic2022-6-144/share/tmp_dir_vcfs/"
+loci_list="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamRun_wgs/00_data/lociList_bcftools.txt"
+output_dir="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamRun_wgs/00_data/00_vcfData/"
+
+# loop function
+for i in {1..23}
+do 
+    # define url for individual vcf file
+    vcf_url="$base_url/interval_${i}.vcf.gz"
+
+    # define output for individual vcf file
+    output_file="$output_dir/interval_${i}_genos.txt"
+
+    # extract genos for loci in list, output to txt file
+    bcftools query -H -f '%CHROM\t%POS\t%REF\t%ALT[\t%GT\t%DP\t%GQ]\n' -R "$loci_list" "$vcf_url" > "$output_file"
+
+    # print message indicating file has been processed
+    echo "Processed interval_${i}.vcf.gz -> $output_file"
+done
+```
+
+bcftools variable definitions (more details at <https://samtools.github.io/bcftools/bcftools.html#query>):
+
+-H, --print-header -f, --format -R, --regions-file
+
+Notes on output: /: genotype unphased \|: genotype phased
+
+GQ (Integer): Conditional genotype quality, encoded as a phred quality − 10log_10 p(genotype call is wrong, conditioned on the site's being variant).
+
+DP (Integer): Read depth at this position for this sample
+
+### Run script
+
+Should still be in bioinf environment
+
+```{bash}
+# voila!
+./get_vcfGenos.sh
+```
+
+# 6 Assemble base genos
+
+## 6.1 Create combo df
+
+In read.table, be sure to include comment.char = "" otherwise it will see "\#[1]CHROM" and ditch the headers
+
+```{r}
+# define directory w/vcfGeno txt files
+vcfGenos_dir <- "./06_tamRun_wgs/00_data/00_vcfData"
+
+# list text files in the directory
+vcfGenos_dflist <- lapply(list.files(path = vcfGenos_dir, pattern = "*.txt", full.names = TRUE), read.table, sep = "\t", header = T, comment.char = "")
+
+# create single df
+vcfGenos_df_messy <- do.call(rbind, vcfGenos_dflist)
+```
+
+## 6.2 Reformat
+
+Have records for 196 loci (doesn't include the 12 SPECIESID loci bc these are fixed in each species I guess?)
+
+**NOTE** bcftools query returned an extra variant site (CM018917.1-101190598; REF = ATG, ALT = .); this likely happened bc it's very close to one of the variant sites that *is* in the loci list (CM018917.1-101190600). Chatgpt says possible reasons for this are:
+
+1.  Variant Proximity: Some tools might not limit results strictly to the requested position but also include nearby variants due to overlap or when querying within a small window.
+
+2.  Indexing in the VCF File: The way the VCF file is structured or indexed could cause variants that are very close in position to be reported together, especially if they are part of a complex event or if querying pulls nearby regions.
+
+**NOTE2** LWED_254 is listed with REF = T and ALT = A,G -- in my lociInfo file, I have that this locus has alleles A,G. Maybe the T ref allele is based on SIMP samples??
+
+```{r}
+# clean up df
+vcfGenos_df_temp <- vcfGenos_df_messy %>%
+  # create snpID 
+  unite(snpID, c(X..1.CHROM, X.2.POS), sep = ":", remove = T) %>%
+  # get loci names
+  merge(., lociInfo[, c("snpID", "locus")], by = "snpID", all = T) %>%
+  relocate(locus) %>%
+  arrange(locus) %>%
+  # ditch speciesID loci (automatically ditches that extra variant too)
+  filter(!str_detect(locus, "SPECIES")) %>%
+  select(-snpID)
+
+vcfGenos_df_refAlt <- vcfGenos_df_temp %>%
+  select(locus, X.3.REF, X.4.ALT) %>%
+  dplyr::rename("ref" = "X.3.REF",
+                "alt" = "X.4.ALT") %>%
+  # some loci have multiple alt alleles!
+  separate(alt, into = c("alt1", "alt2"), sep = ",")
+
+vcfGenos_df_clean <- vcfGenos_df_temp %>%
+  select(-X.3.REF, -X.4.ALT) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("temp") %>%
+  # remove the prefix "X.." or "X." from the strings
+  mutate(temp = gsub("^X\\.\\.1\\.|^X\\.[1-8]?[0-9]\\.", "", temp)) %>%
+  # split into two columns
+  separate(temp, into = c("sampleID", "fmt"), sep = "\\.") %>%
+  merge(., md[, c("sampleID", "animalID_md")], by = "sampleID", all.x = T) %>%
+  relocate(animalID_md) %>%
+  pivot_longer(!c(animalID_md, sampleID, fmt),
+               names_to = "locus",
+               values_to = "value") %>%
+  pivot_wider(id_cols = c(animalID_md, sampleID, locus),
+              names_from = fmt,
+              values_from = value) %>%
+  # add ref/alt back in -- some loci have multiple alt alleles!
+  merge(., vcfGenos_df_refAlt, by = "locus", all.x = T) %>%
+  
+  
+  # adjust data types & rename
+  mutate(
+    DP = as.numeric(DP),
+    GQ = as.numeric(GQ)
+  ) %>%
+  dplyr::rename("vcf_sampleID" = "sampleID",
+                "vcf_geno" = "GT",
+                "genoDepth" = "DP",
+                "genoQual" = "GQ")
+```
+
+## 6.3 Filter genos
+
+Following Ravinet and Meiers Speciation and Population Genomics guide <https://speciationgenomics.github.io/filtering_vcfs/> section on "Variant based statistics" (this is what Sam said she used in her thesis)
+
+**Visualize data:**
+
+```{r}
+# read depth
+mean(vcfGenos_df_clean$genoDepth) # 32.80141
+
+ggplot(vcfGenos_df_clean, aes(genoDepth)) +
+  geom_density(fill = "dodgerblue1", color = "black", alpha = 0.3) +
+  theme_light()
+
+# geno quality
+mean(vcfGenos_df_clean$genoQual, na.rm = T) # 88.38947
+
+ggplot(vcfGenos_df_clean, aes(genoQual)) +
+  geom_density(fill = "dodgerblue1", color = "black", alpha = 0.3) +
+  theme_light()
+```
+
+**Filter & assign letter genos**
+
+Notes from Ravinet and Meiers website-- - min depth cutoff: "10x is a good rule of thumb as a minimum cutoff for read depth, although if we wanted to be conservative, we could go with 15x." - max depth cutoff: "Usually a good rule of thumb is something the mean depth x 2"
+
+```{r}
+minDepth_cutoff = 15
+maxDepth_cutoff = mean(vcfGenos_df_clean$genoDepth)*2
+qual_cutoff = 30
+
+vcfGenos_filtered <- vcfGenos_df_clean %>%
+  filter(genoDepth >= minDepth_cutoff & genoDepth <= maxDepth_cutoff) %>%
+  filter(genoQual >= qual_cutoff) %>%
+  # assign letter geno to each allele
+  mutate(
+    temp1 = str_sub(vcf_geno, 1, 1),
+    temp1 = case_when(
+      temp1 == "0" ~ ref,
+      temp1 == "1" ~ alt1,
+      temp1 == "2" ~ alt2
+    ),
+    
+    temp2 = str_sub(vcf_geno, -1, -1),
+    temp2 = case_when(
+      temp2 == "0" ~ ref,
+      temp2 == "1" ~ alt1,
+      temp2 == "2" ~ alt2
+    )
+  ) %>%
+  # create geno col
+  mutate(
+    geno = str_c(temp1, temp2, sep = ",")
+  ) %>%
+  relocate(
+    animalID_md, locus, geno, vcf_sampleID, ref, alt1, alt2, genoDepth, genoQual, temp1, temp2
+  ) %>%
+  arrange(locus, animalID_md)
+```
+
+## 6.4 Export genos
+
+```{r}
+vcfGenos_toExport <- vcfGenos_filtered %>%
+  # mark as tissue sample geno
+  mutate(animalID_md = str_c(animalID_md, "_t")) %>%
+  select(animalID_md, locus, geno) %>%
+  pivot_wider(id_cols = locus,
+              names_from = animalID_md,
+              values_from = geno)
+
+write.csv(vcfGenos_toExport, "./06_tamRun_wgs/02_results/tamGenetics_wgs_genos.csv", row.names = F)
+```
