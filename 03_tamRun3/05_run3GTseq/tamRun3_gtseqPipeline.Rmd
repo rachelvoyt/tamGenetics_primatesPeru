@@ -80,7 +80,7 @@ genotyper_v2 is unhappy with tamRun3.434 for whatever reason - I don't feel like
 ```{bash, eval = F}
 cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/05_run3GTseq
 
-for i in ./../02_run3Interleaved/tamRun3*; do perl ./../../project_scripts/GTseq/GTseq_Genotyper_v3_rvModified.pl locusInfo_genotyper.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
+for i in ./../02_run3Interleaved/tamRun3*; do perl ./../../project_scripts/GTseq/GTseq_Genotyper_v3_v2Cutoffs_rvModified.pl locusInfo_genotyper.csv $i > ./genos/$(basename "${i/.fastq/.genos}"); done
 ```
 
 ## 3.4 GTseq_genoCompile
