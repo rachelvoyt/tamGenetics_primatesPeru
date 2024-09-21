@@ -11,9 +11,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # 1 Overview
 
+## 1.1 About
+
 Note that VCF files are 1-based
 
-## RESOURCES:
+## 1.2 Resources
+
+**Tool documentation:**
 
 -   tabix <https://www.htslib.org/doc/tabix.html>
 
@@ -25,7 +29,17 @@ Note that VCF files are 1-based
 
 -   bcftools documentation <https://samtools.github.io/bcftools/bcftools.html#query>
 
+
+**Books/book-like things:**
+
 -   eriqande book <https://eriqande.github.io/eca-bioinf-handbook/handle-vcf.html#bcftools>
+
+-   Ravinet and Meiers Speciation and Population Genomics guide <https://speciationgenomics.github.io/filtering_vcfs/>
+
+-   Evomics book thing <https://evomics.org/learning/population-and-speciation-genomics/2020-population-and-speciation-genomics/first-steps-in-genomic-data-analysis/#ex2.1>
+
+
+**Posts/forums/etc:**
 
 -   reddit post <https://www.reddit.com/r/bioinformatics/comments/jbw72n/comment/g94sge1/> - youtube vid <https://www.youtube.com/watch?v=7W7hrWNyCaM>
 
@@ -35,7 +49,6 @@ Note that VCF files are 1-based
 
 -   pysam maybe helpful code bit? <https://github.com/pysam-developers/pysam/issues/469>
 
--   <https://speciationgenomics.github.io/filtering_vcfs/>
 
 # 2 Packages
 
