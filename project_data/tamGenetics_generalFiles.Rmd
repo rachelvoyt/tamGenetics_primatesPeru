@@ -354,6 +354,15 @@ run5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
     sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
     seqRun = "run5"
     )
+
+run_wgs <- read.csv("./06_tamGenetics_wgs/00_data/tamGenetics_wgs_metadata.csv") %>%
+  select(-sampleID) %>%
+  mutate(
+    sampleID = sampleID2,
+    sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
+    seqRun = "run_wgs",
+    sampleType = "tissue"
+  )
 ```
 
 ## sampleRef
@@ -363,7 +372,8 @@ sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")] %>%
   rbind(., run3_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
   rbind(., run4_md_ill[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
   rbind(., run4_md_ont[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
-  rbind(., run5_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")])
+  rbind(., run5_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
+  rbind(., run_wgs[, c("seqRun", "sampleID", "sampleRef", "sampleType")])
 
 write.csv(sampleRef, "./project_data/sampleID_reference.csv", row.names = F)
 ```
