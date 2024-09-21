@@ -96,7 +96,7 @@ mamba create -n bioinf -c bioconda bcftools bwa samtools
 ## 3.1 Metadata
 
 ```{r}
-md <- read.csv("./samFiles/tamGenetics_wgsMetadata.csv") %>%
+md <- read.csv("./samFiles/tamGenetics_wgsMetadata_original.csv") %>%
   mutate(
     species = case_when(
       species == "Leontocebus weddelli" ~ "lwed",
@@ -106,9 +106,13 @@ md <- read.csv("./samFiles/tamGenetics_wgsMetadata.csv") %>%
       sex == "Female" ~ "F",
       sex == "Male" ~ "M"
     ),
-    animalID_md = str_c(species, sex, animalID, sep = "_")
+    animalID_md = str_c(species, sex, animalID, sep = "_"),
+    sampleID2 = str_c("wgs_", sampleID)
   ) %>%
-  relocate(sampleID, animalID, animalID_md)
+  relocate(sampleID, sampleID2, animalID, animalID_md)
+
+# export updated md
+write.csv(md, "./06_tamGenetics_wgs/00_data/tamGenetics_wgs_metadata.csv", row.names = F)
 ```
 
 ## 3.2 Loci info
@@ -148,7 +152,7 @@ lociList_bcftools <- lociInfo %>%
   select(chr_name, snpPos_inChr) %>%
   arrange(chr_name, snpPos_inChr)
 
-write.table(lociList_bcftools, "./06_tamRun_wgs/00_data/lociList_bcftools.txt", quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+write.table(lociList_bcftools, "./06_tamGenetics_wgs/00_data/lociList_bcftools.txt", quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
 ```
 
 ### .list file for GATK SelectVariants
@@ -163,7 +167,7 @@ lociList_gatk <- lociInfo %>%
   ) %>%
   select(temp)
 
-write.table(lociList_gatk, "./06_tamRun_wgs/00_data/lociList_gatk.list", quote = FALSE, row.names = FALSE, col.names = FALSE)
+write.table(lociList_gatk, "./06_tamGenetics_wgs/00_data/lociList_gatk.list", quote = FALSE, row.names = FALSE, col.names = FALSE)
 ```
 
 ## 4.3 Extract genos from VCF
@@ -181,8 +185,8 @@ Wrote a shell script that can access each VCF file on Sam's server and call bcft
 
 # definitions
 base_url="https://export.uppmax.uu.se/snic2022-6-144/share/tmp_dir_vcfs/"
-loci_list="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamRun_wgs/00_data/lociList_bcftools.txt"
-output_dir="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamRun_wgs/00_data/00_vcfData/"
+loci_list="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamGenetics_wgs/00_data/lociList_bcftools.txt"
+output_dir="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamGenetics_wgs/00_data/00_vcfData/"
 
 # loop function
 for i in {1..23}
@@ -228,7 +232,7 @@ In read.table, be sure to include comment.char = "" otherwise it will see "\#[1]
 
 ```{r}
 # define directory w/vcfGeno txt files
-vcfGenos_dir <- "./06_tamRun_wgs/00_data/00_vcfData"
+vcfGenos_dir <- "./06_tamGenetics_wgs/00_data/00_vcfData"
 
 # list text files in the directory
 vcfGenos_dflist <- lapply(list.files(path = vcfGenos_dir, pattern = "*.txt", full.names = TRUE), read.table, sep = "\t", header = T, comment.char = "")
@@ -279,12 +283,14 @@ vcfGenos_df_clean <- vcfGenos_df_temp %>%
   mutate(temp = gsub("^X\\.\\.1\\.|^X\\.[1-8]?[0-9]\\.", "", temp)) %>%
   # split into two columns
   separate(temp, into = c("sampleID", "fmt"), sep = "\\.") %>%
-  merge(., md[, c("sampleID", "animalID_md")], by = "sampleID", all.x = T) %>%
-  relocate(animalID_md) %>%
-  pivot_longer(!c(animalID_md, sampleID, fmt),
+  merge(., md[, c("sampleID", "sampleID2")], by = "sampleID", all.x = T) %>%
+  select(-sampleID) %>%
+  dplyr::rename("sampleID" = "sampleID2") %>%
+  relocate(sampleID) %>%
+  pivot_longer(!c(sampleID, fmt),
                names_to = "locus",
                values_to = "value") %>%
-  pivot_wider(id_cols = c(animalID_md, sampleID, locus),
+  pivot_wider(id_cols = c(sampleID, locus),
               names_from = fmt,
               values_from = value) %>%
   # add ref/alt back in -- some loci have multiple alt alleles!
@@ -357,21 +363,19 @@ vcfGenos_filtered <- vcfGenos_df_clean %>%
     geno = str_c(temp1, temp2, sep = ",")
   ) %>%
   relocate(
-    animalID_md, locus, geno, vcf_sampleID, ref, alt1, alt2, genoDepth, genoQual, temp1, temp2
+    vcf_sampleID, locus, geno, ref, alt1, alt2, genoDepth, genoQual, temp1, temp2
   ) %>%
-  arrange(locus, animalID_md)
+  arrange(locus, vcf_sampleID)
 ```
 
 ## 6.4 Export genos
 
 ```{r}
 vcfGenos_toExport <- vcfGenos_filtered %>%
-  # mark as tissue sample geno
-  mutate(animalID_md = tolower(animalID_md)) %>%
-  select(animalID_md, locus, geno) %>%
+  select(vcf_sampleID, locus, geno) %>%
   pivot_wider(id_cols = locus,
-              names_from = animalID_md,
+              names_from = vcf_sampleID,
               values_from = geno)
 
-write.csv(vcfGenos_toExport, "./06_tamRun_wgs/02_results/tamGenetics_wgs_genos.csv", row.names = F)
+write.csv(vcfGenos_toExport, "./06_tamGenetics_wgs/02_results/tamGenetics_wgs_genos.csv", row.names = F)
 ```
