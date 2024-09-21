@@ -367,7 +367,7 @@ vcfGenos_filtered <- vcfGenos_df_clean %>%
 ```{r}
 vcfGenos_toExport <- vcfGenos_filtered %>%
   # mark as tissue sample geno
-  mutate(animalID_md = str_c(animalID_md, "_t")) %>%
+  mutate(animalID_md = tolower(animalID_md)) %>%
   select(animalID_md, locus, geno) %>%
   pivot_wider(id_cols = locus,
               names_from = animalID_md,
