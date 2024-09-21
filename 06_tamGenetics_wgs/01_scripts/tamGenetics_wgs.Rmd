@@ -372,6 +372,13 @@ vcfGenos_filtered <- vcfGenos_df_clean %>%
 
 ```{r}
 vcfGenos_toExport <- vcfGenos_filtered %>%
+  # make sure het genos are in alpha-order
+  mutate(
+    geno = sapply(geno, function(x) {
+      # Split by comma, sort alphabetically, and then paste back together
+      paste(sort(unlist(strsplit(x, ","))), collapse = ",")
+    })
+  ) %>%
   select(vcf_sampleID, locus, geno) %>%
   pivot_wider(id_cols = locus,
               names_from = vcf_sampleID,
