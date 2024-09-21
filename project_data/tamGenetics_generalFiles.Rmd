@@ -306,3 +306,66 @@ test_sexAssign <- assignSex(genos_tamRun5_0x, md_tamRun5_v5, exclude_nonTargetSe
 
 test_sexAssign2 <- assignSex(genos_tamRun5_0x, md_tamRun5_v5, exclude_nonTargetSex = "no")
 ```
+
+# 5 Samples
+
+Getting tired of continuously adjusting sample names so I can compare between runs, so going to create a file that has all that info in one spot
+
+## Data
+
+```{r}
+run1_md <- read.csv("./00_tamRun1/03_run1GTscore/tamRun1_metadata_v2.csv") %>%
+  filter(species %in% c("LWED", "SIMP")) %>%
+  mutate(
+    sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
+    seqRun = "run1"
+    )
+
+run3_md <- read.csv("./03_tamRun3/03_run3GTscore/tamRun3_metadata_abcat_5June2023.csv") %>%
+  filter(species %in% c("LWED", "SIMP")) %>%
+  mutate(
+    sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
+    seqRun = case_when(
+      str_detect(sampleID, "cat") ~ "run3_cat",
+      str_detect(sampleID, "3b") ~ "run3_b",
+      .default = "run3_a"
+      )
+    )
+
+run4_md_ill <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv") %>%
+  filter(species %in% c("LWED", "SIMP")) %>%
+  mutate(
+    sampleID = sampleID_ill,
+    sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
+    seqRun = "run4_ill"
+    )
+
+run4_md_ont <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv") %>%
+  filter(species %in% c("LWED", "SIMP")) %>%
+  mutate(
+    sampleID = sampleID_ont,
+    sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
+    seqRun = "run4_ont"
+    )
+
+run5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  filter(species %in% c("LWED", "SIMP")) %>%
+  mutate(
+    sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
+    seqRun = "run5"
+    )
+```
+
+## sampleRef
+
+```{r}
+sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")] %>%
+  rbind(., run3_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
+  rbind(., run4_md_ill[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
+  rbind(., run4_md_ont[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
+  rbind(., run5_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")])
+
+write.csv(sampleRef, "./project_data/sampleID_reference.csv", row.names = F)
+```
+
+
