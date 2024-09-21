@@ -2,8 +2,8 @@
 
 # definitions
 base_url="https://export.uppmax.uu.se/snic2022-6-144/share/tmp_dir_vcfs/"
-loci_list="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamRun_wgs/00_data/lociList_bcftools.txt"
-output_dir="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamRun_wgs/00_data/00_vcfData/"
+loci_list="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamGenetics_wgs/00_data/lociList_bcftools.txt"
+output_dir="/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/06_tamGenetics_wgs/00_data/00_vcfData/"
 
 # loop function
 for i in {1..23}
