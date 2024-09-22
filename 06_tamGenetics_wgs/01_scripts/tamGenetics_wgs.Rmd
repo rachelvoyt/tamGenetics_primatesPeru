@@ -333,6 +333,7 @@ ggplot(vcfGenos_df_clean, aes(genoQual)) +
 **Filter & assign letter genos**
 
 Notes from Ravinet and Meiers website-- - min depth cutoff: "10x is a good rule of thumb as a minimum cutoff for read depth, although if we wanted to be conservative, we could go with 15x." - max depth cutoff: "Usually a good rule of thumb is something the mean depth x 2"
+-   min quality: "We recommend setting a minimum threshold of 30 and filtering more strongly on other aspects of the data."
 
 ```{r}
 minDepth_cutoff = 15
