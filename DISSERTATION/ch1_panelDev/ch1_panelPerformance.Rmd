@@ -1,0 +1,172 @@
+---
+title: "ch1_panelPerformance"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+# 2 Packages
+
+```{r}
+library(poppr)
+library(tidyverse)
+
+# for PopGenUtils
+library(devtools)
+install_github("nikostourvas/PopGenUtils")
+library("PopGenUtils")
+```
+
+# 3 Data formatting
+
+```{r}
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+# LWED n = 42
+lwed_genos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T, na.strings = "0") %>%
+  # subset to lwed hair
+  select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(!str_detect(rownames(.), "SEXID|SPECIESID|SIMP")) %>%
+  # remove samples w/>20% missing data
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.8)) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID")
+
+# genind format genos
+lwed_genos_genind <- adegenet::df2genind(X = lwed_genos[,c(2:155)],
+                                         sep = ",",
+                                         ind.names = lwed_genos$sampleID,
+                                         NA.char = "NA",
+                                         ploidy = 2,
+                                         type = "codom")
+
+# SIMP n = 24
+simp_genos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T, na.strings = "0") %>%
+  # subset to lwed hair
+  select(md[md$species == "SIMP" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(!str_detect(rownames(.), "SEXID|SPECIESID|LWED")) %>%
+  # remove samples w/>20% missing data
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.8)) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID")
+
+# genind format genos
+simp_genos_genind <- adegenet::df2genind(X = simp_genos[,c(2:155)],
+                                         sep = ",",
+                                         ind.names = simp_genos$sampleID,
+                                         NA.char = "NA",
+                                         ploidy = 2,
+                                         type = "codom")
+```
+
+# poppr::genotype_curve
+
+A genotype accumulation curve is a tool that allows you to assess how much power you have to discriminate between unique individuals given a random sample of _n_ loci.
+
+```{r}
+# plot
+lwed_genoCurve <- genotype_curve(gen = genos_lwed_genind,
+                                 sample = 1000,
+                                 plot = T,
+                                 drop = T,
+                                 dropna = T)
+lwed_genoCurve <- last_plot()
+
+lwed_genoCurve +
+  geom_smooth()
+
+# get data
+lwed_genoCurve_data <- lwed_genoCurve$data %>%
+  group_by(NumLoci) %>%
+  summarize(
+    MinMLG = min(MLG, na.rm = TRUE),
+    MaxMLG = max(MLG, na.rm = TRUE),
+    MedianMLG = median(MLG, na.rm = TRUE)
+  )
+```
+
+Definitions of parameters:
+sample = i; the number of times loci will be resampled without replacement
+plot = T; will return plotted genotype curve, if F will return matrix
+drop = T; monomorphic loci will be removed before analysis
+dropna = T; NAs will be ignored when determining if locus is monomorphic
+
+Output includes NumLoci (number of loci) vs. MLG (multilocus genotypes)
+
+# PopGenUtils::pid_permute
+
+## Calculations
+
+```{r}
+lwed_pidPerm <- pid_permute(obj = lwed_genos_genind, nrep = 1000)
+
+simp_pidPerm <- pid_permute(obj = simp_genos_genind, nrep = 1000)
+```
+
+## Analysis
+
+```{r}
+# LWED
+lwed_pidPerm_data <- lwed_pidPerm$median_values
+
+## PID meets 0.0001 threshold at 12 loci
+lwed_pid.thresh <- as.numeric(lwed_pidPerm_data[which(lwed_pidPerm_data$PID<0.0001, arr.ind=TRUE)[1],][[1]])
+
+## PIDsibs meets 0.0001 threshold at 23 loci
+lwed_pidSibs.thresh <- as.numeric(lwed_pidPerm_data[which(lwed_pidPerm_data$PIDsibs<0.0001, arr.ind=TRUE)[1],][[1]])
+
+# SIMP
+simp_pidPerm_data <- simp_pidPerm$median_values
+
+## PID meets 0.0001 threshold at 12 loci
+simp_pid.thresh <- as.numeric(simp_pidPerm_data[which(simp_pidPerm_data$PID<0.0001, arr.ind=TRUE)[1],][[1]])
+
+## PIDsibs meets 0.0001 threshold at 24 loci
+simp_pidSibs.thresh <- as.numeric(simp_pidPerm_data[which(simp_pidPerm_data$PIDsibs<0.0001, arr.ind=TRUE)[1],][[1]])
+```
+
+## Plots
+
+```{r}
+# LWED
+lwed_pidPerm_fig <- lwed_pidPerm$plot +
+  scale_x_discrete(limits = as.character(1:25)) +
+  geom_vline(xintercept = lwed_pid.thresh, color = "#386cb0") +
+  geom_vline(xintercept = lwed_pidSibs.thresh, color = "#fdb462") +
+  #geom_hline(yintercept = 0.0001) +
+  #scale_y_continuous(limits = c(0, 0.001)) +
+  scale_colour_Publication() +
+  theme_Publication() +
+  labs(title = "LWED PID + PIDsibs")
+
+lwed_pidPerm_fig
+
+# SIMP
+simp_pidPerm_fig <- simp_pidPerm$plot +
+  scale_x_discrete(limits = as.character(1:25)) +
+  geom_vline(xintercept = simp_pid.thresh, color = "#386cb0") +
+  geom_vline(xintercept = simp_pidSibs.thresh, color = "#fdb462") +
+  #geom_hline(yintercept = 0.0001) +
+  #scale_y_continuous(limits = c(0, 0.001)) +
+  scale_colour_Publication() +
+  theme_Publication() +
+  labs(title = "SIMP PID + PIDsibs")
+
+simp_pidPerm_fig
+```
+
+
+
+

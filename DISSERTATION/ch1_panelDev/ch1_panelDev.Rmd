@@ -5,6 +5,8 @@ date: "`r Sys.Date()`"
 output: html_document
 editor_options: 
   chunk_output_type: console
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -13,7 +15,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # 1 Overview
 
-This document is to outline all of the data and analyses for dissertation Chapter 1 on SNP panel development.
+This document is to outline all of the data and analyses for
+dissertation Chapter 1 on SNP panel development.
 
 # 2 Packages
 
@@ -29,9 +32,11 @@ source("project_scripts/ggplot_theme_Publication-2.R") # for pretty ggplot theme
 source("project_scripts/ravo_gtScripts.R") # for my custom functions
 ```
 
-if there's issues w/installing seqinr, try installing packages "progress", "cpp11", and "Rcpp"
+if there's issues w/installing seqinr, try installing packages
+"progress", "cpp11", and "Rcpp"
 
-ggplot_theme_Publication-2.R is from: https://medium.com/analytics-vidhya/ggplot2-themes-for-publication-ready-plots-including-dark-themes-9cd65cc5a7e3 
+ggplot_theme_Publication-2.R is from:
+<https://medium.com/analytics-vidhya/ggplot2-themes-for-publication-ready-plots-including-dark-themes-9cd65cc5a7e3>
 
 # 3 Data
 
@@ -51,38 +56,43 @@ pp_laLab <- read.csv("./02_laLab_run1/03_laLab_run1GTscore/primerProbeFile_fullS
 pp_tamRun5 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T)
 ```
 
+## 3.3 sampleRef
+
+```{r}
+sampleRef <- read.csv("./project_data/sampleID_reference.csv")
+```
+
 # 4 SNP panel prep
 
 ## 4.1 Overview
 
-In total, Sam identified 402 informative loci, including n = 219 INDID, n = 66 LWED, n = 66 SIMP, n = 20 SPECIES, and n = 31 SEXID loci. I used sequences surrounding these loci as input for primer design in BatchPrimer3, which successfully designed primers for 362 loci. 
+In total, Sam identified 402 informative loci, including n = 219 INDID,
+n = 66 LWED, n = 66 SIMP, n = 20 SPECIES, and n = 31 SEXID loci. I used
+sequences surrounding these loci as input for primer design in
+BatchPrimer3, which successfully designed primers for 362 loci.
 
-bp3 first set designed primers for n = 329 loci
-bp3 second set designed primers for n = 33 loci
-TOTAL = 362
--   INDID       152 + 33 = 185
--   LWED        66
--   SIMP        66
--   SEXID       25
--   SPECIES     20
+bp3 first set designed primers for n = 329 loci bp3 second set designed
+primers for n = 33 loci TOTAL = 362 - INDID 152 + 33 = 185 - LWED 66 -
+SIMP 66 - SEXID 25 - SPECIES 20
 
 n = 302 passed in silico optimization
 
-
-Link to [Tamarin Genetics Lab Notebook 2 - Primer Design](https://quip.com/O64RAGBSzS5r/Tamarin-Genetics-Lab-Notebook-2-Primer-Design)
+Link to [Tamarin Genetics Lab Notebook 2 - Primer
+Design](https://quip.com/O64RAGBSzS5r/Tamarin-Genetics-Lab-Notebook-2-Primer-Design)
 
 ## 4.2 Panel prep
 
 ### 1) multifasta_1
 
-Sam sent an initial set of **n_loci = 357** (multifasta_1) to be used as input for bp3 - breakdown of counts for loci sets below:
+Sam sent an initial set of **n_loci = 357** (multifasta_1) to be used as
+input for bp3 - breakdown of counts for loci sets below:
 
--   INDID       174
--   LWED         66
--   SIMP         66
--   SEXID        31
--   SPECIESID    20
-  
+-   INDID 174
+-   LWED 66
+-   SIMP 66
+-   SEXID 31
+-   SPECIESID 20
+
 ```{r}
 multifasta_1 <- read.fasta(file = "./primers/concatenated_species_ind_sex_14.01.2022.fasta") %>%
   names(.) %>%
@@ -100,7 +110,8 @@ multifasta_1 %>%
 
 ### 2) bp3Output_1
 
-BatchPrimer3 was able to successfully design primers for **n = 329** out of the 357 loci from multifasta_1, including the following:
+BatchPrimer3 was able to successfully design primers for **n = 329** out
+of the 357 loci from multifasta_1, including the following:
 
 ```{r}
 bp3Output_1 <- read.csv("./primers/primerSet1_bp3Output_formattingUpdated_20Jan2022.csv") %>%
@@ -114,7 +125,9 @@ bp3Output_1 %>%
   as.data.frame() %>%
   janitor::adorn_totals()
 ```
-Loci that failed primer design (n = 28) include the following counts per lociSet:
+
+Loci that failed primer design (n = 28) include the following counts per
+lociSet:
 
 ```{r}
 multifasta_1 %>%
@@ -127,7 +140,13 @@ multifasta_1 %>%
 
 ### 3) fastpcrOutput_1a
 
-BatchPrimer3 was set to return three potential primer pairs per locus, which we subsequently uploaded to FastPCR to assign quality scores to each primer pair. FastPCR quality scores range from zero to 100 and are based on in silico amplification efficiency, with higher scores assigned to primers with wider ranges of executable temperatures and thus a lower likelihood of adverse effects associated with variation in reaction buffers, polymerase types, or annealing temperatures.
+BatchPrimer3 was set to return three potential primer pairs per locus,
+which we subsequently uploaded to FastPCR to assign quality scores to
+each primer pair. FastPCR quality scores range from zero to 100 and are
+based on in silico amplification efficiency, with higher scores assigned
+to primers with wider ranges of executable temperatures and thus a lower
+likelihood of adverse effects associated with variation in reaction
+buffers, polymerase types, or annealing temperatures.
 
 The output from FastPCR is below:
 
@@ -137,18 +156,28 @@ fastpcrOutput_1a <- read.csv("./primers/primerSet1_fastpcrAnalysis_20Jan2022.csv
 
 ### 4) fastpcrOutput_1b
 
-Because FastPCR assigns quality scores to forward and reverse primers individually, I created a ranking system for the primer *pairs* based on the following:
+Because FastPCR assigns quality scores to forward and reverse primers
+individually, I created a ranking system for the primer *pairs* based on
+the following:
 
-1)    "qualType", in which I assigned pairs as "type1" when both forward and reverse primers had quality scores >= 75, "type2" when both forward and reverse primers had quality scores >= 50, but one or both scored < 75, and "type3" when both forward and reverse primers had quality scores < 50
-2)    "avgQual", which represented the average of forward and reverse primer quality scores for each pair
+1)  "qualType", in which I assigned pairs as "type1" when both forward
+    and reverse primers had quality scores \>= 75, "type2" when both
+    forward and reverse primers had quality scores \>= 50, but one or
+    both scored \< 75, and "type3" when both forward and reverse primers
+    had quality scores \< 50
+2)  "avgQual", which represented the average of forward and reverse
+    primer quality scores for each pair
 
-I used these variables to choose primer pairs for each locus that maximized both "qualType" and "avgQual", resulting in fastpcrOutput2.
+I used these variables to choose primer pairs for each locus that
+maximized both "qualType" and "avgQual", resulting in fastpcrOutput2.
 
 ```{r}
 fastpcrOutput_1b <- read.csv("./primers/primerSet2_forInSilico_20Jan2022.csv")
 ```
 
-I have a set of scripts outlining how I did this originally, but the script below is way simpler and easier to follow (and gives the same results) --
+I have a set of scripts outlining how I did this originally, but the
+script below is way simpler and easier to follow (and gives the same
+results) --
 
 ```{r}
 temp <- fastpcrOutput_1a %>%
@@ -190,9 +219,12 @@ fastpcrOutput_1b <- fastpcrOutput_1a %>%
 
 ### 5) mfeOutput_1
 
-**the metrics for this section are based on the first round of MFE only; there were additional rounds where primers for failed loci were swapped out and tried again**
+**the metrics for this section are based on the first round of MFE only;
+there were additional rounds where primers for failed loci were swapped
+out and tried again**
 
-I sent fastpcrOutput_1b to Sam to run MFE in silico tests. Of the n = 329 loci, **n = 235** passed and n = 94 failed in silico tests.
+I sent fastpcrOutput_1b to Sam to run MFE in silico tests. Of the n =
+329 loci, **n = 235** passed and n = 94 failed in silico tests.
 
 ```{r}
 mfeOutput_1 <- read.csv("./primers/primerSet2_passFail.csv") %>%
@@ -212,20 +244,30 @@ sum(mfeOutput_1$inSilico == "PASS") # 235
 sum(mfeOutput_1$inSilico == "FAIL") # 94
 ```
 
-Info on loci that failed in-silico PCR is in multifasta_2 section (need info from multifasta_2 to figure out sets and whatnot since MFE tests went through a few rounds - that means that while 94 loci failed here, replacement primers could have passed for some)
+Info on loci that failed in-silico PCR is in multifasta_2 section (need
+info from multifasta_2 to figure out sets and whatnot since MFE tests
+went through a few rounds - that means that while 94 loci failed here,
+replacement primers could have passed for some)
 
 ### 6) multifasta_2
 
-To replace primers that failed in silico optimization, Sam identified an additional 45 INDID loci for primer design. These were combined into a multi-FASTA file with the loci that had already passed in silico PCR for a total of **n = 320** total, with the following loci-set breakdown:
+To replace primers that failed in silico optimization, Sam identified an
+additional 45 INDID loci for primer design. These were combined into a
+multi-FASTA file with the loci that had already passed in silico PCR for
+a total of **n = 320** total, with the following loci-set breakdown:
 
--   INDID       169 (124 previous + 45 additional)
--   LWED        62
--   SIMP        53
--   SEXID       18
--   SPECIESID   18
--   total       320
+-   INDID 169 (124 previous + 45 additional)
+-   LWED 62
+-   SIMP 53
+-   SEXID 18
+-   SPECIESID 18
+-   total 320
 
-**NOTE** that there were some discrepancies between Sam's numbers and mine (see quip doc for details) -- the "rvEdits" fasta file was udpated to address those issues. **HOWEVER** it looks like I did something dumb in those edits b/c SEXID_gatk...815956-816448 (which I apparently thought was missing, and therefore added) is now in there twice
+**NOTE** that there were some discrepancies between Sam's numbers and
+mine (see quip doc for details) -- the "rvEdits" fasta file was udpated
+to address those issues. **HOWEVER** it looks like I did something dumb
+in those edits b/c SEXID_gatk...815956-816448 (which I apparently
+thought was missing, and therefore added) is now in there twice
 
 ```{r}
 multifasta_2 <- read.fasta(file = "./primers/concatenated_ALL_19.02.2022_rvEdits.fasta") %>%
@@ -249,7 +291,8 @@ multifasta_2 %>%
   adorn_totals()
 ```
 
-That means that the loci that failed the first round in-silico PCR include the following counts per lociSet:
+That means that the loci that failed the first round in-silico PCR
+include the following counts per lociSet:
 
 ```{r}
 # seq names from multifasta_1 that passed first round in silico (n = 275)
@@ -274,18 +317,22 @@ bp3Output_1 %>% # 329 primers designed
 
 ### 7) bp3Output_2
 
-I used multifasta_2 as input for BatchPrimer3 to see if we could find primers for the additional 45 loci. **BatchPrimer3 was able to design primers for 33 out of the 45 additional loci**, yielding primers for a total of **n = 308** loci.
+I used multifasta_2 as input for BatchPrimer3 to see if we could find
+primers for the additional 45 loci. **BatchPrimer3 was able to design
+primers for 33 out of the 45 additional loci**, yielding primers for a
+total of **n = 308** loci.
 
-**NOTE** that my quip doc shows bp3 output w/primers for 309 loci; this is just due to the duplicated SEXID sequence (see above)
+**NOTE** that my quip doc shows bp3 output w/primers for 309 loci; this
+is just due to the duplicated SEXID sequence (see above)
 
 Counts for loci sets below:
 
--   INDID       157
--   LWED         62
--   SEXID        18
--   SIMP         53
--   SPECIESID    18
--   total       308
+-   INDID 157
+-   LWED 62
+-   SEXID 18
+-   SIMP 53
+-   SPECIESID 18
+-   total 308
 
 ```{r}
 bp3Output_2 <- read.csv("./primers/primerSet3_bp3Output_originalFile_22Feb2022.csv") %>%
@@ -308,7 +355,8 @@ bp3Output_2 %>%
   nrow()
 ```
 
-Loci that failed primer design (n = 12) for the 45 new loci include the following counts per lociSet:
+Loci that failed primer design (n = 12) for the 45 new loci include the
+following counts per lociSet:
 
 ```{r}
 multifasta_2 %>%
@@ -319,7 +367,8 @@ multifasta_2 %>%
 
 ### 8) fastpcrOutput_2a
 
-bp3Output_2 for the 33 new primers was input to FastPCR to assign quality scores with the following output:
+bp3Output_2 for the 33 new primers was input to FastPCR to assign
+quality scores with the following output:
 
 ```{r}
 fastpcrOutput_2a <- read.csv("./primers/primerSet3_fastpcrAnalysis_22Feb2022.csv")
@@ -327,7 +376,9 @@ fastpcrOutput_2a <- read.csv("./primers/primerSet3_fastpcrAnalysis_22Feb2022.csv
 
 ### 9) fastpcrOutput_2b
 
-As before, I used the quality scores assigned by FastPCR to choose the highest-scoring primer *pair* for each of the new loci, resulting in the following primer choices for the 33 new loci:
+As before, I used the quality scores assigned by FastPCR to choose the
+highest-scoring primer *pair* for each of the new loci, resulting in the
+following primer choices for the 33 new loci:
 
 ```{r}
 fastpcrOutput_2b <- read.csv("./primers/primerSet4_forInSilico_22Feb2022.csv")
@@ -335,9 +386,12 @@ fastpcrOutput_2b <- read.csv("./primers/primerSet4_forInSilico_22Feb2022.csv")
 
 ### 10) mfeOutput_2
 
-**These numbers aren't accurate; doesn't account for replacement primers and re-testing in silico - based on my investigations though, it seems like we dropped 6 here**
+**These numbers aren't accurate; doesn't account for replacement primers
+and re-testing in silico - based on my investigations though, it seems
+like we dropped 6 here**
 
-I sent fastpcrOutput_2b to Sam to run MFE in silico tests. Of the n = 33 new loci, **n = 12** passed and n = 21 failed in silico tests.
+I sent fastpcrOutput_2b to Sam to run MFE in silico tests. Of the n = 33
+new loci, **n = 12** passed and n = 21 failed in silico tests.
 
 ```{r}
 mfeOutput_2 <- read.csv("./primers/primerSet4_resultsInSilico_23Feb2022.csv") %>%
@@ -377,24 +431,21 @@ bp3errorTracking %>%
   adorn_totals()
 ```
 
-
 **figuring shit out (not cleaned up)**
 
-Acording to Sam's notes/thesis/etc., this is how things break down:
--   started with 302 loci
--   bp3 error for 99
--   found new variants w/in amplicon for 23 (99 - 23 = 76)
--   used MSA files from tamRun1 to find variants for another 36 (76 - 36 = 40)
+Acording to Sam's notes/thesis/etc., this is how things break down: -
+started with 302 loci - bp3 error for 99 - found new variants w/in
+amplicon for 23 (99 - 23 = 76) - used MSA files from tamRun1 to find
+variants for another 36 (76 - 36 = 40)
 
 According to my own investigations, we have:
 
-           outcome count
- bp3error_noRescue    48
-  bp3error_rescue1    33
-  bp3error_rescue2    28
-           noError   193
-             Total   302
+```         
+       outcome count
+```
 
+bp3error_noRescue 48 bp3error_rescue1 33 bp3error_rescue2 28 noError 193
+Total 302
 
 ```{r}
 # 99 loci w/bp3 error
@@ -502,9 +553,11 @@ lociRemoved <- rbind(lociRemoved_v1.v2, lociRemoved_v2.v3) %>%
   dplyr::rename("locus" = "Locus")
 ```
 
-Plus associated metadata, including whether it was a bp3error locus, whether it was rescued, etc.
+Plus associated metadata, including whether it was a bp3error locus,
+whether it was rescued, etc.
 
-if loci were flagged for bp3 error, but pass pf_opt1, this means they were "rescued"; loci flagged for bp3 error but fail pf_opt1 = dropped
+if loci were flagged for bp3 error, but pass pf_opt1, this means they
+were "rescued"; loci flagged for bp3 error but fail pf_opt1 = dropped
 
 ```{r}
 snpTracking <- multifasta_1 %>%
@@ -583,9 +636,6 @@ asdfasdf
 
 ## 5.1 Overview
 
-
-
-
 ## 5.2 Data
 
 ### Sample metadata
@@ -628,13 +678,9 @@ run1_sampleOverview <- run1_md %>%
 run1_sampleOverview
 ```
 
-  sampleType  sex LWED SIMP negCtrl TOTAL
-1      blood    F    4    9      NA    13
-2      blood    M   11    5      NA    16
-3       hair    F    2   NA      NA     2
-4       hair    M   NA    1      NA     1
-5    negCtrl <NA>   NA   NA       1     1
-6      Total    -   17   15       1    33
+sampleType sex LWED SIMP negCtrl TOTAL 1 blood F 4 9 NA 13 2 blood M 11
+5 NA 16 3 hair F 2 NA NA 2 4 hair M NA 1 NA 1 5 negCtrl <NA> NA NA 1 1 6
+Total - 17 15 1 33
 
 ```{r}
 run1_md %>%
@@ -643,10 +689,7 @@ run1_md %>%
   as.data.frame()
 ```
 
-  sampleType count
-1      blood    29
-2       hair     3
-3    pcr1Neg     1
+sampleType count 1 blood 29 2 hair 3 3 pcr1Neg 1
 
 ```{r}
 str_c(run1_md %>%
@@ -690,18 +733,15 @@ run1_md %>%
   as.data.frame()
 ```
 
-  animalID sampleType sampleName dupe_count
-1       10      blood    lm_1183          3
-2      182      blood    lm_1275          3
-3       27      blood    lm_1191          3
-4      203      blood     lm_700          2
-5      216      blood    lm_1197          2
-6      223       hair     env_15          2
-7       73      blood     lm_505          2
+animalID sampleType sampleName dupe_count 1 10 blood lm_1183 3 2 182
+blood lm_1275 3 3 27 blood lm_1191 3 4 203 blood lm_700 2 5 216 blood
+lm_1197 2 6 223 hair env_15 2 7 73 blood lm_505 2
 
 ### Loci metadata
 
-I've imported the primer-probe file that contains ALL loci originally in the tamRun1 panel, including those with the BatchPrimer3 error regardless of whether they were rescued. 
+I've imported the primer-probe file that contains ALL loci originally in
+the tamRun1 panel, including those with the BatchPrimer3 error
+regardless of whether they were rescued.
 
 **Data**
 
@@ -731,15 +771,12 @@ run1_primerProbeFile %>%
   adorn_totals("row")
 ```
 
-     lociSet count
- indSNP_dual   151
- indSNP_lwed    39
- indSNP_simp    35
- sexSNP_dual    11
- sexSNP_lwed     3
- sexSNP_simp     4
-  spSNP_dual    18
-       Total   261
+```         
+ lociSet count
+```
+
+indSNP_dual 151 indSNP_lwed 39 indSNP_simp 35 sexSNP_dual 11 sexSNP_lwed
+3 sexSNP_simp 4 spSNP_dual 18 Total 261
 
 ```{r}
 run1_primerProbeFile %>%
@@ -756,11 +793,7 @@ run1_primerProbeFile %>%
   adorn_totals("row")
 ```
 
- lociSet count
-    dual   180
-    lwed    42
-    simp    39
-   Total   261
+lociSet count dual 180 lwed 42 simp 39 Total 261
 
 ### Sample/loci lists
 
@@ -894,16 +927,13 @@ run1_totalReads_gtseq <- run1_sampleSum_gtseq %>%
 (run1_otReads_gtseq / run1_totalReads_gtseq)*100
 ```
 
-
 ### bySample
 
 **all samples + sp-specific loci sets**
 
- lociSet otProp otReads primerProp primerReads totalReads
- fullSet   0.01      13       0.12        1049       9048
- lwedSet   0.56  145480       0.25      257509    1030318
- simpSet   0.73  174212       0.28      237728     845718
-   Total   0.64  319705       0.26      496286    1885084
+lociSet otProp otReads primerProp primerReads totalReads fullSet 0.01 13
+0.12 1049 9048 lwedSet 0.56 145480 0.25 257509 1030318 simpSet 0.73
+174212 0.28 237728 845718 Total 0.64 319705 0.26 496286 1885084
 
 ```{r}
 run1_sampleSum_gtscore %>%
@@ -925,10 +955,9 @@ run1_sampleSum_gtscore %>%
 
 **pos only (no negs) + sp-specific loci sets**
 
- lociSet otProp otReads primerProp primerReads totalReads
- lwedSet   0.56  145480       0.25      257509    1030318
- simpSet   0.73  174212       0.28      237728     845718
-   Total   0.65  319692       0.26      495237    1876036
+lociSet otProp otReads primerProp primerReads totalReads lwedSet 0.56
+145480 0.25 257509 1030318 simpSet 0.73 174212 0.28 237728 845718 Total
+0.65 319692 0.26 495237 1876036
 
 ```{r}
 run1_sampleSum_gtscore %>%
@@ -972,11 +1001,9 @@ tamRun1_gtscore_sampleSum_lociAll %>%
 
 #### Overview
 
-   sampleSet  lociSet otProp otReads primerReads
- lwedSamples lwedSpec   0.95   32991       34634
-  posSamples     dual   0.57  222408      391347
- simpSamples simpSpec   0.93   64293       69256
-       Total    Total   0.65  319692      495237
+sampleSet lociSet otProp otReads primerReads lwedSamples lwedSpec 0.95
+32991 34634 posSamples dual 0.57 222408 391347 simpSamples simpSpec 0.93
+64293 69256 Total Total 0.65 319692 495237
 
 ```{r}
 run1_locusSum_gtscore %>%
@@ -1025,7 +1052,7 @@ tamRun1_gtscore_locusSum %>%
 
 #### lwedLoci
 
-lwed vs. simp samples (* indicates target sampleSet)
+lwed vs. simp samples (\* indicates target sampleSet)
 
 ```{r}
 tamRun1_gtscore_locusSum %>%
@@ -1050,7 +1077,7 @@ tamRun1_gtscore_locusSum %>%
 
 #### simpLoci
 
-lwed vs. simp samples (* indicates target sampleSet)
+lwed vs. simp samples (\* indicates target sampleSet)
 
 ```{r}
 tamRun1_gtscore_locusSum %>%
@@ -1144,8 +1171,6 @@ tamRun1_gtscore_locusSum %>%
 
 #### dualLoci
 
-
-
 #### lwedLoci
 
 **data**
@@ -1182,6 +1207,7 @@ tamRun1_genoSuccess_gtscore0x_lwedSpec <- tamRun1_gtscore0x_genos %>%
 ```{r}
 mean(tamRun1_genoSuccess_gtscore0x_lwedSpec$propSuccess_lwed)
 ```
+
 ```{r}
 mean(tamRun1_genoSuccess_gtscore0x_lwedSpec$propSuccess_simp)
 ```
@@ -1293,15 +1319,12 @@ max(temp2$propMatch) # 1
 median(temp2$propMatch) # 0.986201
 ```
 
-
 ## 5.6 Panel optimization summary
 
 Removed...
 
 -   41 loci due to bp3 error
 -   9 variants not producing genotypes (based on GTseq analysis)
-
-
 
 ```{r}
 tamRun1_lociFail_bp3error <- bp3errorTracking %>%
@@ -1348,7 +1371,8 @@ asdf
 
 ### Sample metadata
 
-this is md_run3_v3; see sandbox GTscore_tamRun5_plus_run3.Rmd for details on samples vs. metadata
+this is md_run3_v3; see sandbox GTscore_tamRun5_plus_run3.Rmd for
+details on samples vs. metadata
 
 **Data**
 
@@ -1394,6 +1418,7 @@ str_c(run3_md %>%
   distinct() %>%
   nrow(), " unique individuals")
 ```
+
 ```{r}
 str_c(run3_md %>%
   filter(species == "LWED") %>%
@@ -1644,7 +1669,7 @@ run3_gtscore_locusSum %>%
 
 #### lwedLoci
 
-lwed vs. simp samples (* indicates target sampleSet)
+lwed vs. simp samples (\* indicates target sampleSet)
 
 ```{r}
 run3_gtscore_locusSum %>%
@@ -1669,7 +1694,7 @@ run3_gtscore_locusSum %>%
 
 #### simpLoci
 
-lwed vs. simp samples (* indicates target sampleSet)
+lwed vs. simp samples (\* indicates target sampleSet)
 
 ```{r}
 run3_gtscore_locusSum %>%
@@ -1916,17 +1941,14 @@ run4_readCounts_gtscore %>%
 
 Comparing a vs. b runs:
 
-gtseq:
-  genosCommon genosMatch genosMismatch propMismatch
-1       37152      36874           278  0.007482773 -> 0.75%
+gtseq: genosCommon genosMatch genosMismatch propMismatch 1 37152 36874
+278 0.007482773 -\> 0.75%
 
-gtscore0x:
-  genosCommon genosMatch genosMismatch propMismatch
-1       48603      46882          1721   0.03540934 -> 3.5%
+gtscore0x: genosCommon genosMatch genosMismatch propMismatch 1 48603
+46882 1721 0.03540934 -\> 3.5%
 
-gtscore10x:
-  genosCommon genosMatch genosMismatch propMismatch
-1       38353      37735           618   0.01611347 > 1.6%
+gtscore10x: genosCommon genosMatch genosMismatch propMismatch 1 38353
+37735 618 0.01611347 \> 1.6%
 
 ```{r}
 # gtseq a vs. b - propMismatch = 0.007482773
@@ -1972,11 +1994,10 @@ test %>%
   mutate(propMismatch = genosMismatch/genosCommon)
 ```
 
-
-
 ### Functions
 
-Calculate via genotyping discordance b/t technical replicates in run3a and run3b
+Calculate via genotyping discordance b/t technical replicates in run3a
+and run3b
 
 ```{r}
 # readSum
@@ -2217,13 +2238,9 @@ run3_gtscore0x_genoError_bySample %>%
        y = "Percent discordant genotypes")
 ```
 
-
-
 # 7 library_3 tamRun4
 
 ## 7.1 Overview
-
-
 
 ## 7.2 Data
 
@@ -2459,6 +2476,7 @@ tamRun4_ill_gtscore_sampleSum %>%
   ) %>%
   relocate(lociSet, otProp, otReads, primerProp, primerReads, totalReads)
 ```
+
 **pos only (no negs) + all loci**
 
 ```{r}
@@ -2562,7 +2580,7 @@ tamRun4_ill_gtscore_locusSum %>%
 
 #### lwedLoci
 
-lwed vs. simp samples (* indicates target sampleSet)
+lwed vs. simp samples (\* indicates target sampleSet)
 
 ```{r}
 tamRun4_ill_gtscore_locusSum %>%
@@ -2587,7 +2605,7 @@ tamRun4_ill_gtscore_locusSum %>%
 
 #### simpLoci
 
-lwed vs. simp samples (* indicates target sampleSet)
+lwed vs. simp samples (\* indicates target sampleSet)
 
 ```{r}
 tamRun4_ill_gtscore_locusSum %>%
@@ -2636,19 +2654,14 @@ run4_gtscore_sampleSum %>%
 
 **gtseq**
 
-before ditching failed samples:
-  sampleType mean_genoSuccess min_genoSuccess max_genoSuccess med_genoSuccess
-  <chr>                 <dbl>           <dbl>           <dbl>           <dbl>
-1 blood                 0.816          0                0.977           0.893
-2 fecal                 0.727          0.0694           0.983           0.815
-3 hair                  0.488          0                0.909           0.601
+before ditching failed samples: sampleType mean_genoSuccess
+min_genoSuccess max_genoSuccess med_genoSuccess <chr> <dbl> <dbl> <dbl>
+<dbl> 1 blood 0.816 0 0.977 0.893 2 fecal 0.727 0.0694 0.983 0.815 3
+hair 0.488 0 0.909 0.601
 
-after:
-  sampleType mean_genoSuccess min_genoSuccess max_genoSuccess med_genoSuccess
-  <chr>                 <dbl>           <dbl>           <dbl>           <dbl>
-1 blood                 0.887           0.571           0.977           0.903
-2 fecal                 0.804           0.526           0.983           0.828
-3 hair                  0.736           0.583           0.909           0.723
+after: sampleType mean_genoSuccess min_genoSuccess max_genoSuccess
+med_genoSuccess <chr> <dbl> <dbl> <dbl> <dbl> 1 blood 0.887 0.571 0.977
+0.903 2 fecal 0.804 0.526 0.983 0.828 3 hair 0.736 0.583 0.909 0.723
 
 ```{r}
 run4_gtseq_genoSuccess_bySample <- run4_gtseq_sampleSum %>%
@@ -2724,7 +2737,6 @@ run4_gtseq_sampleSum %>%
        y = "Percent loci genotyped") +
   theme(legend.position = "none")
 ```
-
 
 ```{r}
 # gtscore0x
@@ -2846,14 +2858,14 @@ run4_sexAssignments %>%
 
 ### bySample
 
-Examining geno concordance for GTseq genos 
-1. Set up genoCompare df; set any genos for non-target species to NA
-2. Get total/prop common/mismatch genos per animalID; remove indivs whose sample types don't have at least 50% common genos (relative to their species' loci set)
+Examining geno concordance for GTseq genos 1. Set up genoCompare df; set
+any genos for non-target species to NA 2. Get total/prop common/mismatch
+genos per animalID; remove indivs whose sample types don't have at least
+50% common genos (relative to their species' loci set)
 
-Avg common genos:
-  -   blood_vs_fecal = 134.4167 (median = 139)
-  -   blood_vs_hair = 119.25 (median = 119.5)
-  -   fecal_vs_hair = 122.5833 (median = 123)
+Avg common genos: - blood_vs_fecal = 134.4167 (median = 139) -
+blood_vs_hair = 119.25 (median = 119.5) - fecal_vs_hair = 122.5833
+(median = 123)
 
 ```{r}
 run4_genoCompare_sampleTypes_sampleList <- run4_md %>%
@@ -2950,8 +2962,7 @@ median(run4_genoCompare_sampleTypes_gtseq_sampleSum$fh_propMatch) # 0.9388099
 ```
 
 210_LWED and 74_SIMP fecal samples both seem incorrect
---s053_lwed_210_fecal; rnaL_1166; t8
---s040_simp_74_fecal; rnaL_241; t20
+--s053_lwed_210_fecal; rnaL_1166; t8 --s040_simp_74_fecal; rnaL_241; t20
 
 ```{r}
 View(run4_md %>% filter(sampleID_unique %in% c("210_fecal", "74_fecal")))
@@ -2983,17 +2994,16 @@ run4_genoCompare_sampleTypes_gtseq_sampleSum %>%
 
 ```
 
-
 # 8 GTseq vs. GTscore
 
 ## 8.1 Overview
 
 Comparing results from GTseq vs. GTscore pipelines, including:
 
-  -   total reads
-  -   on-target reads (dual-loci only)
-  -   geno success (gtseq vs. gtscore 0x cutoff)
-  -   geno concordance
+-   total reads
+-   on-target reads (dual-loci only)
+-   geno success (gtseq vs. gtscore 0x cutoff)
+-   geno concordance
 
 ## 8.1 Data
 
@@ -3270,9 +3280,6 @@ sum(!is.na(run4_genoCompare_seqScore_fullPrimer$genos_gt))/nrow(run4_genoCompare
 sum(!is.na(run4_genoCompare_seqScore_fullPrimer$genos_gr))/nrow(run4_genoCompare_seqScore_fullPrimer) # 0.796746 >> now 0.7963492
 ```
 
-
-
-
 ```{r}
 temp_genos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
   rownames_to_column("locus") %>%
@@ -3418,3 +3425,198 @@ run4_sexAssignments_ngmerge_gtscore <- assignSex(genoFile = run4_genos_ngmerge_g
   ) %>%
   relocate(c(sexMajority, mdMatch_sexMajority), .after = sexAssigned)
 ```
+
+# 10 library_3 tamRun5
+
+## 10.1 Overview
+
+Mini suggested that I use tamRun5 as library 3 here vs. tamRun4, with
+tamRun4 used only in a separate paper comparing illumina vs. nanopore
+(this would be in addition to paper1, since that paper only uses a few
+loci and is combined with other species/panels)
+
+## 10.2 Data
+
+### Metadata
+
+Import latest version of sample md from /metadataReconciliation
+
+```{r}
+# samples
+run5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+# loci
+panel_v3 <- read.csv("./project_data/master_lociInfo.csv")
+```
+
+### Allele reads
+
+```{r}
+run5_readCounts_gtseq <- read.csv("./05_tamRun5/05_run5GTseq/tamRun5_alleleReads.csv") %>%
+  select(c(Sample, contains("_"))) %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  column_to_rownames("Sample") %>%
+  mutate(across(everything(), \(x) gsub("/", ",", x))) %>%
+  t() %>%
+  as.data.frame()
+
+run5_readCounts_gtscore <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+```
+
+### Genos
+
+```{r}
+run5_genos_gtscore0x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+run5_genos_gtscore10x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+run5_genos_gtseq <- read.csv("./05_tamRun5/05_run5GTseq/tamRun5_compiledGenos.csv", na.strings = "00") %>%
+  select(c(Sample, contains("_"))) %>%
+  mutate(Sample = gsub("-", "\\.", Sample)) %>%
+  column_to_rownames("Sample") %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2))))
+```
+
+## 10.x Error rates
+
+### wgsGenos
+
+```{r}
+run_wgs_genos <- read.csv("./06_tamGenetics_wgs/02_results/tamGenetics_wgs_genos.csv") %>%
+  column_to_rownames("locus")
+```
+
+### genoCompare
+
+```{r}
+# gtscore0x
+genoCompare_wgs.gr0x <- get_genoCompare(run_wgs_genos, run5_genos_gtscore0x, sampleRef, lociInfo) %>%
+  mutate(
+    match = case_when(
+      str_detect("lwed", sampleRef) & str_detect("SIMP", locus) ~ NA,
+      str_detect("simp", sampleRef) & str_detect("LWED", locus) ~ NA,
+      .default = match
+    ),
+    mismatchType = case_when(
+      str_detect("lwed", sampleRef) & str_detect("SIMP", locus) ~ NA,
+      str_detect("simp", sampleRef) & str_detect("LWED", locus) ~ NA,
+      .default = mismatchType
+    )
+  )
+
+length(unique(genoCompare_wgs.gr0x$sampleRef)) # 26 samples
+
+temp <- genoCompare_wgs.gr0x %>%
+  group_by(sampleType2, locus) %>%
+  summarise(
+    genosCommon = sum(!is.na(match)),
+    genosMatch = sum(match == TRUE, na.rm = T),
+    genosMismatch = sum(match == FALSE, na.rm = T)
+  ) %>%
+  mutate(
+    propMismatch = genosMismatch/genosCommon
+  ) %>%
+  filter(sampleType2 == "hair")
+
+mean(temp$propMismatch, na.rm = T) # 0.04679376
+
+# gtscore10x
+genoCompare_wgs.gr10x <- get_genoCompare(run_wgs_genos, run5_genos_gtscore10x, sampleRef, lociInfo) %>%
+  mutate(
+    match = case_when(
+      str_detect("lwed", sampleRef) & str_detect("SIMP", locus) ~ NA,
+      str_detect("simp", sampleRef) & str_detect("LWED", locus) ~ NA,
+      .default = match
+    ),
+    mismatchType = case_when(
+      str_detect("lwed", sampleRef) & str_detect("SIMP", locus) ~ NA,
+      str_detect("simp", sampleRef) & str_detect("LWED", locus) ~ NA,
+      .default = mismatchType
+    )
+  )
+
+length(unique(genoCompare_wgs.gr10x$sampleRef)) # 26 samples
+
+temp2 <- genoCompare_wgs.gr10x %>%
+  group_by(sampleType2, locus) %>%
+  summarise(
+    genosCommon = sum(!is.na(match)),
+    genosMatch = sum(match == TRUE, na.rm = T),
+    genosMismatch = sum(match == FALSE, na.rm = T)
+  ) %>%
+  mutate(
+    propMismatch = genosMismatch/genosCommon
+  ) %>%
+  filter(sampleType2 == "hair")
+
+mean(temp2$propMismatch, na.rm = T) # 0.02339251
+
+
+# gtseq
+genoCompare_wgs.gs <- get_genoCompare(run_wgs_genos, run5_genos_gtseq, sampleRef, lociInfo) %>%
+  mutate(
+    match = case_when(
+      str_detect("lwed", sampleRef) & str_detect("SIMP", locus) ~ NA,
+      str_detect("simp", sampleRef) & str_detect("LWED", locus) ~ NA,
+      .default = match
+    ),
+    mismatchType = case_when(
+      str_detect("lwed", sampleRef) & str_detect("SIMP", locus) ~ NA,
+      str_detect("simp", sampleRef) & str_detect("LWED", locus) ~ NA,
+      .default = mismatchType
+    )
+  )
+
+length(unique(genoCompare_wgs.gs$sampleRef)) # 26 samples
+
+temp3 <- genoCompare_wgs.gs %>%
+  group_by(sampleType2, locus) %>%
+  summarise(
+    genosCommon = sum(!is.na(match)),
+    genosMatch = sum(match == TRUE, na.rm = T),
+    genosMismatch = sum(match == FALSE, na.rm = T)
+  ) %>%
+  mutate(
+    propMismatch = genosMismatch/genosCommon
+  ) %>%
+  filter(sampleType2 == "hair")
+
+mean(temp3$propMismatch, na.rm = T) # 0.02304529
+```
+
+### Allelic dropout
+
+As per Broquet and Petit 2004, the rate of ADO can be estimated as
+follows:
+
+$$
+p_j = \frac{D_j}{A_het.j}
+$$
+
+p_j = frequency of ADO at locus j
+D_j = number of amplifications involving the loss of one allele
+A_het.j = number of positive amplifications of individuals determined as het according to their reference allele
+
+```{r}
+temp <- genoCompare_wgs.gr10x %>%
+  filter(callType1 == "het") %>%
+  filter(sampleType2 == "hair") %>%
+  filter(match %in% c("TRUE", "FALSE"))
+  
+D_j = sum(temp$mismatchType == "het_hom", na.rm = T) 
+A_het.j = nrow(temp)
+
+D_j / A_het.j
+```
+

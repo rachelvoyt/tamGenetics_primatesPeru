@@ -1,0 +1,592 @@
+---
+title: "ch2_fitness"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+
+
+# 2 Packages
+
+```{r}
+library(adegenet)
+library(ggExtra)
+library(lubridate)
+library(PopGenReport) # FAILED
+library(poppr)
+library(tidyverse)
+
+source("project_scripts/ggplot_theme_Publication-2.R") # for pretty ggplot themes
+```
+
+# 3 Data
+
+## metadata
+
+```{r}
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+sampleRef <- read.csv("./project_data/sampleID_reference.csv")
+```
+
+## capData
+
+```{r}
+capData <- read.csv("./DISSERTATION/ch2_demographics/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4),
+    captureYear = as.numeric(captureYear)
+  ) %>%
+  # adjust rowID 1 ageClass to "UNK"
+  mutate(
+    ageClass = case_when(
+      rowID == 1 ~ "UNK",
+      .default = ageClass
+    )
+  )
+
+capData_firstEntry <- capData[match(unique(capData$animalID), capData$animalID),] %>%
+  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+```
+
+## birth/death year
+
+```{r}
+birthAssignments <- read.csv("./DISSERTATION/ch2_demographics/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
+  select(animalID, birthYear_est) %>%
+  na.omit() %>%
+  distinct() %>%
+  arrange(animalID)
+
+deathAssignments <- read.csv("./DISSERTATION/ch2_demographics/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv") %>%
+  select(animalID, deathYear_est) %>%
+  na.omit() %>%
+  distinct() %>%
+  arrange(animalID)
+```
+
+## parityAssignments
+
+Using "parity2" -- meaning either left or right (vs avg) meets threshold
+
+```{r}
+source("./project_scripts/ravo_ch2Scripts.R")
+
+parityAssignments <- get_parityStatus(capData_file = capData) %>%
+  select(animalID, captureDate, parity2) %>%
+  dplyr::rename("parity" = "parity2") %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4)
+  ) %>%
+  select(-captureDate) %>%
+  distinct()
+
+parityAssigments_firstParous <- parityAssignments[match(unique(parityAssignments$animalID), parityAssignments$animalID),] %>%
+  filter(parity == "parous") %>%
+  dplyr::rename("parityYear" = "captureYear")
+```
+
+## likelyTwins
+
+created in ch2_demographics.Rmd
+
+```{r}
+likelyTwins <- read.csv("./DISSERTATION/ch2_demographics/00_data/01_demoData_clean/twinList_tamRun5_6June2024.csv")
+
+twinList <- likelyTwins %>%
+  select(twin1, twin2, twin3) %>%
+  arrange(twin1) %>%
+  mutate(twinSet = str_c("twinSet", row_number())) %>%
+  pivot_longer(-twinSet,
+               names_to = "twinID",
+               values_to = "animalID") %>%
+  na.omit() %>%
+  merge(., sampleRef[, c("animalID", "sampleID_franz", "seqRun", "sampleType")], by = "animalID", all.x = T) %>%
+  filter(seqRun == "run5") %>%
+  filter(sampleType == "hair") %>%
+  relocate(twinSet) %>%
+  arrange(twinSet)
+```
+
+## genos
+
+```{r}
+genos0x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T, na.strings = "0")
+```
+
+# FRANz
+
+Following Shedd et al GitHub 1_RRS_Hogan_13_15.Rmd<https://github.com/krshedd/Relative-fitness-of-Pink-Salmon/blob/main/analysis/1_RRS_Hogan_13_15.Rmd>
+
+## Create input files
+
+**Subset genos to samples with >= 70% genotyping success**
+
+### Prep files
+
+**LWED**
+
+```{r}
+# gtscore0x genos w/>= 70% genoSuccess
+lwed_genos0x <- genos0x %>%
+  # subset to lwed hair
+  select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(!str_detect(rownames(.), "SEXID|SPECIESID|SIMP")) %>%
+  # filter to samples w/decent geno success
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.7)) %>%
+  t() %>%
+  as.data.frame()
+
+lwed_genos0x_franz <- names(lwed_genos0x) %>%
+  map_dfc(~ lwed_genos0x %>%
+            select(all_of(.x)) %>%
+            separate(.x,
+                     into = paste0(.x, c("a", "b")),
+                     sep = ",")
+          ) %>%
+  
+  # add sampleID_franz, sex, & animalID (animalID is just for merging birthYear)
+  rownames_to_column("sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "sampleID_franz", "animalID", "sex")], by = "sampleID") %>%
+  relocate(c(sampleID_franz, sex)) %>%
+  
+  # add birthYear
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  dplyr::rename("birthYear" = "birthYear_est") %>%
+  relocate(birthYear, .before = "sex") %>%
+  
+  # add deathYear
+  merge(., deathAssignments[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  dplyr::rename("deathYear" = "deathYear_est") %>%
+  relocate(deathYear, .before = "sex") %>%
+  
+  # replace allele letters with numbers (required by FRANz)
+  mutate_at(vars(starts_with(c("INDID", "LWED"))), ~ str_replace(., "A", "4")) %>%
+  mutate_at(vars(starts_with(c("INDID", "LWED"))), ~ str_replace(., "T", "7")) %>%
+  mutate_at(vars(starts_with(c("INDID", "LWED"))), ~ str_replace(., "C", "3")) %>%
+  mutate_at(vars(starts_with(c("INDID", "LWED"))), ~ str_replace(., "G", "6")) %>%
+  arrange(sampleID) %>%
+  select(-animalID, -sampleID)
+
+# export
+write.csv(lwed_genos0x_franz, "./DISSERTATION/ch2_demographics/00_data/lwed_genos0x_franz.csv", row.names = F)
+```
+
+**SIMP**
+
+```{r}
+# gtscore0x genos w/>= 70% genoSuccess
+simp_genos0x <- genos0x %>%
+  # subset to simp hair
+  select(md[md$species == "SIMP" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(!str_detect(rownames(.), "SEXID|SPECIESID|LWED")) %>%
+  # filter to samples w/decent geno success
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.7)) %>%
+  t() %>%
+  as.data.frame()
+
+simp_genos0x_franz <- names(simp_genos0x) %>%
+  map_dfc(~ simp_genos0x %>%
+            select(all_of(.x)) %>%
+            separate(.x,
+                     into = paste0(.x, c("a", "b")),
+                     sep = ",")
+          ) %>%
+  
+  # add sampleID_franz, sex, & animalID (animalID is just for merging birthYear)
+  rownames_to_column("sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "sampleID_franz", "animalID", "sex")], by = "sampleID") %>%
+  relocate(c(sampleID_franz, sex)) %>%
+  
+  # add birthYear
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  dplyr::rename("birthYear" = "birthYear_est") %>%
+  relocate(birthYear, .before = "sex") %>%
+  
+  # add deathYear
+  merge(., deathAssignments[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  dplyr::rename("deathYear" = "deathYear_est") %>%
+  relocate(deathYear, .before = "sex") %>%
+  
+  # replace allele letters with numbers (required by FRANz)
+  mutate_at(vars(starts_with(c("INDID", "SIMP"))), ~ str_replace(., "A", "4")) %>%
+  mutate_at(vars(starts_with(c("INDID", "SIMP"))), ~ str_replace(., "T", "7")) %>%
+  mutate_at(vars(starts_with(c("INDID", "SIMP"))), ~ str_replace(., "C", "3")) %>%
+  mutate_at(vars(starts_with(c("INDID", "SIMP"))), ~ str_replace(., "G", "6")) %>%
+  arrange(sampleID) %>%
+  select(-animalID, -sampleID)
+
+# export
+write.csv(simp_genos0x_franz, "./DISSERTATION/ch2_demographics/00_data/simp_genos0x_franz.csv", row.names = F)
+```
+
+### .csv to .dat
+
+FRANz provides a perl script (csv.pl) to convert .csv files to .dat
+files. The manual says that you can also go to a GUI at
+<http://legacy.bioinf.uni-leipzig.de/Software/FRANz/CSV_Import.html>,
+but I haven't gotten it to work (it just loads forever).
+
+FRANz has examples of how to use csv.pl in their "man" file; I've edited
+their example slightly so that the output automatically creates a new
+file.
+
+NOTE that column IDs start with 0.
+
+How to put output into file:
+<https://askubuntu.com/questions/420981/how-do-i-save-terminal-output-to-a-file>
+
+**NOTE** - use csv_modified.pl; line 164 has an error in the original
+script -- original has "\$death_col = $data->[$death_col];", but should
+be "\$death = $data->[$death_col];"
+
+```{r}
+system2("perl",
+        args="./project_scripts/franz/csv_modified.pl --in ./DISSERTATION/ch2_demographics/00_data/lwed_genos0x_franz.csv --alleles_per_col 1 --has_header --missing_allele 'NA' --birth_col 1 --death_col 2 --sex_col 3 --data_col 4 > ./DISSERTATION/ch2_demographics/00_data/lwed_genos0x_franz.dat")
+
+system2("perl",
+        args="./project_scripts/franz/csv_modified.pl --in ./DISSERTATION/ch2_demographics/00_data/simp_genos0x_franz.csv --alleles_per_col 1 --has_header --missing_allele 'NA' --birth_col 1 --death_col 2 --sex_col 3 --data_col 4 > ./DISSERTATION/ch2_demographics/00_data/simp_genos0x_franz.dat")
+```
+
+## Assign Nf & Nm
+
+From FRANz manual: *N* is the number of candidate female (*Nf*) and male (*Nm*) parents in the population, equal to the sum of the average number of sampled (*n*) and unsampled (*N-n*) breeding females and males in the population (respectively). If unset, then estimated jointly with the pedigree. For parentage inference N=Nf=Nm (NOT Nf+Nm), but one can also specify Nf and Nm instead of N if these numbers differ. If N isnot known, use Nmax instead.
+
+The FRANz manual suggests that if a good estimate of Nf/Nm is possible, specifying these variables is preferable to Nfmax/Nmmax (the maximum number of candidate female/male parents in the population). As such, I'm using the sex-specific abundance estimates calculated in ch2_demography.Rmd (currently in ch2_relatedness.Rmd tho, need to move it) based on capData records.
+
+```
+lwed_Nf = 73
+lwed_Nm = 82
+
+simp_Nf = 52
+simp_Nm = 60
+```
+
+## franz_run1
+
+### Run script
+
+```{bash}
+# lwed
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demographics/02_results/lwed/franz_run1
+
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 73 --Nm 82 --fullsibtest --fullsibparental --updatefreqs ./../../../00_data/lwed_genos0x_franz.dat
+
+# simp
+cd ./../../simp/franz_run1
+
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 52 --Nm 60 --fullsibtest --fullsibparental --updatefreqs ./../../../00_data/simp_genos0x_franz.dat
+```
+
+FRANz parameters are defined as follows:
+--femrepro and --malerepro specify the age ranges in which females and males can reproduce
+
+--Nf and --Nm specify the number of candidate female and male parents in the population, which is the sum of the average number of sampled (n) and unsampled (N-n) breeding females/males in the population. The FRANz manual suggests that if a good estimate of Nf/Nm is possible, specifying these variables is preferable to Nfmax/Nmmax (the maximum number of candidate female/male parents in the population)
+
+--fullsibtest specifies that FRANz should run the fullsib heuristic (as described in Riester et al. 2009)
+
+--fullsibparental specifies that FRANz should also detect fullsibs in the parent generation
+
+--updatefreqs specifies that FRANz should update allele frequencies using MCMC sampling
+
+**NOTE** that FRANz automatically sets --mintyped loci to (1+loci)/2; this also defines the min number of common typed loci for a pair of indivs. Other defaults include:
+
+-   typingerror = 0.01
+
+### Assess results
+
+#### Cumulative exclusion probability
+
+LWED: Cumulative exclusion probability when 1 to 7 fullsibs are genotyped
+  First Parent              : 0.9999997  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
+  Second Parent             : 1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
+  Parent Pair               : 1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
+  
+SIMP: Cumulative exclusion probability when 1 to 7 fullsibs are genotyped
+  First Parent              : 0.9999993  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
+  Second Parent             : 1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
+  Parent Pair               : 1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
+
+#### PO assignments
+
+FRANz colnames are not my favorite - set new ones:
+
+```{r}
+colnames_parentage <- c("offspring",
+                        "lociTyped_offspring",
+                        "parent1",
+                        "lociTyped_parent1",
+                        "parent2",
+                        "lociTyped_parent2",
+                        "LOD",
+                        "posterior",
+                        "commonLociTyped",
+                        "mismatches",
+                        "n_f",
+                        "n_m",
+                        "pairLOD_parent1",
+                        "pairLOD_parent2",
+                        "posterior_parent1",
+                        "posterior_parent2",
+                        "parentage_mlPedigree")
+```
+
+**PO assignments**
+
+```{r}
+lwed_po_run1_file <- read.csv("./DISSERTATION/ch2_demographics/02_results/lwed/franz_run1/parentage.csv", na.strings = c("", "NA")) %>%
+  rownames_to_column("temp") %>%
+  `colnames<-`(colnames_parentage) %>%
+  mutate(franzRun = "run1")
+
+simp_po_run1_file <- read.csv("./DISSERTATION/ch2_demographics/02_results/simp/franz_run1/parentage.csv", na.strings = c("", "NA")) %>%
+  rownames_to_column("temp") %>%
+  `colnames<-`(colnames_parentage) %>%
+  mutate(franzRun = "run1")
+```
+
+**Take a peek at parentage posterior probabilities**
+
+```{r}
+lwed_po_run1_file %>%
+  filter(!is.na(parent1)) %>%
+  ggplot(aes(x = posterior)) +
+  geom_histogram(breaks = seq(0, 1, 0.01)) +
+  ggtitle("Histogram of FRANz posterior probabilities for parentage assignments") +
+  theme_bw()
+
+simp_po_run1_file %>%
+  filter(!is.na(parent1)) %>%
+  ggplot(aes(x = posterior)) +
+  geom_histogram(breaks = seq(0, 1, 0.01)) +
+  ggtitle("Histogram of FRANz posterior probabilities for parentage assignments") +
+  theme_bw()
+```
+
+**PO checks**
+
+```{r}
+# LWED
+lwed_po_run1 <- lwed_po_run1_file %>%
+  filter(posterior > 0.9) %>%
+  select(offspring, parent1, parent2) %>%
+  pivot_longer(-offspring,
+               names_to = "parentID",
+               values_to = "parent") %>%
+  select(-parentID) %>%
+  na.omit() %>%
+  
+  # add birthYear and sex
+  merge(., lwed_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., lwed_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # add groups
+  mutate(
+    animalID_par = gsub(".*_([0-9]+)$", "\\1", parent),
+    animalID_off = gsub(".*_([0-9]+)$", "\\1", offspring)
+    ) %>%
+  
+  mutate(
+    temp = as.numeric(birthYear_off) - 1
+    ) %>%
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_par", "temp"), by.y = c("animalID", "captureYear"), all.x = T) %>%
+  select(-temp) %>%
+  
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_off", "birthYear_off"), by.y = c("animalID", "captureYear"), all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # same groupName?
+  mutate(
+    groupMatch = groupName_par == groupName_off
+  ) %>%
+  
+  # add parity for F
+  merge(., parityAssigments_firstParous[, c("animalID", "parityYear")], by.x = "animalID_par", by.y = "animalID", all.x = T) %>%
+  mutate(
+    diff_birth.parity = as.numeric(birthYear_off) - as.numeric(parityYear)
+  ) %>%
+  
+  relocate(parent, offspring, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off)
+
+
+# SIMP
+simp_po_run1 <- simp_po_run1_file %>%
+  filter(posterior > 0.9) %>%
+  select(offspring, parent1, parent2) %>%
+  pivot_longer(-offspring,
+               names_to = "parentID",
+               values_to = "parent") %>%
+  select(-parentID) %>%
+  na.omit() %>%
+  
+  # add birthYear and sex
+  merge(., simp_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., simp_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # add groups
+  mutate(
+    animalID_par = gsub(".*_([0-9]+)$", "\\1", parent),
+    animalID_off = gsub(".*_([0-9]+)$", "\\1", offspring)
+    ) %>%
+  
+  mutate(
+    temp = as.numeric(birthYear_off) - 1
+    ) %>%
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_par", "temp"), by.y = c("animalID", "captureYear"), all.x = T) %>%
+  select(-temp) %>%
+  
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_off", "birthYear_off"), by.y = c("animalID", "captureYear"), all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # same groupName?
+  mutate(
+    groupMatch = groupName_par == groupName_off
+  ) %>%
+  
+  # add parity for F
+  merge(., parityAssigments_firstParous[, c("animalID", "parityYear")], by.x = "animalID_par", by.y = "animalID", all.x = T) %>%
+  mutate(
+    diff_birth.parity = as.numeric(birthYear_off) - as.numeric(parityYear)
+  ) %>%
+  
+  relocate(parent, offspring, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off)
+```
+
+**PO pedigree.dat**
+
+Just filtering by groupMatch == T; filtering by diff_birth.parity gives too few I think
+
+LWED: F = 7, M = 6
+SIMP: F = 4, M = 4
+
+```{r}
+lwed_po_run1_forPed <- lwed_po_run1 %>%
+  filter(groupMatch == TRUE) %>%
+  mutate(franzPed = str_c(parent, offspring))
+
+simp_po_run1_forPed <- simp_po_run1 %>%
+  filter(groupMatch == TRUE) %>%
+  mutate(franzPed = str_c(parent, offspring))
+
+# overview of parent assignment numbers for pedigree.dat
+lwed_po_run1_forPed %>%
+  group_by(sex_par) %>%
+  summarise(count = n())
+
+simp_po_run1_forPed %>%
+  group_by(sex_par) %>%
+  summarise(count = n())
+```
+
+Reformat and export as .dat files
+
+```{r}
+nrow(lwed_genos0x_franz) # 59 lwed samples
+nrow(simp_genos0x_franz) # 41 simp samples
+
+lwed_ped_forRun2 <- c(lwed_genos0x_franz$sampleID_franz,
+                      lwed_po_run1_forPed$franzPed) %>%
+  as.data.frame() %>%
+  dplyr::rename("59" = ".")
+
+simp_ped_forRun2 <- c(simp_genos0x_franz$sampleID_franz,
+                      simp_po_run1_forPed$franzPed) %>%
+  as.data.frame() %>%
+  dplyr::rename("41" = ".")
+
+# export
+write.table(lwed_ped_forRun2, file = "./DISSERTATION/ch2_demographics/00_data/lwed_poPed_forRun2.dat", quote = F, row.names = F)
+
+write.table(simp_ped_forRun2, file = "./DISSERTATION/ch2_demographics/00_data/simp_poPed_forRun2.dat", quote = F, row.names = F)
+```
+
+#### SIB assignments
+
+```{r}
+colnames_sibs <- c("Genotype1", "Genotype2", "FS", "PO", "HS", "pV_PO", "pV_HS", "pV_U", "Common_Parents", "Common_Loci")
+
+lwed_sibs_run1_file <- readLines("./DISSERTATION/ch2_demographics/02_results/lwed/franz_run1/siblings.txt")
+
+lwed_sibs_run1_file1 <- lwed_sibs_run1_file[24:28] %>%
+  as.data.frame() %>%
+  dplyr::rename("temp" = ".") %>%
+  mutate(
+    temp = gsub(" ", "", temp),
+    temp = str_sub(temp, 2, -2)
+    ) %>%
+  separate(temp, into = colnames_sibs, sep = "\\|") %>%
+  mutate(dyadStatus = "accepted")
+  
+lwed_sibs_run1_file2 <- lwed_sibs_run1_file[35:53] %>%
+  as.data.frame() %>%
+  dplyr::rename("temp" = ".") %>%
+  mutate(
+    temp = gsub(" ", "", temp),
+    temp = str_sub(temp, 2, -2)
+    ) %>%
+  separate(temp, into = colnames_sibs, sep = "\\|") %>%
+  mutate(dyadStatus = "rejected")
+
+lwed_sibs_run1 <- rbind(lwed_sibs_run1_file1, lwed_sibs_run1_file2) %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "Genotype1", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "Genotype2", by.y = "sampleID_franz", all.x = T, suffixes = c("_1", "_2")) %>%
+  mutate(
+    twinSetMatch = twinSet_1 == twinSet_2
+  )
+```
+
+
+## franz_run2
+
+### Run script
+
+```{bash}
+# lwed
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demographics/02_results/lwed/franz_run2
+
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 73 --Nm 82 --pedigreein ./../../../00_data/lwed_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs ./../../../00_data/lwed_genos0x_franz.dat
+
+# simp
+cd ./../../simp/franz_run2
+
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 52 --Nm 60 --pedigreein ./../../../00_data/simp_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs ./../../../00_data/simp_genos0x_franz.dat
+```
+
+LWED warnings:
+Warning: Locus 78 not informative.
+Warning: Locus 84 not informative.
+Warning: Locus 89 not informative.
+Warning: Locus 91 not informative.
+Warning: Locus 130 not informative.
+Warning: Locus 131 not informative.
+Warning: Locus 132 not informative.
+Warning: Locus 133 not informative.
+Warning: Locus 135 not informative.
+Warning: Locus 139 not informative.
+Warning: Locus 142 not informative.
+Warning: Locus 144 not informative.
+Warning: Locus 147 not informative.
+Warning: Locus 149 not informative.
+
+SIMP warnings:
+Warning: Locus 71 not informative.
+Warning: Locus 78 not informative.
+Warning: Locus 121 not informative.
+Warning: Locus 125 not informative.
+Warning: Locus 132 not informative.
+Warning: Locus 136 not informative.
+Warning: Locus 137 not informative.
+Warning: Locus 142 not informative.
+Warning: Locus 145 not informative.
+
+### Assess results
+

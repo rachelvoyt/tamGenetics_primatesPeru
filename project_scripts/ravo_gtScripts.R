@@ -467,7 +467,7 @@ get_gtseqGenos_v2_OLD <- function(readCounts, locus, lociInfo) {
 ### GENO COMPARE ###
 ####################
 
-get_genoCompare <- function(genoFile1, genoFile2) {
+get_genoCompare <- function(genoFile1, genoFile2, sampleRef, lociInfo) {
   
   na_values <- c("0", "0,0", "00")
   
@@ -480,7 +480,9 @@ get_genoCompare <- function(genoFile1, genoFile2) {
     mutate(genos1 = case_when(
       genos1 %in% na_values ~ NA,
       .default = genos1
-    ))
+    )) %>%
+    merge(., sampleRef[, c("sampleID", "sampleRef", "sampleType")], by = "sampleID") %>%
+    dplyr::rename("sampleType1" = "sampleType")
   
   genoSet2 <- genoFile2 %>%
     mutate(across(everything(), \(x) as.character(x))) %>%
@@ -491,13 +493,31 @@ get_genoCompare <- function(genoFile1, genoFile2) {
     mutate(genos2 = case_when(
       genos2 %in% na_values ~ NA,
       .default = genos2
-    ))
+    )) %>%
+    merge(., sampleRef[, c("sampleID", "sampleRef", "sampleType")], by = "sampleID") %>%
+    dplyr::rename("sampleType2" = "sampleType")
   
   genoCompare <- genoSet1 %>%
-    merge(., genoSet2, by = c("sampleID", "locus")) %>%
+    merge(., genoSet2, by = c("sampleRef", "locus"), all.x = T) %>%
+    select(-contains("sampleID")) %>%
     mutate(
       match = genos1 == genos2
-    )
+    ) %>%
+    # determine mismatchType
+    mutate(
+      callType1 = get_callType(locus, genos1, lociInfo),
+      callType2 = get_callType(locus, genos2, lociInfo),
+      
+      mismatchType = case_when(
+        match == FALSE & str_detect(callType1, "hom") & str_detect(callType2, "het") ~ "hom_het",
+        match == FALSE & str_detect(callType1, "het") & str_detect(callType2, "hom") ~ "het_hom",
+        match == FALSE & str_detect(callType1, "hom") & str_detect(callType2, "hom") ~ "hom_hom",
+        match == FALSE & str_detect(callType1, "FA") ~ str_c(callType1, callType2, sep = "_"),
+        match == FALSE & str_detect(callType2, "FA") ~ str_c(callType1, callType2, sep = "_"),
+        .default = NA
+      )
+    ) %>%
+    select(sampleRef, locus, match, mismatchType, genos1, genos2, callType1, callType2, sampleType1, sampleType2)
   
   return(genoCompare)
   
@@ -511,6 +531,53 @@ get_genoCompare <- function(genoFile1, genoFile2) {
 get_readSum <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
 # Input: column name
 # Example usage: %>% mutate(readSums = get_readSum(readCounts))
+
+
+get_callType <- function(locusCol, genoCol, lociInfo) {
+  
+  # function for single record
+  get_callType_single <- function(locus, geno) {
+    
+    # Get corresponding alleles from lociInfo based on the locusCol
+    a1_ref <- lociInfo$allele1[lociInfo$locus == locus]
+    a2_ref <- lociInfo$allele2[lociInfo$locus == locus]
+    
+    # Split genoCol into a1_call and a2_call
+    alleles <- unlist(strsplit(geno, ","))
+    a1_call <- alleles[1]
+    a2_call <- alleles[2]
+    
+    # Check for missing values in the reference alleles or allele calls
+    if (is.na(a1_ref) | is.na(a2_ref) | is.na(a1_call) | is.na(a2_call)) {
+      return(NA)  # Return NA if any of the values are missing
+    }
+    
+    # Classify the genotype
+    if (a1_call == a1_ref & a2_call == a1_ref) {
+      return("a1hom")
+    } else if (a1_call == a2_ref & a2_call == a2_ref) {
+      return("a2hom")
+    } else if ((a1_call == a1_ref & a2_call == a2_ref) | 
+               (a1_call == a2_ref & a2_call == a1_ref)) {
+      return("het")
+    } else if ((a1_call != a1_ref & a1_call != a2_ref & a2_call == a1_ref & a2_call != a2_ref) | 
+               (a1_call != a1_ref & a1_call != a2_ref & a2_call != a1_ref & a2_call == a2_ref)) {
+      return("a1FA")
+    } else if ((a1_call == a1_ref & a1_call != a2_ref & a2_call != a1_ref & a2_call != a2_ref) |
+               (a1_call != a1_ref & a1_call == a2_ref & a2_call != a1_ref & a2_call != a2_ref)) {
+      return("a2FA")
+    } else if ((a1_call != a1_ref & a1_call != a2_ref & a2_call != a1_ref & a2_call != a2_ref)) {
+      return("a12FA")
+    } else {
+      return(NA)  # Return NA if the genotype doesn't match any condition
+    }
+    
+  }
+  
+  # Apply to all rows using mapply
+  mapply(get_callType_single, locusCol, genoCol)
+  
+}
 
 
 
