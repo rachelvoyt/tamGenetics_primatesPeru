@@ -361,21 +361,37 @@ run_wgs <- read.csv("./06_tamGenetics_wgs/00_data/tamGenetics_wgs_metadata.csv")
     sampleID = sampleID2,
     sampleRef = tolower(str_c(species, sex, animalID, sep = "_")),
     seqRun = "run_wgs",
-    sampleType = "tissue"
+    sampleType = "skin"
   )
 ```
 
 ## sampleRef
 
+First version
+
 ```{r}
-sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")] %>%
-  rbind(., run3_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
-  rbind(., run4_md_ill[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
-  rbind(., run4_md_ont[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
-  rbind(., run5_md[, c("seqRun", "sampleID", "sampleRef", "sampleType")]) %>%
-  rbind(., run_wgs[, c("seqRun", "sampleID", "sampleRef", "sampleType")])
+sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID")] %>%
+  rbind(., run3_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run4_md_ill[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run4_md_ont[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run5_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run_wgs[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID")]) %>%
+  
+  # add sampleID_md
+  mutate(
+    sampleID_md = case_when(
+      sampleType == "blood" ~ str_c(sampleRef, "_b"),
+      sampleType == "hair" ~ str_c(sampleRef, "_h"),
+      sampleType == "skin" ~ str_c(sampleRef, "_s")
+    ),
+    
+    sampleID_franz = case_when(
+      seqRun == "run4_ont" ~ str_c("seq", str_sub(sampleID, -2, -1), "_", animalID),
+      seqRun == "run_wgs" ~ str_c("seqWGS_", animalID),
+      .default = str_c("seq", str_sub(sampleID, -3, -1), "_", animalID)
+      ),
+    sampleID_franz = str_pad(sampleID_franz, 10, pad = "_", side = "left")
+  )
 
 write.csv(sampleRef, "./project_data/sampleID_reference.csv", row.names = F)
 ```
-
-
