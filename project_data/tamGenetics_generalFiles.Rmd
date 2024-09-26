@@ -390,6 +390,7 @@ sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "anima
       seqRun == "run_wgs" ~ str_c("seqWGS_", animalID),
       .default = str_c("seq", str_sub(sampleID, -3, -1), "_", animalID)
       ),
+    # pad sampleID_franz so all are exactly 10 characters (required by FRANz)
     sampleID_franz = str_pad(sampleID_franz, 10, pad = "_", side = "left")
   )
 
