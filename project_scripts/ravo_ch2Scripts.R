@@ -50,3 +50,57 @@ get_parityStatus <- function(capData_file) {
   return(parityAssignments)
   
 }
+
+#######################
+### READ FRANZ SIBS ###
+#######################
+
+read_franzSibs <- function(sibFile_path) {
+  
+  sibFile <- readLines(sibFile_path)
+  
+  colnames_sibs <- c("sample1",
+                     "sample2",
+                     "FS",
+                     "PO",
+                     "HS",
+                     "pV_PO",
+                     "pV_HS",
+                     "pV_U",
+                     "commonParents",
+                     "commonLoci")
+  
+  # accepted dyads
+  startLine_table1 <- grep("Genotype 1", sibFile)[1] + 2
+  endLine_table1 <- grep("Rejected", sibFile)[1] - 5
+  
+  sibs_table1 <- sibFile[startLine_table1:endLine_table1] %>%
+    as.data.frame() %>%
+    dplyr::rename("temp" = ".") %>%
+    mutate(
+      temp = gsub(" ", "", temp),
+      temp = str_sub(temp, 2, -2)
+    ) %>%
+    separate(temp, into = colnames_sibs, sep = "\\|") %>%
+    mutate(dyadStatus = "accepted")
+  
+  
+  # rejected dyads
+  startLine_table2 <- grep("Rejected", sibFile)[1] + 2
+  endLine_table2 <- grep("TOTAL \\(REJECTED!)", sibFile)[1] - 3
+  
+  sibs_table2 <- sibFile[startLine_table2:endLine_table2] %>%
+    as.data.frame() %>%
+    dplyr::rename("temp" = ".") %>%
+    mutate(
+      temp = gsub(" ", "", temp),
+      temp = str_sub(temp, 2, -2)
+    ) %>%
+    separate(temp, into = colnames_sibs, sep = "\\|") %>%
+    mutate(dyadStatus = "rejected")
+  
+  sibs_df <- rbind(sibs_table1, sibs_table2)
+  
+  return(sibs_df)
+  
+}
