@@ -24,6 +24,7 @@ library(poppr)
 library(tidyverse)
 
 source("project_scripts/ggplot_theme_Publication-2.R") # for pretty ggplot themes
+source("./project_scripts/ravo_ch2Scripts.R")
 ```
 
 # 3 Data
@@ -281,7 +282,7 @@ simp_Nm = 60
 # lwed
 cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demographics/02_results/lwed/franz_run1
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 73 --Nm 82 --fullsibtest --fullsibparental --updatefreqs ./../../../00_data/lwed_genos0x_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 73 --Nm 82 --fullsibtest --fullsibparental --updatefreqs --siblingsoutformat 3 ./../../../00_data/lwed_genos0x_franz.dat
 
 # simp
 cd ./../../simp/franz_run1
@@ -512,38 +513,23 @@ write.table(simp_ped_forRun2, file = "./DISSERTATION/ch2_demographics/00_data/si
 #### SIB assignments
 
 ```{r}
-colnames_sibs <- c("Genotype1", "Genotype2", "FS", "PO", "HS", "pV_PO", "pV_HS", "pV_U", "Common_Parents", "Common_Loci")
-
-lwed_sibs_run1_file <- readLines("./DISSERTATION/ch2_demographics/02_results/lwed/franz_run1/siblings.txt")
-
-lwed_sibs_run1_file1 <- lwed_sibs_run1_file[24:28] %>%
-  as.data.frame() %>%
-  dplyr::rename("temp" = ".") %>%
-  mutate(
-    temp = gsub(" ", "", temp),
-    temp = str_sub(temp, 2, -2)
-    ) %>%
-  separate(temp, into = colnames_sibs, sep = "\\|") %>%
-  mutate(dyadStatus = "accepted")
-  
-lwed_sibs_run1_file2 <- lwed_sibs_run1_file[35:53] %>%
-  as.data.frame() %>%
-  dplyr::rename("temp" = ".") %>%
-  mutate(
-    temp = gsub(" ", "", temp),
-    temp = str_sub(temp, 2, -2)
-    ) %>%
-  separate(temp, into = colnames_sibs, sep = "\\|") %>%
-  mutate(dyadStatus = "rejected")
-
-lwed_sibs_run1 <- rbind(lwed_sibs_run1_file1, lwed_sibs_run1_file2) %>%
-  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "Genotype1", by.y = "sampleID_franz", all.x = T) %>%
-  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "Genotype2", by.y = "sampleID_franz", all.x = T, suffixes = c("_1", "_2")) %>%
+lwed_sibs_run1 <- read_franzSibs("./DISSERTATION/ch2_demographics/02_results/lwed/franz_run1/siblings.txt") %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample1", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample2", by.y = "sampleID_franz", all.x = T, suffixes = c("_1", "_2")) %>%
   mutate(
     twinSetMatch = twinSet_1 == twinSet_2
-  )
-```
+  ) %>%
+  relocate(sample1)
 
+
+simp_sibs_run1 <- read_franzSibs("./DISSERTATION/ch2_demographics/02_results/simp/franz_run1/siblings.txt") %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample1", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample2", by.y = "sampleID_franz", all.x = T, suffixes = c("_1", "_2")) %>%
+  mutate(
+    twinSetMatch = twinSet_1 == twinSet_2
+  ) %>%
+  relocate(sample1)
+```
 
 ## franz_run2
 
@@ -589,4 +575,152 @@ Warning: Locus 142 not informative.
 Warning: Locus 145 not informative.
 
 ### Assess results
+
+#### PO assignments
+
+**PO assignments**
+
+```{r}
+lwed_po_run2_file <- read.csv("./DISSERTATION/ch2_demographics/02_results/lwed/franz_run2/parentage.csv", na.strings = c("", "NA")) %>%
+  rownames_to_column("temp") %>%
+  `colnames<-`(colnames_parentage) %>%
+  mutate(franzRun = "run2")
+
+simp_po_run2_file <- read.csv("./DISSERTATION/ch2_demographics/02_results/simp/franz_run2/parentage.csv", na.strings = c("", "NA")) %>%
+  rownames_to_column("temp") %>%
+  `colnames<-`(colnames_parentage) %>%
+  mutate(franzRun = "run2")
+```
+
+**PO checks**
+
+```{r}
+# LWED
+lwed_po_run2 <- lwed_po_run2_file %>%
+  filter(posterior > 0.9) %>%
+  select(offspring, parent1, parent2) %>%
+  pivot_longer(-offspring,
+               names_to = "parentID",
+               values_to = "parent") %>%
+  select(-parentID) %>%
+  na.omit() %>%
+  
+  # add birthYear and sex
+  merge(., lwed_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., lwed_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # add groups
+  mutate(
+    animalID_par = gsub(".*_([0-9]+)$", "\\1", parent),
+    animalID_off = gsub(".*_([0-9]+)$", "\\1", offspring)
+    ) %>%
+  
+  mutate(
+    temp = as.numeric(birthYear_off) - 1
+    ) %>%
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_par", "temp"), by.y = c("animalID", "captureYear"), all.x = T) %>%
+  select(-temp) %>%
+  
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_off", "birthYear_off"), by.y = c("animalID", "captureYear"), all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # same groupName?
+  mutate(
+    groupMatch = groupName_par == groupName_off
+  ) %>%
+  
+  # add parity for F
+  merge(., parityAssigments_firstParous[, c("animalID", "parityYear")], by.x = "animalID_par", by.y = "animalID", all.x = T) %>%
+  mutate(
+    diff_birth.parity = as.numeric(birthYear_off) - as.numeric(parityYear)
+  ) %>%
+  
+  relocate(parent, offspring, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off)
+
+
+# SIMP
+simp_po_run2 <- simp_po_run2_file %>%
+  filter(posterior > 0.9) %>%
+  select(offspring, parent1, parent2) %>%
+  pivot_longer(-offspring,
+               names_to = "parentID",
+               values_to = "parent") %>%
+  select(-parentID) %>%
+  na.omit() %>%
+  
+  # add birthYear and sex
+  merge(., simp_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., simp_genos0x_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # add groups
+  mutate(
+    animalID_par = gsub(".*_([0-9]+)$", "\\1", parent),
+    animalID_off = gsub(".*_([0-9]+)$", "\\1", offspring)
+    ) %>%
+  
+  mutate(
+    temp = as.numeric(birthYear_off) - 1
+    ) %>%
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_par", "temp"), by.y = c("animalID", "captureYear"), all.x = T) %>%
+  select(-temp) %>%
+  
+  merge(., capData[, c("animalID", "captureYear", "groupName")], by.x = c("animalID_off", "birthYear_off"), by.y = c("animalID", "captureYear"), all.x = T, suffixes = c("_par", "_off")) %>%
+  
+  # same groupName?
+  mutate(
+    groupMatch = groupName_par == groupName_off
+  ) %>%
+  
+  # add parity for F
+  merge(., parityAssigments_firstParous[, c("animalID", "parityYear")], by.x = "animalID_par", by.y = "animalID", all.x = T) %>%
+  mutate(
+    diff_birth.parity = as.numeric(birthYear_off) - as.numeric(parityYear)
+  ) %>%
+  
+  relocate(parent, offspring, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off)
+```
+
+
+```{r}
+lwed_po_run2 %>%
+  filter(sex_par == "F") %>%
+  group_by(parent) %>%
+  summarise(count = n())
+
+lwed_po_run2 %>%
+  filter(sex_par == "M") %>%
+  group_by(parent) %>%
+  summarise(count = n())
+
+
+simp_po_run2 %>%
+  filter(sex_par == "F") %>%
+  group_by(parent) %>%
+  summarise(count = n())
+
+simp_po_run2 %>%
+  filter(sex_par == "M") %>%
+  group_by(parent) %>%
+  summarise(count = n())
+```
+
+#### SIB assignments
+
+```{r}
+lwed_sibs_run2 <- read_franzSibs("./DISSERTATION/ch2_demographics/02_results/lwed/franz_run2/siblings.txt") %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample1", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample2", by.y = "sampleID_franz", all.x = T, suffixes = c("_1", "_2")) %>%
+  mutate(
+    twinSetMatch = twinSet_1 == twinSet_2
+  ) %>%
+  relocate(sample1)
+
+
+simp_sibs_run2 <- read_franzSibs("./DISSERTATION/ch2_demographics/02_results/simp/franz_run2/siblings.txt") %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample1", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., twinList[, c("sampleID_franz", "twinSet")], by.x = "sample2", by.y = "sampleID_franz", all.x = T, suffixes = c("_1", "_2")) %>%
+  mutate(
+    twinSetMatch = twinSet_1 == twinSet_2
+  ) %>%
+  relocate(sample1)
+```
 
