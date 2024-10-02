@@ -1,0 +1,157 @@
+---
+title: "ch2_popGenReport"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+asdf
+
+# 2 Packages
+
+```{r}
+library(adegenet)
+library(conflicted) # deal with conflicting package issues
+library(PopGenReport)
+library(tidyverse)
+```
+
+### Troubleshooting
+
+```{r}
+install.packages("/home/rachelvoyt/programs/PopGenReport_3.1.tar.gz", repos = NULL, type = "source")
+```
+
+**Issue #1:**
+
+Install failed, the base error seems to be related to gdal--
+
+"configure: error: gdal-config not found or not executable."
+
+Folks on stackoverflow (https://stackoverflow.com/questions/12141422/error-gdal-config-not-found-while-installing-r-dependent-packages-whereas-gdal) found that running the below helped--
+
+```
+sudo apt install libgdal-dev
+```
+
+**Issue #2:**
+
+Dealing with Issue #1 seemed to help with most of the errors, but 'dismo' still won't install, as per the error message below--
+
+"ERROR: dependency ‘dismo’ is not available for package ‘PopGenReport’"
+
+Try to install 'dismo' manually--
+
+```{r}
+install.packages("dismo")
+```
+
+Now try PopGenReport again-- SUCCESS!
+
+```{r}
+install.packages("/home/rachelvoyt/programs/PopGenReport_3.1.tar.gz", repos = NULL, type = "source")
+```
+
+# 3 testing
+
+## 3.1 prep
+
+```{r}
+lwed_genoSuccess_byLocus <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T, na.strings = "0") %>%
+  # subset to lwed hair
+  dplyr::select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  dplyr::filter(!str_detect(rownames(.), "SEXID|SPECIESID|SIMP")) %>%
+  
+  # remove 0% genoSuccess samples
+  dplyr::select(where(~sum(!is.na(.x))/length(.x) != 0)) %>%
+  
+  mutate(
+    genoSuccess = rowSums(!is.na(.))/( rowSums(is.na(.)) + rowSums(!is.na(.)) )
+  )
+
+mean(lwed_genoSuccess_byLocus$genoSuccess) # 0.516543
+median(lwed_genoSuccess_byLocus$genoSuccess) # 0.5912698
+
+ggplot(lwed_genoSuccess_byLocus, aes(x = genoSuccess)) +
+  geom_histogram(binwidth = 0.01)
+
+
+lwed_genoSuccess_bySample <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T, na.strings = "0") %>%
+  # subset to lwed hair
+  dplyr::select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  dplyr::filter(!str_detect(rownames(.), "SEXID|SPECIESID|SIMP")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(
+    genoSuccess = rowSums(!is.na(.))/( rowSums(is.na(.)) + rowSums(!is.na(.)) )
+  )
+
+mean(lwed_genoSuccess_bySample$genoSuccess) # 0.4750687
+median(lwed_genoSuccess_bySample$genoSuccess) # 0.5437956
+min(lwed_genoSuccess_bySample$genoSuccess)
+
+ggplot(lwed_genoSuccess_bySample, aes(x = genoSuccess)) +
+  geom_histogram(binwidth = 0.01)
+```
+
+
+## 3.2 df2genind
+
+```{r}
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+
+lwed_genos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_0x.txt", header = T, na.strings = "0") %>%
+  # subset to lwed hair
+  dplyr::select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  # reformat loci & subset to indid only
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  dplyr::filter(!str_detect(rownames(.), "SEXID|SPECIESID|SIMP")) %>%
+  
+  # FILTER
+  ## remove 0% genoSuccess samples
+  dplyr::select(where(~sum(!is.na(.x))/length(.x) != 0)) %>%
+  ## remove <= 50% genoSuccess loci
+  mutate(
+    propNA = rowSums(is.na(.))/( rowSums(is.na(.)) + rowSums(!is.na(.)) )
+    ) %>%
+  dplyr::filter(propNA <= 0.5) %>%
+  dplyr::select(-propNA) %>%
+  # remove <= 50% genoSuccess samples
+  dplyr::select(where(~sum(!is.na(.x))/length(.x) >= 0.5)) %>%
+  
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("ind") %>%
+  mutate(pop = "lwed",
+         lat = NA,
+         long = NA) %>%
+  relocate(ind, pop, lat, long)
+
+write.csv(lwed_genos, "./DISSERTATION/ch2_demography/00_data/lwed_genos_forPGR.csv", row.names = F)
+
+lwed_genind <- read.genetable("./DISSERTATION/ch2_demography/00_data/lwed_genos_forPGR.csv", ind = 1, pop = 2, lat = 3, long = 4, oneColPerAll = F, sep = ",", ploidy = 2)
+
+#lwed_genind <- adegenet::df2genind(X = lwed_genos[,c(2:155)],
+#                                   sep = ",",
+#                                   ind.names = lwed_genos$ind,
+#                                   pop = lwed_genos$pop,
+#                                   NA.char = "NA",
+#                                   ploidy = 2,
+#                                   type = "codom")
+```
+
+
+```{r}
+lwed_out1 <- popgenreport(lwed_genind, path.pgr = "/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/lwed", mk.complete = T, foldername = "popGenReport")
+```
+

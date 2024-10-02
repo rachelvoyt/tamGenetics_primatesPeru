@@ -9,12 +9,17 @@
 ### - alleles separated by comma
 ### - non-genotyped alleles can be in any format (e.g., NA, "0", "0,0")
 ## 2) mdFile: should include a column for "species" and "sampleID"
-## 3) sampleID_colName: specify column name for sampleID
+## 3) sampleID_colName: specify mdFile column name for sampleID
 
 assignSpecies <- function(genoFile, mdFile, sampleID_colName) {
   
-  # import speciesKey
-  speciesKeyFile <- read.csv("./project_data/speciesKey.csv")
+  # get list of species loci present in genoFile (just in case some were filtered out in previous analyses)
+  genoFile_speciesLoci <- rownames(genoFile) %>%
+    str_subset(pattern = "SPECIES")
+  
+  # import speciesKey, subset to loci in genoFile_speciesLoci
+  speciesKeyFile <- read.csv("./project_data/speciesKey.csv") %>%
+    filter(locus %in% genoFile_speciesLoci)
   
   # ensure sampleID colname is in correct format
   if(missing(sampleID_colName)) {
@@ -75,16 +80,21 @@ assignSpecies <- function(genoFile, mdFile, sampleID_colName) {
 ### - alleles separated by comma
 ### - non-genotyped alleles can be in any format (e.g., NA, "0", "0,0")
 ## 2) mdFile: should include a column for "species" and "sampleID"
-## 3) sampleID_colName: specify column name for sampleID ("colName")
+## 3) sampleID_colName: specify mdFile column name for sampleID ("colName")
 ## 4) exclude_nonTargetSp: specify ("yes" or "no") whether to include genos for sex loci that are specific to the non-target species 
 
 assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSp) {
   
-  # import sexKey
+  # get list of sex loci present in genoFile (just in case some were filtered out in previous analyses)
+  genoFile_sexLoci <- rownames(genoFile) %>%
+    str_subset(pattern = "SEXID")  
+
+  # import sexKey, subset to loci in genoFile_sexLoci
   sexKeyFile <- read.csv("./project_data/sexKey.csv") %>%
     mutate(
       exclude_ntSex = exclude_nonTargetSp
-    )
+    ) %>%
+    filter(locus %in% genoFile_sexLoci)
   
   # ensure sampleID colname is in correct format
   if(missing(sampleID_colName)) {
@@ -148,6 +158,89 @@ assignSex <- function(genoFile, mdFile, sampleID_colName, exclude_nonTargetSp) {
     relocate(c(mdMatch, mdSex), .after = sampleID)
   
   return(result)
+}
+
+############################
+### ID DUPLICATE SAMPLES ###
+############################
+
+# RV modified version of the GTscore function; when creating genotypes_NAmatrix, added as.matrix() to...
+# ...enable using geno dataframe vs. polygen output
+
+#function to compare genotypes between all pairs of samples
+#input format: rows are loci, columns are samples, alleles are 0 and 1, missing genotypes are NA
+#heterozygous calls must be consistent within a locus, ie all 0/1, no 1/0
+get_dupSamples <- function(genotypes,MAF=NULL){
+  #function to calculate MAF
+  calcMAF<-function(locusGenos){
+    allele1Counts<-sum(str_count(locusGenos,"0"),na.rm=TRUE)
+    allele2Counts<-sum(str_count(locusGenos,"1"),na.rm=TRUE)
+    allele1Freq<-allele1Counts/sum(allele1Counts,allele2Counts)
+    if(allele1Freq>0.5){
+      MAF<-1-allele1Freq
+    }else{
+      MAF<-allele1Freq
+    }
+    return(MAF)
+  }
+  
+  #filter loci using MAF if threshold is specified
+  if(!is.null(MAF)){
+    #calculate MAF
+    message(paste("MAF threshold applied:",MAF,"MAF",sep=" "))
+    message("calculating MAF")
+    locusMAF<-pbapply(genotypes,1,calcMAF)
+    #convert to dataframe
+    locusMAF<-data.frame(locus_ID=names(locusMAF),MAF=locusMAF,row.names=NULL)
+    locusMAF$locus_ID<-as.character(locusMAF$locus_ID)
+    #filter loc based on MAF threshold
+    genotypes<-genotypes[rownames(genotypes)%in%locusMAF$locus_ID[locusMAF$MAF>=MAF],]
+  }else{
+    message("No MAF threshold applied, using all loci")
+  }
+  
+  #make matrix of called vs NA genotypes for faster counting of missing data
+  genotypes_NAmatrix<-as.matrix(genotypes)
+  genotypes_NAmatrix[!is.na(genotypes_NAmatrix)]<-0
+  genotypes_NAmatrix[is.na(genotypes_NAmatrix)]<-1
+  class(genotypes_NAmatrix)<-"numeric"
+  
+  #identify all unique pairs of samples
+  allPairs<-combn(dim(genotypes)[2], 2)
+  ncombo<-dim(allPairs)[2]
+  nloci<-dim(genotypes)[1]
+  message(paste("number of samples:",dim(genotypes)[2],sep=" "))
+  message(paste("number of loci:",nloci,sep=" "))
+  message(paste("number of sample pairs:",ncombo,sep=" "))
+  #reshape into 2xn matrix
+  allPairs<-matrix(allPairs,nrow=2)
+  
+  #function to compare genotypes
+  compareGenos<-function(samplePair){
+    #count number of loci that are genotyped in both samples
+    NAcounts<-genotypes_NAmatrix[,samplePair[1]]+genotypes_NAmatrix[,samplePair[2]]
+    sharedCounts<-nloci-(sum(NAcounts)-sum(NAcounts[NAcounts==2])/2)
+    #count number of loci with genotypes that match in both samples
+    genotypeMatches<-sum(genotypes[,samplePair[1]]==genotypes[,samplePair[2]],na.rm=TRUE)
+    #return counts of genotype matches and shared loci
+    return(c(genotypeMatches,sharedCounts))
+  }
+  
+  #do all pairwise sample comparisons
+  message("comparing genotypes")
+  matches<-pbapply(allPairs,2,compareGenos)
+  
+  #make dataframe of results
+  comparisonResults<-data.frame(matrix(NA,nrow=dim(allPairs)[2],ncol=7))
+  colnames(comparisonResults)<-c("Sample1","Sample2","matchedGenotypes","commonGenotypes","proportionMatch","proportionCommon","totalLoci")
+  comparisonResults$Sample1<-colnames(genotypes)[allPairs[1,]]
+  comparisonResults$Sample2<-colnames(genotypes)[allPairs[2,]]
+  comparisonResults$matchedGenotypes<-matches[1,]
+  comparisonResults$commonGenotypes<-matches[2,]
+  comparisonResults$proportionMatch<-comparisonResults$matchedGenotypes/comparisonResults$commonGenotypes
+  comparisonResults$proportionCommon<-comparisonResults$commonGenotypes/nloci
+  comparisonResults$totalLoci<-nloci
+  return(comparisonResults)
 }
 
 ###############################
