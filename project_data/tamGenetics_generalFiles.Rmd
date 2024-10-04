@@ -370,12 +370,12 @@ run_wgs <- read.csv("./06_tamGenetics_wgs/00_data/tamGenetics_wgs_metadata.csv")
 First version
 
 ```{r}
-sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID", "sex")] %>%
-  rbind(., run3_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID", "sex")]) %>%
-  rbind(., run4_md_ill[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID", "sex")]) %>%
-  rbind(., run4_md_ont[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID", "sex")]) %>%
-  rbind(., run5_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID", "sex")]) %>%
-  rbind(., run_wgs[, c("seqRun", "sampleID", "sampleRef", "sampleType", "animalID", "sex")]) %>%
+sampleRef <- run1_md[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "sampleType", "animalID")] %>%
+  rbind(., run3_md[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run4_md_ill[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run4_md_ont[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run5_md[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "sampleType", "animalID")]) %>%
+  rbind(., run_wgs[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "sampleType", "animalID")]) %>%
   
   # add sampleID_md
   mutate(
@@ -394,5 +394,5 @@ sampleRef <- run1_md[, c("seqRun", "sampleID", "sampleRef", "sampleType", "anima
     sampleID_franz = str_pad(sampleID_franz, 10, pad = "_", side = "left")
   )
 
-write.csv(sampleRef, "./project_data/sampleID_reference.csv", row.names = F)
+write.csv(sampleRef, "./project_data/master_sampleInfo", row.names = F)
 ```
