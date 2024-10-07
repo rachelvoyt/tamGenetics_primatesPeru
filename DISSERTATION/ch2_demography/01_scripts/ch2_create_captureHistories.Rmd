@@ -76,15 +76,16 @@ capHist <- capData %>%
   # Unite is similar to paste. Here we are pasting the strings together from the second column (first capture event)
   # to the last capture event ("tail(names(.),1)").
   # we don't want any characters separating 0's and 1's, so we use: sep = ""
-  unite("capHist", 2:tail(names(.),1), sep = "") %>%
+  unite("ch", 2:tail(names(.),1), sep = "") %>%
   
   # add some metadata (as factor)
   merge(., capData[, c("animalID", "sex", "species")], by = "animalID") %>%
   distinct() %>%
   mutate(
-    sex = as.factor(sex),
+    animalID = as.numeric(animalID),
     species = as.factor(species),
-    animalID = as.numeric(animalID)
+    sex = as.factor(sex),
+    ch = as.character(ch)
   ) %>%
   relocate(animalID, species, sex) %>%
   arrange(animalID)
@@ -93,6 +94,6 @@ capHist <- capData %>%
 # Export
 
 ```{r}
-write.csv(capHist, "./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistory_2009to2023.csv", row.names = F)
+write.csv(capHist, "./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_2009to2023.csv", row.names = F)
 ```
 
