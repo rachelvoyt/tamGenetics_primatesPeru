@@ -9,17 +9,17 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Overview
+# 1 Overview
 
 Quick little script to create capture histories for use in demography analyses.
 
 **NOTE** that animalID 87 died during captures -- according to Cooch & White (2023) (Gentle intro to MARK), this indiv should be removed from the live marked population due to loss during capture so as not to bias survival estimates
 
-# Resources
+## 1.1 Resources
 
 James Paterson blog on how to create capture histories (<https://jamesepaterson.github.io/jamespatersonblog/07_creatingcapturehistories>)
 
-# Some background
+## 1.2 Some background
 
 From James Paterson's blog --
 
@@ -38,13 +38,13 @@ recorded or stored in this format. Often data are stored in 'long-form'
 where each capture or resighting is a row. Plus, events when an
 individual are not re-sighted do not usually have rows.
 
-# Packages
+# 2 Packages
 
 ```{r}
 library(tidyverse)
 ```
 
-# Data
+# 3 Data
 
 Ditch those w/unknown animalIDs
 
@@ -53,7 +53,7 @@ capData_2009to2023 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoDat
   filter(animalID != "UNK")
 ```
 
-# Create capture histories
+# 4 Indiv capture histories
 
 ```{r}
 capHist_df <- capData_2009to2023 %>%
@@ -97,9 +97,44 @@ capHist_df <- capData_2009to2023 %>%
   arrange(animalID)
 ```
 
-# Export
+## Export
 
 ```{r}
-write.csv(capHist, "./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_2009to2023.csv", row.names = F)
+write.csv(capHist, "./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_byIndiv_2009to2023.csv", row.names = F)
 ```
 
+# 5 Group capHist
+
+```{r}
+grp_capHist_df <- capData_2009to2023 %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  select(groupName, captureYear) %>%
+  # remove dups
+  distinct() %>%
+  # format as capHist
+  mutate(
+    detect = 1
+  ) %>%
+  # spread out data. The fill = 0 adds rows for combinations of id and event where individuals were not observerd
+  spread(captureYear, detect, fill = 0) %>% 
+  
+  # For every individual....
+  group_by(groupName) %>%
+  # Paste together 0's and 1's
+  # Unite is similar to paste. Here we are pasting the strings together from the second column (first capture event)
+  # to the last capture event ("tail(names(.),1)").
+  # we don't want any characters separating 0's and 1's, so we use: sep = ""
+  unite("ch", 2:tail(names(.),1), sep = "") %>% # colname needs to be "ch"!
+  
+  # add some metadata (as factor)
+  merge(., capData_2009to2023[, c("groupName", "species")], by = "groupName") %>%
+  distinct() %>%
+  relocate(species, groupName) %>%
+  arrange(species, groupName)
+```
+
+## Export
+
+```{r}
+write.csv(grp_capHist_df, "./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_byGroup_2009to2023.csv", row.names = F)
+```
