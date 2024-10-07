@@ -81,11 +81,11 @@ run5_hairDups <- run5_md_hair %>%
 table(run5_md_hair$species)
 ```
 
-# 4 Population overview
+# 4 Basic popDem
 
 ## 4.1 capData numbers
 
-I just did juveniles vs. non-juveniles here rather than looking at subadult/adult distinctions -- mostly bc I think these are a touch iffy, plus there are some indivs with NA for ageClass
+I just did juveniles vs. non-juveniles here rather than looking at subadult/adult distinctions -- mostly bc I think the adults vs. subadult designations are a touch iffy, plus there are some indivs with NA for ageClass
 
 From 2009-2019:
 
