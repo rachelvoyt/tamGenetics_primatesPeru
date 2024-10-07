@@ -41,7 +41,7 @@ need to be ditched
 
 ```{r}
 # latest updated version of capData_byIndiv from current rmd
-capData_byIndiv <- read.csv("./DISSERTATION/ch2_demographics/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v6.csv") %>%
+capData_byIndiv <- read.csv("./DISSERTATION/ch2_demography/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v6.csv") %>%
   filter(as.character(animalID) != "UNK") %>%
   # filter to 2009-2019 records only
   filter(as.numeric(rowID) <= 613)
@@ -63,6 +63,17 @@ capData_byIndiv_firstEntry_simp <- capData_byIndiv_firstEntry %>%
   filter(species == "SIMP")
 ```
 
+## 3.2 Capture histories
+
+Filtered to 2009-2019 only
+
+```{r}
+capHist <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_2009to2023.csv", colClasses = "character") %>%
+  # filter to 2009-2019 only
+  mutate(ch = str_sub(ch, 1, 11)) %>%
+  filter(ch != "00000000000")
+```
+
 ## 3.2 Genetic data
 
 Latest version of md_tamRun5 (from metadataReconciliation.Rmd file);
@@ -81,7 +92,7 @@ run5_hairDups <- run5_md_hair %>%
 table(run5_md_hair$species)
 ```
 
-# 4 Basic popDem
+# 4 Population & groups
 
 ## 4.1 capData numbers
 
@@ -282,15 +293,18 @@ capData_byIndiv_firstEntry_tamRun5Hair %>%
 99-52
 ```
 
+# x Infant survival
+
+```{r}
+
+```
 
 
+# X Mark-recapture
 
+**NEED TO REMEMBER** to account for 1) animalID 87 died during captures in 2012, so should be removed from dataset so as not to biase survival estimates, and 2) 
 
-
-
-# 5 Capture-mark-recapture models
-
-## 5.1 Some background
+## Some background
 
 -   Jolly-Seber (JS) model - focused on estimating abundance parameters
     (e.g., pop growth, recruitment, and abundance)
@@ -324,74 +338,41 @@ And based on Sandercock (2020), I may also want:
 -   a multistate model, in which detections are coded as dynamic
     categorical states that potentially change b/t consecutive occasions
 
-**Resources:** - James Paterson has a
-blog(<https://jamesepaterson.github.io/jamespatersonblog/07_creatingcapturehistories>)
-with a lot of really great info on how to use mark & recapture data
+## capHist subsets
 
-## 5.2 Create capture histories
-
-The first step is to ensure our data is in the right format for
-mark-recapture analyses, which require input data to be formatted as
-"capture histories" - binary strings to describe when individuals were
-found in the study.
-
-For example, a capture history of "101" describes a study where an
-individual was:
-
--   caught on the first event,
--   not observed on the second event, and
--   observed on the third event.
-
-Data from mark-recapture and mark-resight studies are not usually
-recorded or stored in this format. Often data are stored in 'long-form'
-where each capture or resighting is a row. Plus, events when an
-individual are not re-sighted do not usually have rows.
+Code to create original capHist file is in ch2_create_captureHistories.Rmd
 
 ```{r}
-# packages
-library(dplyr)
-library(tidyr)
-library(magrittr)
+# original capHist imported above
+capHist
 
-# subset capData_byIndiv for the columns I need
-capHist_inputData <- capData_byIndiv_v5 %>%
-  # ensure order is correct
-  arrange(rowID) %>%
-  select(animalID, captureDate) %>%
-  filter(animalID != "UNK") %>%
-  mutate(
-    captureYear = as.numeric(str_sub(captureDate, 1, 4))
-  ) %>%
-  select(-captureDate) %>%
-  mutate(
-    detect = 1
-  )
+# species/sex subsets
+capHist_lwedF <- capHist %>%
+  filter(species == "LWED") %>%
+  filter(sex == "F")
+capHist_lwedM <- capHist %>%
+  filter(species == "LWED") %>%
+  filter(sex == "M")
 
-# then create capture histories (Paterson's code & notes below)
-capHist <- capHist_inputData %>%
-  # remove duplicates, which may occur when individuals are caught multiple times in an event
-  # For example, your event may be a year and an individual may be caught multiple times in a year.
-  distinct() %>%
-  # spread out data. The fill = 0 adds rows for combinations of id and event where individuals were not observerd
-  spread(captureYear, detect, fill = 0) %>% 
-  # For every individual....
-  group_by(animalID) %>%
-  # Paste together 0's and 1's
-  # Unite is similar to paste. Here we are pasting the strings together from the second column (first capture event)
-  # to the last capture event ("tail(names(.),1)").
-  # we don't want any characters separating 0's and 1's, so we use: sep = ""
-  unite("ch", 2:tail(names(.),1), sep = "")
+capHist_simpF <- capHist %>%
+  filter(species == "SIMP") %>%
+  filter(sex == "F")
+capHist_simpM <- capHist %>%
+  filter(species == "SIMP") %>%
+  filter(sex == "M")
 ```
 
-Depending on
 
-```{r}
-capHist_lwed <- capHist %>%
-  filter(animalID %in% capData_byIndiv_lwed$animalID)
 
-capHist_simp <- capHist %>%
-  filter(animalID %in% capData_byIndiv_simp$animalID)
-```
+
+
+
+
+
+
+# 5 Capture-mark-recapture models
+
+
 
 ## 5.2 Jolly-Seber models
 
