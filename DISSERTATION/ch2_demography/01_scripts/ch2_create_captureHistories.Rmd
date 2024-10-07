@@ -13,9 +13,15 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Quick little script to create capture histories for use in demography analyses.
 
-**Resources:** - James Paterson has a
-blog(<https://jamesepaterson.github.io/jamespatersonblog/07_creatingcapturehistories>)
-with a lot of really great info on how to use mark & recapture data -- some background info from this site:
+**NOTE** that animalID 87 died during captures -- according to Cooch & White (2023) (Gentle intro to MARK), this indiv should be removed from the live marked population due to loss during capture so as not to bias survival estimates
+
+# Resources
+
+James Paterson blog on how to create capture histories (<https://jamesepaterson.github.io/jamespatersonblog/07_creatingcapturehistories>)
+
+# Some background
+
+From James Paterson's blog --
 
 "Capture histories" are binary strings to describe when individuals were
 found in the study.
@@ -43,14 +49,14 @@ library(tidyverse)
 Ditch those w/unknown animalIDs
 
 ```{r}
-capData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
+capData_2009to2023 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
   filter(animalID != "UNK")
 ```
 
 # Create capture histories
 
 ```{r}
-capHist <- capData %>%
+capHist_df <- capData_2009to2023 %>%
   select(animalID, captureDate) %>%
   filter(animalID != "UNK") %>%
   mutate(
@@ -76,10 +82,10 @@ capHist <- capData %>%
   # Unite is similar to paste. Here we are pasting the strings together from the second column (first capture event)
   # to the last capture event ("tail(names(.),1)").
   # we don't want any characters separating 0's and 1's, so we use: sep = ""
-  unite("ch", 2:tail(names(.),1), sep = "") %>%
+  unite("ch", 2:tail(names(.),1), sep = "") %>% # colname needs to be "ch"!
   
   # add some metadata (as factor)
-  merge(., capData[, c("animalID", "sex", "species")], by = "animalID") %>%
+  merge(., capData_2009to2023[, c("animalID", "sex", "species")], by = "animalID") %>%
   distinct() %>%
   mutate(
     animalID = as.numeric(animalID),
