@@ -3620,3 +3620,32 @@ A_het.j = nrow(temp)
 D_j / A_het.j
 ```
 
+# GTseq_Genotyper versions
+
+```{r}
+library(gt)
+gVers_table <- data.frame(
+  callType = c("A1HOM", "A2HOM", "HET"),
+  v1 = c("[10, inf)", "[0, 0.1]", "(0.2, 5]"),
+  v2 = c("[10, inf)", "[0, 0.1]", "(0.2, 2]"),
+  v3 = c("[10, inf)", "[0, 0.1]", "(0.5, 2]")
+) %>%
+  gt() %>%
+  cols_label(
+    callType = md("**Call type**"),
+    # unicode superscript 1, 2, 3
+    v1 = md("Version 1\U00B9"),
+    v2 = md("Version 2\U00B2"),
+    v3 = md("Version 3\U00B3")
+  ) %>%
+  tab_spanner(
+    label = md("**_GTseq_Genotyper.pl_ version**"),
+    columns = 2:4
+  ) %>%
+  gt::tab_options(table.font.names = "Times New Roman")
+gVers_table
+
+gVers_table %>%
+  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/SI_table1_alleleRatioVersions.png")
+```
+

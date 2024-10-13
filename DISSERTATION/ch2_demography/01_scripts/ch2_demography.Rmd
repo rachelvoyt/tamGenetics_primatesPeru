@@ -40,61 +40,80 @@ in ch2_dataOrganization.Rmd and most likely these entries
 need to be ditched
 
 ```{r}
-# latest updated version of capData_byIndiv from current rmd
-capData_byIndiv <- read.csv("./DISSERTATION/ch2_demography/01_dataOrganization/02_dataCleaning/captureData_byIndividual_v6.csv") %>%
-  filter(as.character(animalID) != "UNK") %>%
-  # filter to 2009-2019 records only
-  filter(as.numeric(rowID) <= 613)
+capData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4),
+    captureYear = as.numeric(captureYear)
+  ) %>%
+  # adjust rowID 1 ageClass to "UNK"
+  mutate(
+    ageClass = case_when(
+      rowID == 1 ~ "UNK",
+      .default = ageClass
+    )
+  )
 
-# species subsets
-capData_byIndiv_lwed <- capData_byIndiv %>%
-  filter(species == "LWED")
-capData_byIndiv_simp <- capData_byIndiv %>%
-  filter(species == "SIMP")
+capData_2009to2019 <- capData %>%
+  filter(rowID <= 613)
 
-# filter to first capture for each animalID
-capData_byIndiv_firstEntry <- capData_byIndiv[match(unique(capData_byIndiv$animalID), capData_byIndiv$animalID),]
-  #select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+capData_firstEntry <- capData[match(unique(capData$animalID), capData$animalID),] %>%
+  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
 
-# species subsets
-capData_byIndiv_firstEntry_lwed <- capData_byIndiv_firstEntry %>%
-  filter(species == "LWED")
-capData_byIndiv_firstEntry_simp <- capData_byIndiv_firstEntry %>%
-  filter(species == "SIMP")
+capData_2009to2019_firstEntry <- capData[match(unique(capData$animalID), capData$animalID),] %>%
+  filter(rowID <= 613) %>%
+  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV) %>%
+  # remove UNK animalID
+  filter(animalID != "UNK")
 ```
 
-## 3.2 Capture histories
+## 3.2 Birth/death data
+
+```{r}
+birthAssignments <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
+  select(animalID, birthYear_est) %>%
+  na.omit() %>%
+  distinct() %>%
+  arrange(animalID)
+
+deathAssignments <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv") %>%
+  select(animalID, deathYear_est) %>%
+  na.omit() %>%
+  distinct() %>%
+  arrange(animalID)
+```
+
+## 3.3 Capture histories
 
 Filtered to 2009-2019 only
 
 ```{r}
-capHist <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_2009to2023.csv", colClasses = "character") %>%
+capHist_2009to2023 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_byIndiv_2009to2023.csv", colClasses = "character")
+
+capHist_2009to2019 <- capHist_2009to2023 %>%
   # filter to 2009-2019 only
   mutate(ch = str_sub(ch, 1, 11)) %>%
   filter(ch != "00000000000")
 ```
 
-## 3.2 Genetic data
+## 3.4 Genetic data
 
 Latest version of md_tamRun5 (from metadataReconciliation.Rmd file);
 hair samples only
 
 ```{r}
 # latest updated version of md_tamRun5 from metadataReconciliation.Rmd
-run5_md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  relocate(captureYear, .after = captureDate)
 
-run5_md_hair <- run5_md %>%
-  filter(sampleType == "hair")
+sampleRef <- read.csv("./project_data/master_sampleInfo.csv")
 
-run5_hairDups <- run5_md_hair %>%
-  get_dupes(animalID)
-
-table(run5_md_hair$species)
+lociRef <- read.csv("./project_data/master_lociInfo.csv")
 ```
 
 # 4 Population & groups
 
-## 4.1 capData numbers
+## 4.1 General numbers
 
 I just did juveniles vs. non-juveniles here rather than looking at subadult/adult distinctions -- mostly bc I think the adults vs. subadult designations are a touch iffy, plus there are some indivs with NA for ageClass
 
@@ -172,6 +191,394 @@ temp <- capData_byIndiv %>%
   )
 ```
 
+# x Infant survival
+
+```{r}
+capHist_juvs <- capHist
+```
+
+# X Mark-recapture
+
+**NEED TO REMEMBER** to account for 1) animalID 87 died during captures in 2012, so should be removed from dataset so as not to biase survival estimates, and 2) 
+
+## Some background
+
+-   Jolly-Seber (JS) model - focused on estimating abundance parameters
+    (e.g., pop growth, recruitment, and abundance)
+    -   explicit definitions of process by which unmarked animals are
+        newly captured and marked; assumptions about process allows est
+        of recruitment and pop sizes
+    -   assumed that unmarked indivs in pop have same prob of capture as
+        marked indiv in pop (i.e., newly captured unmarked animals are a
+        random sample of all unmarked animals in pop)
+-   Cormack-Jolly-Seber (CJS) models - focused on estimating survival
+    rates (but not abundance)
+    -   no assumptions made about how newly marked animals are obtained
+    -   subsequent process of recovering marked animals in CJS is
+        conditional upon animal being released alive at first encounter;
+        survival and catchability refer only to those marked animals
+
+Based on Iijima (2020), I want:
+
+-   **capture-recapture model for open population**, where an "open
+    population" is one in which the number of individuals can change via
+    natural mortality, birth, and migration during the study period -
+    may also benefit from **robust design** where multiple surveys are
+    conducted under a constant condition
+-   1st hierarchy of sampling in which variables can change across
+    sampling periods
+-   2nd hierarchy of sampling in which things should remain relatively
+    stable
+
+And based on Sandercock (2020), I may also want:
+
+-   a multistate model, in which detections are coded as dynamic
+    categorical states that potentially change b/t consecutive occasions
+
+## CJS models w/marked
+
+So in package 'marked' there's function "mscjs()" that will compute MLEs for a Multi-state Cormack-Jolly-Seber open population capture-recapture model for processed dataframe x with user specified formulas in parameters that create list of design matrices dml. This function can be called directly but is most easily called from crm that sets up needed arguments. 
+
+OR-- might want mvmscjs() - fitting fxn for multivariate multistate CJS with uncertainty models
+--constructed as a hidden Markov model as described in Johnson et al. 2015 
+
+### data
+
+Using package 'marked' (make sure RMark is detached first! too many overlapping function names)
+
+```{r}
+#detach("package:RMark", unload=TRUE)
+library(marked)
+
+capHist_2009to2019 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_byIndiv_2009to2023.csv", colClasses = "character") %>%
+  # filter to 2009-2019 only
+  mutate(ch = str_sub(ch, 1, 11)) %>%
+  filter(ch != "00000000000")
+
+capHist_lwed <- capHist_2009to2019 %>%
+  filter(species == "LWED") %>%
+  select(-species) %>%
+  mutate(sex = as.factor(sex))
+
+capHist_simp <- capHist_2009to2019 %>%
+  filter(species == "SIMP") %>%
+  select(-species) %>%
+  mutate(sex = as.factor(sex))
+```
+
+### analysis
+
+### Run model
+
+**1. Process data**
+
+process.data() is a helper function to process data for the model
+
+```{r}
+# lwed
+lwed.cjs.proc <- process.data(capHist_lwed,
+                              model = "cjs",
+                              groups = "sex")
+
+# simp
+
+```
+
+**2. Make design data**
+
+Allows adding variables that depend on time (e.g., seasonal changes, weather, catastrophic events)
+
+```{r}
+lwed.cjs.ddl <- make.design.data(lwed.cjs.proc)
+
+#simpF.js.ddl <- make.design.data(simpF.js.proc)
+#simpM.js.ddl <- make.design.data(simpM.js.proc)
+```
+
+**3. Create function to fit multiple models**
+
+```{r}
+fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.sex.time <- list(formula=~sex*time) # Just like in other linear models "*" includes main effects and an interaction
+  Phi.time <- list(formula=~time) # differs between discrete times
+  Phi.sex <- list(formula=~sex) # differs between males and females
+  Phi.dot <- list(formula=~1) # constant survival
+  
+  # Detection probability (p) formula
+  p.sex <- list(formula=~sex)  # differs between males and females
+  p.time <- list(formula=~time)  # one discrete estimate of p per capture event
+  p.dot <- list(formula=~1) # constant detection
+  
+  # Construct all combinations and put into one model table
+  cml <- create.model.list(c("Phi","p")) # makes all possibile combinations of those parameter formulas
+  
+  results <- crm.wrapper(cml,
+                         data = dataProc,
+                         ddl = dataDesign,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+```
+
+
+
+
+**3. Outline formulas for each parameter**
+
+```{r}
+Phi.dot <- list(formula=~1)  # ~1 is always a constant (or single estimate)
+Phi.sex <- list(formula=~sex) # This formula will have an intercept (for females) and an estimate for the difference between females and males
+p.sex <- list(formula=~sex) # Be careful of case-sensitive names. Use the exact group column that was in data
+```
+
+**4. Make model**
+
+```{r}
+lwed.cjs_m1 <- crm(lwed.cjs.proc,
+                   lwed.cjs.ddl,
+                   model.parameters = list(Phi = Phi.dot,
+                                           p = p.sex),
+                   accumulate = F)
+lwed.cjs_m1
+```
+
+
+
+
+
+**3. Run function**
+
+```{r}
+# run function
+lwedF.js.models <- fit.js.models(lwedF.js.proc, lwedF.js.ddl)
+lwedM.js.models <- fit.js.models(lwedM.js.proc, lwedM.js.ddl)
+
+simpF.js.models <- fit.js.models(simpF.js.proc, simpF.js.ddl)
+simpM.js.models <- fit.js.models(simpM.js.proc, simpM.js.ddl)
+
+# view models
+lwedF.js.models
+lwedM.js.models
+
+simpF.js.models
+simpM.js.models
+```
+
+**4. Estimate real parameters**
+
+We can look at the top model estimates:
+
+```{r}
+# pull top model
+lwedF.js.models[[1]]
+lwedM.js.models[[1]]
+
+simpF.js.models[[1]]
+simpM.js.models[[1]]
+```
+
+But these estimates ^^ are not on probability scale (or in individuals for N) (e.g. Phi, p on logit scale, pent on mlogit scale) - so we need to use the *predict* function to estimate the real parameters:
+
+```{r}
+# predict real values
+lwedF.js.predicted <- predict(lwedF.js.models[[1]])
+lwedM.js.predicted <- predict(lwedM.js.models[[1]])
+
+simpF.js.predicted <- predict(simpF.js.models[[1]])
+simpM.js.predicted <- predict(simpM.js.models[[1]])
+
+# look at predictions of real parameters
+lwedF.js.predicted
+lwedM.js.predicted
+
+simpF.js.predicted
+simpM.js.predicted
+
+# what these parameters are saying (just lwedF for an example):
+lwedF.js.predicted$Phi$estimate # 0.64 survival b/t capture events
+lwedF.js.predicted$p$estimate # 0.84 detection prob
+lwedF.js.predicted$pent # 0.09 prob of entry for each capture event
+lwedF.js.predicted$N$estimate # ~ 5 unmarked indiv
+```
+
+
+
+
+## BaSTA
+
+```{r}
+library(BaSTA)
+```
+
+### format data
+
+```{r}
+# format capHist for basta
+capHist_basta <- splitCH(x = "ch", data = capHist_2009to2019, prefix = "year") %>%
+  select(-ch) %>%
+  merge(., birthAssignments, by = "animalID", all = T) %>%
+  merge(., deathAssignments, by = "animalID", all = T) %>%
+  dplyr::rename("birthYear" = "birthYear_est",
+                "deathYear" = "deathYear_est") %>%
+  relocate(animalID, birthYear, deathYear) %>%
+  relocate(-sex)
+
+lwed_capHist_basta <- capHist_basta %>%
+  filter(species == "LWED") %>%
+  select(-species)
+
+simp_capHist_basta <- capHist_basta %>%
+  filter(species == "SIMP") %>%
+  select(-species)
+
+# check data - update year of birth to 0 since basta apparently wants that
+DataCheck(lwed_capHist_basta, dataType = "CMR", studyStart = 2009, studyEnd = 2019)
+
+DataCheck(simp_capHist_basta, dataType = "CMR", studyStart = 2009, studyEnd = 2019)
+
+# fix data for basta
+lwed_fixed_basta <- FixCMRdata(lwed_capHist_basta,
+                               studyStart = 2009,
+                               studyEnd = 2019,
+                               autofix = rep(1, 6))
+lwed_data_basta <- lwed_fixed_basta$newData %>%
+  dplyr::rename("sex" = "Z")
+
+simp_fixed_basta <- FixCMRdata(simp_capHist_basta,
+                               studyStart = 2009,
+                               studyEnd = 2019,
+                               autofix = rep(1, 6))
+simp_data_basta <- simp_fixed_basta$newData %>%
+  dplyr::rename("sex" = "Z")
+```
+
+### run basta
+
+```{r}
+source("./DISSERTATION/ch2_demography/01_scripts/00_cmrModels/multibasta.R")
+source("./DISSERTATION/ch2_demography/01_scripts/00_cmrModels/plotFancyBasta.R")
+
+lwed_multibasta <- MultiBaSTA(object = lwed_data_basta,
+                              studyStart = 2009,
+                              studyEnd = 2019)
+
+lwed_basta_out <- basta(object = lwed_data_basta,
+                        dataType = "CMR",
+                        
+                        studyStart = 2009,
+                        studyEnd = 2019,
+                       
+                        model = "LO",
+                        shape = "bathtub",
+                       
+                        covarsStruct = "prop.haz",
+                        
+                        nsim = 4,
+                        parallel = T,
+                        updateJumps = T)
+
+summary(lwed_basta_out, digits = 3)
+plot(lwed_basta_out, plot.type = "demorates")
+
+lwed_basta_out$lifeTable
+
+BaSTA::print.basta(lwed_basta_out)
+```
+
+
+
+
+
+
+
+**1. capHist**
+
+```{r}
+censusMat <- capData_2009to2023 %>%
+  select(animalID, captureYear) %>%
+  mutate(animalID = as.numeric(animalID)) %>%
+  distinct() %>%
+  arrange(animalID) %>%
+  as.matrix()
+head(censusMat)
+
+chMat <- CensusToCaptHist(ID = censusMat[,1], d = censusMat[,2], dformat = "%Y", timeInt = "Y") %>%
+  arrange(as.numeric(ID))
+head(chMat)
+```
+
+**2. birthDeath**
+
+```{r}
+birthDeath <- merge(birthAssignments, deathAssignments, by = "animalID", all = T) %>%
+  `colnames<-`(c("ID", "Birth", "Death"))
+```
+
+**3. covMat**
+
+```{r}
+rawCovMat <- md %>%
+  select(animalID, sex)
+
+covMat <- MakeCovMat(x = "sex", data = rawCovMat)
+
+BaSTA::c
+```
+
+
+
+
+
+
+## capHist subsets
+
+Code to create original capHist file is in ch2_create_captureHistories.Rmd
+
+```{r}
+# original capHist imported above
+capHist
+
+# species/sex subsets
+capHist_lwedF <- capHist %>%
+  filter(species == "LWED") %>%
+  filter(sex == "F")
+capHist_lwedM <- capHist %>%
+  filter(species == "LWED") %>%
+  filter(sex == "M")
+
+capHist_simpF <- capHist %>%
+  filter(species == "SIMP") %>%
+  filter(sex == "F")
+capHist_simpM <- capHist %>%
+  filter(species == "SIMP") %>%
+  filter(sex == "M")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# XXXXXX
 ## 4.2 tamRun5 numbers
 
 ### Full set
@@ -293,74 +700,10 @@ capData_byIndiv_firstEntry_tamRun5Hair %>%
 99-52
 ```
 
-# x Infant survival
-
-```{r}
-
-```
 
 
-# X Mark-recapture
 
-**NEED TO REMEMBER** to account for 1) animalID 87 died during captures in 2012, so should be removed from dataset so as not to biase survival estimates, and 2) 
 
-## Some background
-
--   Jolly-Seber (JS) model - focused on estimating abundance parameters
-    (e.g., pop growth, recruitment, and abundance)
-    -   explicit definitions of process by which unmarked animals are
-        newly captured and marked; assumptions about process allows est
-        of recruitment and pop sizes
-    -   assumed that unmarked indivs in pop have same prob of capture as
-        marked indiv in pop (i.e., newly captured unmarked animals are a
-        random sample of all unmarked animals in pop)
--   Cormack-Jolly-Seber (CJS) models - focused on estimating survival
-    rates (but not abundance)
-    -   no assumptions made about how newly marked animals are obtained
-    -   subsequent process of recovering marked animals in CJS is
-        conditional upon animal being released alive at first encounter;
-        survival and catchability refer only to those marked animals
-
-Based on Iijima (2020), I want:
-
--   **capture-recapture model for open population**, where an "open
-    population" is one in which the number of individuals can change via
-    natural mortality, birth, and migration during the study period -
-    may also benefit from **robust design** where multiple surveys are
-    conducted under a constant condition
--   1st hierarchy of sampling in which variables can change across
-    sampling periods
--   2nd hierarchy of sampling in which things should remain relatively
-    stable
-
-And based on Sandercock (2020), I may also want:
-
--   a multistate model, in which detections are coded as dynamic
-    categorical states that potentially change b/t consecutive occasions
-
-## capHist subsets
-
-Code to create original capHist file is in ch2_create_captureHistories.Rmd
-
-```{r}
-# original capHist imported above
-capHist
-
-# species/sex subsets
-capHist_lwedF <- capHist %>%
-  filter(species == "LWED") %>%
-  filter(sex == "F")
-capHist_lwedM <- capHist %>%
-  filter(species == "LWED") %>%
-  filter(sex == "M")
-
-capHist_simpF <- capHist %>%
-  filter(species == "SIMP") %>%
-  filter(sex == "F")
-capHist_simpM <- capHist %>%
-  filter(species == "SIMP") %>%
-  filter(sex == "M")
-```
 
 
 
