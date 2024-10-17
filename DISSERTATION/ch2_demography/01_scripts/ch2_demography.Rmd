@@ -23,6 +23,7 @@ dissertation. Data used is from tamRun5, hair samples only.
 library(janitor)
 library(tidyverse)
 source("project_scripts/ravo_gtScripts.R") # for my custom functions
+source("./project_scripts/ravo_ch2Scripts.R")
 ```
 
 # 3 Data
@@ -36,8 +37,8 @@ tamGenetics_paper3_dataOrganization), then 1) filter to first capture
 for each animalID 2) filter again to animalIDs in tamRun5
 
 **note** exclude those in capData w/"UNK" animalID; did a lot of digging
-in ch2_dataOrganization.Rmd and most likely these entries
-need to be ditched
+in ch2_dataOrganization.Rmd and most likely these entries need to be
+ditched
 
 ```{r}
 capData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
@@ -69,8 +70,10 @@ capData_2009to2019_firstEntry <- capData[match(unique(capData$animalID), capData
 ## 3.2 Birth/death data
 
 ```{r}
+birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv")
+
 birthAssignments <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
-  select(animalID, birthYear_est) %>%
+  select(animalID, birthYear_est, species) %>%
   na.omit() %>%
   distinct() %>%
   arrange(animalID)
@@ -111,25 +114,22 @@ sampleRef <- read.csv("./project_data/master_sampleInfo.csv")
 lociRef <- read.csv("./project_data/master_lociInfo.csv")
 ```
 
-# 4 Population & groups
+# 4 Pop/grp overview
 
 ## 4.1 General numbers
 
-I just did juveniles vs. non-juveniles here rather than looking at subadult/adult distinctions -- mostly bc I think the adults vs. subadult designations are a touch iffy, plus there are some indivs with NA for ageClass
+I just did juveniles vs. non-juveniles here rather than looking at
+subadult/adult distinctions -- mostly bc I think the adults vs. subadult
+designations are a touch iffy, plus there are some indivs with NA for
+ageClass
 
 From 2009-2019:
 
-**LWED** - nGroups = 16
- ageClass  F  M Total
- juvenile 26 44    70
-   nonJuv 42 33    75
-    Total 68 77   145
+**LWED** - nGroups = 16 ageClass F M Total juvenile 26 44 70 nonJuv 42
+33 75 Total 68 77 145
 
-**SIMP** - nGroups = 10
- ageClass  F  M Total
- juvenile 26 27    53
-   nonJuv 22 27    49
-    Total 48 54   102
+**SIMP** - nGroups = 10 ageClass F M Total juvenile 26 27 53 nonJuv 22
+27 49 Total 48 54 102
 
 ```{r}
 # LWED
@@ -191,15 +191,868 @@ temp <- capData_byIndiv %>%
   )
 ```
 
-# x Infant survival
+# 5 Mark-recapture models
+
+**NEED TO REMEMBER** to account for 1) animalID 87 (SIMP) died during
+captures in 2012, so should be removed from dataset so as not to biase
+survival estimates, and 2) - "marked" package documentation says that
+can include field "freq" in capture history, which if negative
+represents loss on capture at the final capture occasion. If freq is
+missing, a value of 1 is assumed for all records.
+
+## Background
+
+Following James Paterson blog (mostly..ish)
+
+-   **Test 1** = the omnibus or overall test. Overall, is there evidence
+    that animals have equal capture probabilities and equal survival?
+    Tells us if there's a problem, but not where (which events) or why
+    (which assumption is violated).
+
+-   **Test 2:** Does recapture depend on when an animal was first
+    marked? Tests the equal catchability assumption. There are two
+    components: Test2.CT and Test2.CL.
+
+    -   **Test 2.CT** tests whether there is a difference in p at t+1
+        between those captured and not captured at t when animals are
+        known to be alive because they are recaptured later in the
+        study. (tests for trap dependence)
+    -   **Test2.CL** tests if there is a difference in the expected time
+        of next recapture between individuals captured and not captured
+        at t when animals are known to be alive.
+
+-   **Test 3:** Does marking affect survival? Tests the equal survival
+    assumption. There are two components to Test 3 (Test3.SR and
+    Test3.SM).
+
+    -   **Test3.SR:** Does marking affect survival? Do individuals with
+        previous marks have different survival rates than first-time
+        captures? (tests transience)
+    -   **Test3.SM:** For animals seen again, does when they are
+        recaptured depend on whether they were marked on or before time
+        t?
+
+## Model 1: Age-specific survival (CJS)
+
+### Data
 
 ```{r}
-capHist_juvs <- capHist
+# 1) create capHist
+m1_lwed_capHist <- capHist_2009to2019 %>%
+  filter(species == "LWED") %>%
+  select(-species) %>%
+  
+  # filter to those w/known birth years
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID") %>%
+  # recode any captures in year preceding normalized birthYear to 0
+  mutate(
+    temp = birthYear_est - 2009
+  ) %>%
+  mutate(
+    ch = `substr<-`(ch, temp, temp, "0")
+  ) %>%
+  # subset to 2010-2019 (since normalized birthYears start in 2010)
+  mutate(
+    ch = str_sub(ch, 2, -1)
+  ) %>%
+  select(ch, sex) %>%
+  mutate(sex = as.factor(sex)) %>%
+  arrange(desc(ch)) %>%
+  select(ch, sex)
+
+table(m1_lwed_capHist$sex)
+#  F  M 
+# 25 44 
+
+## get time intervals
+lwed_capSummary_byGroup <- get_capData_summary(capData_2009to2019, "LWED")
+
+m1_lwed_capIntervals <- lwed_capSummary_byGroup %>%
+  # only 2010-2019 to account for birthYear start
+  filter(captureYear %in% 2010:2019) %>%
+  # ditch interval for first year
+  mutate(
+    capInterval_days = case_when(
+      captureYear == min(captureYear) ~ NA,
+      .default = capInterval_days
+    )
+  ) %>%
+  select(capInterval_days) %>%
+  # normalized interval
+  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
+  select(intNorm) %>%
+  na.omit() %>%
+  pull()
+m1_lwed_capIntervals
+# 0.80 1.20 1.07 0.96 1.03 0.95 1.02 1.04 0.98
 ```
 
-# X Mark-recapture
+Quick overview of birth dates vs. years --
 
-**NEED TO REMEMBER** to account for 1) animalID 87 died during captures in 2012, so should be removed from dataset so as not to biase survival estimates, and 2) 
+```{r}
+birthAssignments %>%
+  filter(species == "LWED") %>%
+  group_by(birthYear_est) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = as.factor(birthYear_est), y = count)) +
+  geom_bar(stat = "identity")
+```
+
+### GOF tests
+
+**Prep data**
+
+Reformat data into matrix for R2ucare + create separate groups for F/M
+
+```{r}
+#detach("package:RMark", unload=TRUE)
+library(marked)
+library(R2ucare)
+
+# set up matrix for r2ucare
+m1_lwed_capHist.r2Proc <- marked::process.data(m1_lwed_capHist,
+                                               model = "CJS",
+                                               begin.time = 2010,
+                                               time.intervals = m1_lwed_capIntervals,
+                                               accumulate = FALSE)
+
+m1_lwed.hist <- matrix(as.numeric(unlist(strsplit(as.character(m1_lwed_capHist.r2Proc$data$ch), ","))),
+                   nrow = length(m1_lwed_capHist.r2Proc$data$ch),
+                   byrow = T)
+
+m1_lwed.freq <- m1_lwed_capHist.r2Proc$data$freq
+m1_lwed.group <- m1_lwed_capHist.r2Proc$data$sex
+
+# split dataset into F/M
+mask <- (m1_lwed.group == 'F')
+m1_lwedF.hist <- m1_lwed.hist[mask,]
+m1_lwedF.freq <- m1_lwed.freq[mask]
+mask <- (m1_lwed.group == 'M')
+m1_lwedM.hist <- m1_lwed.hist[mask,]
+m1_lwedM.freq <- m1_lwed.freq[mask]
+```
+
+**GOF tests**
+
+GOF tests suggest that global model is likely a good fit; proceed to CJS model testing (as per Gimenez et al. 2018 flow chart)
+
+```{r}
+# test1
+m1_lwedF_test1 <- overall_CJS(m1_lwedF.hist, m1_lwedF.freq)
+m1_lwedM_test1 <- overall_CJS(m1_lwedM.hist, m1_lwedM.freq)
+
+m1_lwedF_test1 ## p = 0.994 >> fit CJS model
+m1_lwedM_test1 ## p = 0.567 >> fit CJS model
+```
+
+### c-hat
+
+C-hat is ~0.61; when c-hat < 1, general practice is to leave it at 1
+
+```{r}
+# Overall chat for lwed (male test stat + female test stat) / (male df + female df)
+m1_lwedF_tStat <- m1_lwedF_test1$chi2
+m1_lwedM_tStat <- m1_lwedM_test1$chi2
+
+m1_lwedF_dF <- m1_lwedF_test1$degree_of_freedom
+m1_lwedM_dF <- m1_lwedM_test1$degree_of_freedom
+
+m1_lwed.chat <- (m1_lwedF_tStat + m1_lwedM_tStat) / (m1_lwedF_dF + m1_lwedM_dF)
+
+m1_lwed.chat # 0.6062941
+```
+
+### Run models
+
+Note that CJS default fields include cohort, age, time which are factor variables and Cohort, Age, and Time which are numeric versions of the same fields. The values of these can be altered by values of begin.time, time.intervals and initial.ages set in the call to process.data. 
+
+```{r}
+# 1) create capHist (created in GOF tests above)
+View(m1_lwed_capHist)
+
+# 2) process data
+m1_lwed.cjs.proc <- process.data(data = m1_lwed_capHist,
+                                 begin.time = 2010,
+                                 model = "CJS",
+                                 groups = "sex",
+                                 time.intervals = m1_lwed_capIntervals,
+                                 accumulate = FALSE)
+
+# 3) make design data
+m1_lwed.cjs.ddl <- make.design.data(m1_lwed.cjs.proc)
+
+## add ageClass
+#m1_lwed.cjs.ddl$Phi$ageClass <- cut(m1_lwed.cjs.ddl$Phi$Age, breaks = c(0, 0.7, 2, 15), labels = c("Juvenile", "Subadult", "Adult"), right = FALSE)
+#m1_lwed.cjs.ddl$p$ageClass <- cut(m1_lwed.cjs.ddl$p$Age, breaks = c(0, 0.8, 1, 15), labels = c("Juvenile", "Subadult", "Adult"), right = FALSE)
+
+m1_lwed.cjs.ddl$Phi
+m1_lwed.cjs.ddl$p
+
+# 4) define multi-model fxn
+m1_fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.age.sex <- list(formula=~age*sex) # "*" includes main effects + intxn (like other linear models)
+  Phi.age.time <- list(formula=~age*time) 
+  Phi.sex.time <- list(formula=~sex*time)
+  
+  Phi.age_sex <- list(formula=~age+sex)
+  Phi.age_time <- list(formula=~age+time) 
+  Phi.sex_time <- list(formula=~sex+time)
+  
+  Phi.age <- list(formula=~age) # differs across ages
+  Phi.sex <- list(formula=~sex) # differs between males and females
+  Phi.time <- list(formula=~time) # differs between discrete times
+  Phi.dot <- list(formula=~1) # constant survival
+  
+  # Detection probability (p) formula
+  p.age.sex <- list(formula=~age*sex)
+  p.age.time <- list(formula=~age*time)
+  p.sex.time <- list(formula=~sex*time)
+  
+  p.age_sex <- list(formula=~age+sex)
+  p.age_time <- list(formula=~age+time)
+  p.sex_time <- list(formula=~sex+time)
+  
+  p.age <- list(formula=~age)
+  p.sex <- list(formula=~sex)  # differs between males and females
+  p.time <- list(formula=~time)  # one discrete estimate of p per capture event
+  p.dot <- list(formula=~1) # constant detection
+  
+  # Construct all combinations and put into one model table
+  cml <- create.model.list(c("Phi","p")) # makes all possible combinations of those parameter formulas
+  
+  results <- crm.wrapper(cml,
+                         data = dataProc,
+                         ddl = dataDesign,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+
+# 5) test models
+m1_lwed.cjs.models <- m1_fit.cjs.models(m1_lwed.cjs.proc, m1_lwed.cjs.ddl)
+View(m1_lwed.cjs.models$model.table)
+```
+
+### Adjust for small sample size?
+
+Burnham and Anderson suggest correcting for small sample size when n/K < 40, where n = sample size and K = number of fitted parameters (including intercept); the ALSO say that you may as well just use the AICc since it becomes equal to AIC at large n anyway - so -- yes.
+
+```{r}
+# making my own aicc function for ease of use
+get_AICc <- function(aic, k, n) {
+  # Check if the sample size is large enough to calculate AICc
+  if (n > k + 1) {
+    # AICc formula
+    aicc <- aic + (2 * k * (k + 1)) / (n - k - 1)
+  } else {
+    # Return NA if AICc cannot be computed (to avoid division by zero or negative numbers)
+    aicc <- NA
+    warning("Sample size too small to calculate AICc.")
+  }
+  return(aicc)
+}
+
+m1_lwed.cjs.models_aicc <- m1_lwed.cjs.models
+
+m1_lwed.cjs.models_aicc$model.table <- m1_lwed.cjs.models$model.table %>%
+  rowwise() %>%
+  mutate(
+    AICc = get_AICc(aic = AIC, n = nrow(m1_lwed_capHist), k = npar)
+  ) %>%
+  ungroup() %>%  # ungroup so calcs aren't done row-wise for DeltaAICc
+  mutate(
+    DeltaAICc = round(AICc - min(AICc, na.rm = TRUE), 2)  # DeltaAICc = diff from the min AICc
+  ) %>%
+  # recalculate model weight
+  mutate(
+    weight_c = exp(-0.5 * DeltaAICc) / sum(exp(-0.5 * DeltaAICc), na.rm = TRUE),
+    weight_c = round(weight_c, 2)
+  ) %>%
+  arrange(AICc) %>%
+  mutate(
+    rank = row_number()
+  ) %>%
+  relocate(rank)
+
+View(m1_lwed.cjs.models_aicc$model.table)
+```
+
+### Table
+
+```{r}
+table_m1_lwed.cjs.models_aicc <- m1_lwed.cjs.models_aicc$model.table %>%
+  select(rank, model, npar, DeltaAICc, weight_c, neg2lnl) %>%
+  filter(as.numeric(rank) <= 5) %>%
+  gt() %>%
+  cols_label(
+    rank = md("**Rank**"),
+    model = md("**Model**"),
+    npar = md("**K**"),
+    DeltaAICc = md("**DeltaAICc**"),
+    weight_c = md("**Weight**"),
+    neg2lnl = md("**Deviance**")
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = everything()
+  )
+table_m1_lwed.cjs.models_aicc
+
+table_m1_lwed.cjs.models_aicc %>%
+  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_m1_lwed.cjs.models_aicc.png", vwidth = 1500, vheight = 1000)
+```
+
+### Model averaging
+
+The top two models are very similar with regard to AICc and weight_c, suggesting that it might be worthwhile to average them. 
+
+```{r}
+detach("package:marked", unload=TRUE)
+library(RMark)
+
+# 1) process data
+rmark_m1_lwed.cjs.proc <- RMark::process.data(m1_lwed_capHist,
+                                             begin.time = 2010,
+                                             model = "CJS",
+                                             groups = "sex",
+                                             time.intervals = m1_lwed_capIntervals)
+
+# 2) design data
+rmark_m1_lwed.cjs.ddl <- RMark::make.design.data(rmark_m1_lwed.cjs.proc)
+
+rmark_m1_lwed.cjs.ddl$Phi
+rmark_m1_lwed.cjs.ddl$p
+
+# 3) build fxn to create models
+rmark_m1_fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.age.sex <- list(formula=~age*sex) # "*" includes main effects + intxn (like other linear models)
+  Phi.age.time <- list(formula=~age*time) 
+  Phi.sex.time <- list(formula=~sex*time)
+  
+  Phi.age_sex <- list(formula=~age+sex)
+  Phi.age_time <- list(formula=~age+time) 
+  Phi.sex_time <- list(formula=~sex+time)
+  
+  Phi.age <- list(formula=~age) # differs across ages
+  Phi.sex <- list(formula=~sex) # differs between males and females
+  Phi.time <- list(formula=~time) # differs between discrete times
+  Phi.dot <- list(formula=~1) # constant survival
+  
+  # Detection probability (p) formula
+  p.age.sex <- list(formula=~age*sex)
+  p.age.time <- list(formula=~age*time)
+  p.sex.time <- list(formula=~sex*time)
+  
+  p.age_sex <- list(formula=~age+sex)
+  p.age_time <- list(formula=~age+time)
+  p.sex_time <- list(formula=~sex+time)
+  
+  p.age <- list(formula=~age)
+  p.sex <- list(formula=~sex)  # differs between males and females
+  p.time <- list(formula=~time)  # one discrete estimate of p per capture event
+  p.dot <- list(formula=~1) # constant detection
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+
+# run the models
+rmark_m1_lwed.cjs.models <- rmark_m1_fit.cjs.models(rmark_m1_lwed.cjs.proc, rmark_m1_lwed.cjs.ddl)
+
+# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
+search.output.files(rmark_m1_lwed.cjs.models, "convergence") # NULL; apparently all converged?
+search.output.files(rmark_m1_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
+
+View(rmark_m1_lwed.cjs.models$model.table)
+```
+
+numerical underflow: "when the result of an arithmetic operation is so small that it cannot be stored in its intended destination format without suffering a rounding error that is larger than usual." (ieee arithmetic)
+
+I don't understand why I'm getting the duplicate error if I set accumulate to TRUE...
+
+```{r}
+head(m1_lwed.cjs.models_aicc$model.table)
+
+library(AICcmodavg)
+
+# Create a list of your candidate models (replace with actual model objects)
+modList <- list(m1 = m1_lwed.cjs.models_aicc$Phi.dot.p.sex_time,
+                    m2 = m1_lwed.cjs.models_aicc$Phi.sex.p.sex_time)
+
+# Create a vector of model names
+modNames <- c("Phi(~1)p(~sex + time)", "Phi(~sex)p(~sex + time)")
+
+# Create a dataframe with the AICc and weights (using your table above)
+aicc_table <- m1_lwed.cjs.models_aicc$model.table %>%
+  filter(model %in% modNames) %>%
+  select(model, AICc, weight_c)
+
+# Perform model averaging for a specific parameter (e.g., survival)
+modavg_result <- modavg(cand.set = modList,
+                        parm = "Phi",
+                        modnames = modNames)
+
+# View the model-averaged estimates
+print(modavg_result)
+
+
+# Example assuming `m1_lwed.cjs.models` holds your model results
+# You may need to adjust based on the structure of your models
+
+# Extract AICc values
+model_AICc <- sapply(m1_lwed.cjs.models, function(x) x$results$AICc)
+
+# Extract number of parameters
+npar <- sapply(m1_lwed.cjs.models, function(x) x$results$npar)
+
+# Extract the model formula (just for tracking purposes)
+model_formulas <- sapply(m1_lwed.cjs.models, function(x) x$model$formula)
+
+# Compile into a dataframe for easier manipulation
+model_info <- data.frame(
+  model = model_formulas,
+  AICc = model_AICc,
+  npar = npar
+)
+
+```
+
+### Plots
+
+```{r}
+m1_lwed.cjs.models_aicc$model.table[1,]
+
+m1_lwed_topModel <- m1_lwed.cjs.models_aicc$Phi.dot.p.sex_time
+
+m1_lwed_pred <- predict(m1_lwed_topModel,
+                        ddl = m1_lwed.cjs.ddl,
+                        se = T)
+
+m1_lwed_pred$Phi
+m1_lwed_pred$p
+
+
+m1_lwed_pred$Phi %>%
+  mutate(
+    year = case_when(
+      time == 2010 ~ 2010,
+      time == 2010.8 ~ 2011,
+      time == 2012 ~ 2012,
+      time == 2013.07 ~ 2013,
+      time == 2014.03 ~ 2014,
+      time == 2015.06 ~ 2015,
+      time == 2016.01 ~ 2016,
+      time == 2017.03 ~ 2017,
+      time == 2018.07 ~ 2018
+    )
+  ) %>%
+  ggplot(aes(x = as.factor(year), y = estimate, group = sex, color = sex)) +
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = ucl, ymax = lcl), width = 0.1, position = position_dodge(width = 0.5)) +
+  coord_cartesian(ylim = c(0,1)) +
+  scale_y_continuous(breaks = seq(0,1, by=0.1)) +
+  theme_Publication() +
+  scale_colour_Publication() +
+  theme(legend.position = c(0.01, 0.97),
+        legend.justification = "left") +
+  labs(title = "Saddleback tamarin survival estimates by year",
+       x = "Year",
+       y = "Survival probability (phi)")
+```
+
+
+
+
+
+### 1) capHist
+
+```{r}
+
+
+simp_capHist <- capHist_2009to2019 %>%
+  filter(species == "SIMP") %>%
+  select(-species) %>%
+  merge(., capData_2009to2019[, c("animalID", "groupName", "ageClass", "captureYear")], by = "animalID", all.x = T) %>%
+  relocate(animalID, ch, groupName, ageClass, sex, captureYear) %>%
+  arrange(as.numeric(animalID), captureYear) %>%
+  distinct() %>%
+#  mutate(
+#    freq = case_when(
+#      animalID == "87" ~ (-1),
+#      .default = 1
+#    )
+#  ) %>%
+#  relocate(freq, .after = ch) %>%
+  # groups must be coded as factors
+  ## for making factor levels easier bc I can't figure it out otherwise
+  ## also going to bin all non-juv (adults+subAd) together
+  mutate(
+    ageClass = case_when(
+      ageClass == "juvenile" ~ "age1_juv",
+      .default = "age2_nonJuv"
+    )
+  ) %>%
+  mutate_at(c("groupName", "ageClass", "sex"), as.factor)
+```
+
+
+### Process data
+
+Prior to analyzing the data, this function initializes several variables
+(e.g., number of capture occa- sions, time intervals) that are often
+specific to the capture-recapture model being fitted to the data. It
+also is used to 1) define groups in the data that represent different
+levels of one or morestrata.labels factor covariates (e.g., sex), 2)
+define time intervals between capture occasions (if not 1), and 3)
+create an age structure for the data, if any.
+
+```{r}
+detach("package:RMark", unload=TRUE)
+
+# process.data (must include groups)
+lwed.cjs.proc <- lwed_capHist %>%
+  select(ch, ageClass, sex) %>%
+  process.data(data = .,
+               model = "CJS",
+               groups = "ageClass",
+               age.var = 1,
+               initial.ages = c(0,3),
+               accumulate = F)
+
+lwed.cjs.ddl <- make.design.data(lwed.cjs.proc)
+lwed.cjs.ddl$Phi$ya <- cut(lwed.cjs.ddl$Phi$Age, c(0,1,11), right=FALSE, labels = c("juv","adult"))
+
+# create phony age data
+data(dipper)
+dipper$ahy <- "Adult"
+dipper$ahy[1:100] = "HY"
+dipper$ahy=factor(dipper$ahy)
+
+#process data assigning initial ages
+dp=process.data(dipper,groups="ahy",initial.age=c(1,0),age.var=1,accumulate=FALSE)
+# make design data
+ddl=make.design.data(dp)
+# create 0, 1+ age variable
+ddl$Phi$ya = cut(ddl$Phi$Age, c(0,1,10), right=FALSE, labels = c("HY","AHY"))
+# fit model
+model=crm(dp,ddl,model.parameters=list(Phi=list(formula=~ya)))
+# append design data to design matrix to show model
+xx=cbind(ddl$Phi,as.matrix(model$results$model_data$Phi.dm))
+head(xx)
+tail(xx)
+```
+
+### Define multi-model function
+
+\*\*probably don't actually need to include group w/phi (apparent
+survival) b/c phi is usually modeled on factors that might directly
+impact an indiv's survival prob b/t cap events -- unless I think that
+diff groups impact indiv survival, it's not really needed
+
+group IS likely to affect capture probability though
+
+but could include group in both phi and p if grp membership changes
+frequently or has biological relevance to survival
+
+```{r}
+# fxn to fit multiple models
+fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.age.sex.time <- list(formula=~ageClass*sex*time) # Just like in other linear models "*" includes main effects and an interaction
+  Phi.age <- list(formula=~ageClass)
+  Phi.sex <- list(formula=~sex) # differs between males and females
+  Phi.time <- list(formula=~time) # differs between discrete times
+  Phi.dot <- list(formula=~1) # constant survival
+  
+  # Detection probability (p) formula
+  #p.grp <- list(formula=~groupName)
+  p.age <- list(formula=~ageClass)
+  p.sex <- list(formula=~sex)  # differs between males and females
+  p.time <- list(formula=~time)  # one discrete estimate of p per capture event
+  p.dot <- list(formula=~1) # constant detection
+  
+  # Construct all combinations and put into one model table
+  cml <- create.model.list(c("Phi","p")) # makes all possible combinations of those parameter formulas
+  
+  results <- crm.wrapper(cml,
+                         data = dataProc,
+                         ddl = dataDesign,
+                         external = FALSE,
+                         accumulate = FALSE,
+                         hessian = TRUE)
+  
+  return(results)
+}
+```
+
+### Run function
+
+```{r}
+lwed.cjs.models <- fit.cjs.models(lwed.cjs.proc, lwed.cjs.ddl)
+
+lwed.cjs.model.table <- lwed.cjs.models$model.table
+
+predict(lwed.cjs.models[[1]])
+
+#######
+### saving the groupName version that I did b/c it took forever to run--
+#lwed.cjs.models_groupNames <- lwed.cjs.models
+
+lwed.cjs.model.table_groupNames <- lwed.cjs.models_groupNames$model.table
+
+predict(lwed.cjs.models_groupNames[[1]])
+```
+
+\$Phi ageClass occ estimate se lcl ucl
+1 age2_nonJuv 5 0.8474592 0.01196096 0.8225121 0.8694564
+2 age1_juv 1 0.6860579 0.04197180 0.5986411 0.7620046
+
+\$p ageClass occ estimate se lcl ucl
+1 age2_nonJuv 6 0.8574406 0.01383736 0.8281138 0.8824739
+2 age1_juv 2 0.8087834 0.05218191 0.6858513 0.8912384
+
+Prob of offspring surviving b/t capture events = 0.69; prob of catching
+offspring during cap event = 0.81
+
+
+
+## GOF tests
+
+The R2ucare package can test the CJS assumptions of equal catchability
+and equal survival using Tests 1, 2, and 3
+
+-   **Test 1** (omnibus test) is ok if there is no lack-of-fit
+-   **Test 2** and **Test 3** are useful for diagnosing *when* (which
+    events) and *why* (detection or survival) there's evidence for
+    lack-of-fit
+    -   Sub-components often lack adequate sample sizes for tests when
+        the cap data is sparse (e.g., few recaptures, cap events w/small
+        number of animals)
+
+**Note:** These tests are always for time-dependent models, i.e.
+"Phi.time.p.time".
+
+**Warning:** to date, no goodness-of-fit test exists for models with
+individual covariates (unless you discretize them and use groups),
+individual time-varying covariates (unless you treat them as states) or
+temporal covariates; therefore, remove these covariates from your
+dataset before using it with R2ucare. For groups, just treat groups
+separately as in the Dipper example.
+
+### Data
+
+Reformat data into matrix for R2ucare + create separate groups for those
+first marked as juveniles vs. adults
+
+```{r}
+library(R2ucare) # CARE = CApture REcapture
+
+# re-process to collapse and get freqs
+lwed_capHist_proc <- lwed_capHist %>%
+  select(ch, ageClass) %>%
+  process.data(.)
+
+lwed.hist <- matrix(as.numeric(unlist(strsplit(as.character(lwed_capHist_proc$data$ch), ","))),
+                   nrow = length(lwed_capHist_proc$data$ch),
+                   byrow = T)
+lwed.freq <- lwed_capHist_proc$data$freq
+lwed.group <- lwed_capHist_proc$data$ageClass
+
+# split dataset into adults/juvs
+mask <- (lwed.group == 'age1_juv')
+lwedJuv.hist <- lwed.hist[mask,]
+lwedJuv.freq <- lwed.freq[mask]
+mask <- (lwed.group == 'age2_nonJuv')
+lwedAd.hist <- lwed.hist[mask,]
+lwedAd.freq <- lwed.freq[mask]
+```
+
+### Testing
+
+Following decision tree in Gimenez et al. 2018 (MS for R2ucare
+package)--
+
+#### Full dataset
+
+Results (p-value) suggest that some issue exists that's causing lack of fit
+
+```{r}
+lwed_test1 <- overall_CJS(lwed.hist, lwed.freq)
+lwed_test1 ## p = 0
+```
+
+#### Juveniles
+
+Test 1 for juveniles is NOT significant; Gimenez et al. 2018 decision
+tree says to move forward w/fitting CJS model
+
+```{r}
+# test1
+lwedJuv_test1 <- overall_CJS(lwedJuv.hist, lwedJuv.freq)
+lwedJuv_test1 ## p = 0.771 >> fit CJS model
+```
+
+#### Adults
+
+-   Test 1 IS significant; check Test 2CT
+-   Test 2CT IS significant (indicates trap-dependence); check Test 3SR
+    -   Note also that the sign-test value (signed square root of the
+        Pearson chi-square statistic) is a directional test of the null
+        hypothesis (Pradel et al. 2005) -- when negative (as it is
+        here), it indicates an excess of indiv encountered at a given
+        occasion among the indivs encountered at the previous occasion
+-   Test 3SR IS significant (indicates transient effect); check Test 2CL
+    & 3SM
+    -   sign-test is negative; I assume it means the same as before? In
+        Gimenez et al., they had a positive value, which they said
+        happens when there's an excess of never seen again among the
+        newly marked
+-   Test 2CL does not have enough individuals to run
+-   Test 3SM is NOT significant; decision tree recommends fitting model
+    for trap-dependence & transience (not overdispersion though)
+
+```{r}
+# test1
+lwedAd_test1 <- overall_CJS(lwedAd.hist, lwedAd.freq)
+lwedAd_test1 ## p = 0 >> test2ct
+
+# test2ct
+lwedAd_test2ct <- test2ct(lwedAd.hist, lwedAd.freq)
+lwedAd_test2ct ## p = 0.002 >> test3sr
+## sign_test = -1.031; neg value means excess of indiv at a given occasion among indivs encountered at the previous occasion
+
+# test3sr 
+lwedAd_test3sr <- test3sr(lwedAd.hist, lwedAd.freq)
+lwedAd_test3sr ## p = 0.000 >> test2cl & test3sm
+## sign_test = -4.723; neg value means excess of indiv at a given occasion among indivs encountered at the previous occasion (I assume it means the same here?? not 100% sure though)
+
+# ---
+
+# test2cl
+lwedAd_test2cl <- test2cl(lwedAd.hist, lwedAd.freq)
+lwedAd_test2cl ## not enough individuals to test (test_perf = None)
+
+# test3sm
+lwedAd_test3sm <- test3sm(lwedAd.hist, lwedAd.freq)
+lwedAd_test3sm ## p = 0.581 >> fit CJS model w/trap-dependence & transience
+```
+
+From paper: "it is possible to calculate a GOF test for this new model
+by removing the two components Test 3.SR and Test 2.CT to the overall
+GOF test (Pradel et al., 2005):"
+
+```{r}
+# subtract components 3sr and 2ct to the CJS test statistic
+stat_new <- overall_CJS(lwedAd.hist, lwedAd.freq)$chi2 -
+  (test3sr(lwedAd.hist, lwedAd.freq)$test3sr[[1]] +
+     test2ct(lwedAd.hist, lwedAd.freq)$test2ct[[1]])
+
+# calculate degree of freedom associated w/the new test statistic
+df_new <- overall_CJS(lwedAd.hist, lwedAd.freq)$degree_of_freedom -
+  (test3sr(lwedAd.hist, lwedAd.freq)$test3sr[[2]] +
+     test2ct(lwedAd.hist, lwedAd.freq)$test2ct[[2]])
+
+# compute p-value
+1 - pchisq(stat_new, df_new) # 0.5809599; new model fits data well
+```
+
+### Adjust models
+
+Obtain test for model w/trap-dependence:
+
+```{r}
+stat_tp <- lwedF_test1$chi2 - lwedF_test2ct$test2ct["stat"] # overall stat - 2CT stat
+df_tp <- lwedF_test1$degree_of_freedom - lwedF_test2ct$test2ct["df"] # overall dof - 2CT dof
+
+# compute p-value for null hypothesis: model with trap-dep fits the data well
+pvalue <- 1 - pchisq(stat_tp, df_tp)  
+pvalue # 0.0104678 -- so we reject the null; trap-dep does NOT fit data well
+```
+
+So that didn't work... maybe try with model w/transience?
+
+```{r}
+lwedF_test3sr$test3sr
+
+stat_tp <- lwedF_test1$chi2 - lwedF_test3sr$test3sr["stat"] # overall stat - 2CT stat
+df_tp <- lwedF_test1$degree_of_freedom - lwedF_test3sr$test3sr["df"] # overall dof - 2CT dof
+
+# compute p-value for null hypothesis: model with transience fits the data well
+pvalue <- 1 - pchisq(stat_tp, df_tp)  
+pvalue # 0.03967785  -- reject the null; transience does NOT fit data well
+```
+
+
+
+## Overdispersion
+
+Paterson blog:
+<https://jamesepaterson.github.io/jamespatersonblog/2020-06-30_chat_for_CJS.html>
+
+**c-hat**
+
+```{r}
+# Overall chat for lwed (male test stat + female test stat) / (male df + female df)
+
+lwedF_tStat <- lwedF_test1$chi2
+lwedM_tStat <- lwedM_test1$chi2
+
+lwedF_dF <- lwedF_test1$degree_of_freedom
+lwedM_dF <- lwedM_test1$degree_of_freedom
+
+lwed.chat <- (lwedF_tStat + lwedM_tStat) / (lwedF_dF + lwedM_dF)
+
+lwed.chat # 2.499571
+```
+
+A simple guide to interpreting c-hat values:
+
+c-hat \< 1: generally we ignore slight deviations with underdispersion,
+c-hat = 1: variance in data is as expected, given the model c-hat \> 1:
+there is extra binomial noise in the data. We can adjust model selection
+to use QAIC and increase variance around parameter estimates (widens
+confidence intervals). c-hat \> 3: generally represents poor fit and
+suggests model structure should be adjusted (is there an important part
+of the system we haven't modeled?)
+
+**adjust model table w/c-hat**
+
+```{r}
+# Adjust our CJS model table to account for chat different than 1 (chat = 1.016095)
+# QAIC = (-2lnLik / chat) + 2K
+# This favours simpler models as chat gets larger than 1
+lwed.cjs.models$model.table$chat <- lwed.chat
+
+lwed.cjs.models$model.table$QAIC <- (lwed.cjs.models$model.table$neg2lnl/lwed.chat) + (2*lwed.cjs.models$model.table$npar)
+
+# Note: this doesn't autmatically update the order of the table! 
+# In our case, the order of supported models did not change
+# To sort:
+lwed.cjs.models$model.table <- lwed.cjs.models$model.table %>%
+  arrange(QAIC)
+
+lwed.cjs.models # display models
+```
+
+# XXXXXXXXXXX
 
 ## Some background
 
@@ -237,14 +1090,21 @@ And based on Sandercock (2020), I may also want:
 
 ## CJS models w/marked
 
-So in package 'marked' there's function "mscjs()" that will compute MLEs for a Multi-state Cormack-Jolly-Seber open population capture-recapture model for processed dataframe x with user specified formulas in parameters that create list of design matrices dml. This function can be called directly but is most easily called from crm that sets up needed arguments. 
+So in package 'marked' there's function "mscjs()" that will compute MLEs
+for a Multi-state Cormack-Jolly-Seber open population capture-recapture
+model for processed dataframe x with user specified formulas in
+parameters that create list of design matrices dml. This function can be
+called directly but is most easily called from crm that sets up needed
+arguments.
 
-OR-- might want mvmscjs() - fitting fxn for multivariate multistate CJS with uncertainty models
---constructed as a hidden Markov model as described in Johnson et al. 2015 
+OR-- might want mvmscjs() - fitting fxn for multivariate multistate CJS
+with uncertainty models --constructed as a hidden Markov model as
+described in Johnson et al. 2015
 
 ### data
 
-Using package 'marked' (make sure RMark is detached first! too many overlapping function names)
+Using package 'marked' (make sure RMark is detached first! too many
+overlapping function names)
 
 ```{r}
 #detach("package:RMark", unload=TRUE)
@@ -286,7 +1146,8 @@ lwed.cjs.proc <- process.data(capHist_lwed,
 
 **2. Make design data**
 
-Allows adding variables that depend on time (e.g., seasonal changes, weather, catastrophic events)
+Allows adding variables that depend on time (e.g., seasonal changes,
+weather, catastrophic events)
 
 ```{r}
 lwed.cjs.ddl <- make.design.data(lwed.cjs.proc)
@@ -325,9 +1186,6 @@ fit.cjs.models <- function(dataProc, dataDesign) {
 }
 ```
 
-
-
-
 **3. Outline formulas for each parameter**
 
 ```{r}
@@ -346,10 +1204,6 @@ lwed.cjs_m1 <- crm(lwed.cjs.proc,
                    accumulate = F)
 lwed.cjs_m1
 ```
-
-
-
-
 
 **3. Run function**
 
@@ -382,7 +1236,9 @@ simpF.js.models[[1]]
 simpM.js.models[[1]]
 ```
 
-But these estimates ^^ are not on probability scale (or in individuals for N) (e.g. Phi, p on logit scale, pent on mlogit scale) - so we need to use the *predict* function to estimate the real parameters:
+But these estimates \^\^ are not on probability scale (or in individuals
+for N) (e.g. Phi, p on logit scale, pent on mlogit scale) - so we need
+to use the *predict* function to estimate the real parameters:
 
 ```{r}
 # predict real values
@@ -406,9 +1262,6 @@ lwedF.js.predicted$pent # 0.09 prob of entry for each capture event
 lwedF.js.predicted$N$estimate # ~ 5 unmarked indiv
 ```
 
-
-
-
 ## BaSTA
 
 ```{r}
@@ -419,42 +1272,69 @@ library(BaSTA)
 
 ```{r}
 # format capHist for basta
-capHist_basta <- splitCH(x = "ch", data = capHist_2009to2019, prefix = "year") %>%
+capHist_2009to2019_forBasta <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_byIndiv_2009to2023.csv", colClasses = "character") %>%
+  # filter LWED to 2009-2019 only; SIMP to 2011-2019
+  mutate(
+    ch = case_when(
+      species == "SIMP" ~ str_sub(ch, 3, 11),
+      species == "LWED" ~ str_sub(ch, 1, 11)
+    )
+  ) %>%
+  filter(!ch %in% c("000000000", "00000000000"))
+
+lwed_capHist_basta <- capHist_2009to2019_forBasta %>%
+  filter(species == "LWED") %>%
+  select(-species) %>%
+  splitCH(x = "ch", data = ., prefix = "year") %>%
   select(-ch) %>%
-  merge(., birthAssignments, by = "animalID", all = T) %>%
-  merge(., deathAssignments, by = "animalID", all = T) %>%
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  merge(., deathAssignments, by = "animalID", all.x = T) %>%
   dplyr::rename("birthYear" = "birthYear_est",
                 "deathYear" = "deathYear_est") %>%
   relocate(animalID, birthYear, deathYear) %>%
-  relocate(-sex)
+  relocate(-sex) %>%
+  # recode NA to 0
+  mutate(
+    birthYear = replace_na(birthYear, 0),
+    deathYear = replace_na(deathYear, 0)
+  )
 
-lwed_capHist_basta <- capHist_basta %>%
-  filter(species == "LWED") %>%
-  select(-species)
-
-simp_capHist_basta <- capHist_basta %>%
+simp_capHist_basta <- capHist_2009to2019_forBasta %>%
   filter(species == "SIMP") %>%
-  select(-species)
+  select(-species) %>%
+  splitCH(x = "ch", data = ., prefix = "year") %>%
+  select(-ch) %>%
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  merge(., deathAssignments, by = "animalID", all.x = T) %>%
+  dplyr::rename("birthYear" = "birthYear_est",
+                "deathYear" = "deathYear_est") %>%
+  relocate(animalID, birthYear, deathYear) %>%
+  relocate(-sex) %>%
+  # recode NA to 0
+  mutate(
+    birthYear = replace_na(birthYear, 0),
+    deathYear = replace_na(deathYear, 0)
+  )
 
 # check data - update year of birth to 0 since basta apparently wants that
 DataCheck(lwed_capHist_basta, dataType = "CMR", studyStart = 2009, studyEnd = 2019)
 
-DataCheck(simp_capHist_basta, dataType = "CMR", studyStart = 2009, studyEnd = 2019)
+DataCheck(simp_capHist_basta, dataType = "CMR", studyStart = 2011, studyEnd = 2019)
 
 # fix data for basta
 lwed_fixed_basta <- FixCMRdata(lwed_capHist_basta,
                                studyStart = 2009,
                                studyEnd = 2019,
                                autofix = rep(1, 6))
-lwed_data_basta <- lwed_fixed_basta$newData %>%
-  dplyr::rename("sex" = "Z")
+lwed_data_basta <- lwed_fixed_basta$newData
+
+View(lwed_fixed_basta$newData)
 
 simp_fixed_basta <- FixCMRdata(simp_capHist_basta,
-                               studyStart = 2009,
+                               studyStart = 2011,
                                studyEnd = 2019,
                                autofix = rep(1, 6))
-simp_data_basta <- simp_fixed_basta$newData %>%
-  dplyr::rename("sex" = "Z")
+simp_data_basta <- simp_fixed_basta$newData
 ```
 
 ### run basta
@@ -463,9 +1343,18 @@ simp_data_basta <- simp_fixed_basta$newData %>%
 source("./DISSERTATION/ch2_demography/01_scripts/00_cmrModels/multibasta.R")
 source("./DISSERTATION/ch2_demography/01_scripts/00_cmrModels/plotFancyBasta.R")
 
-lwed_multibasta <- MultiBaSTA(object = lwed_data_basta,
-                              studyStart = 2009,
-                              studyEnd = 2019)
+View(bastaCMRdat)
+
+lwed_multibasta <- MultiBaSTA(object = bastaCMRdat,
+                              studyStart = 51,
+                              studyEnd = 70,
+                              models = c("EX", "GO", "WE", "LO"),
+                              shapes = c("simple", "Makeham", "bathtub"))
+
+ls("package:BaSTA")
+
+
+
 
 lwed_basta_out <- basta(object = lwed_data_basta,
                         dataType = "CMR",
@@ -489,12 +1378,6 @@ lwed_basta_out$lifeTable
 
 BaSTA::print.basta(lwed_basta_out)
 ```
-
-
-
-
-
-
 
 **1. capHist**
 
@@ -530,14 +1413,10 @@ covMat <- MakeCovMat(x = "sex", data = rawCovMat)
 BaSTA::c
 ```
 
-
-
-
-
-
 ## capHist subsets
 
-Code to create original capHist file is in ch2_create_captureHistories.Rmd
+Code to create original capHist file is in
+ch2_create_captureHistories.Rmd
 
 ```{r}
 # original capHist imported above
@@ -559,26 +1438,8 @@ capHist_simpM <- capHist %>%
   filter(sex == "M")
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # XXXXXX
+
 ## 4.2 tamRun5 numbers
 
 ### Full set
@@ -700,22 +1561,7 @@ capData_byIndiv_firstEntry_tamRun5Hair %>%
 99-52
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 # 5 Capture-mark-recapture models
-
-
 
 ## 5.2 Jolly-Seber models
 
@@ -934,7 +1780,7 @@ capHist_lwed.derived.rmark
 
 #### run model
 
-Do the thing (following Pateron blog):
+Do the thing (following Paterson blog):
 
 ```{r}
 # Jolly-Seber models (POPAN formulation) are open population models, and 

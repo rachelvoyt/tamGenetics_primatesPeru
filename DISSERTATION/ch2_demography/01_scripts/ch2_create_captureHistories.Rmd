@@ -95,6 +95,8 @@ capHist_df <- capData_2009to2023 %>%
   ) %>%
   relocate(animalID, species, sex) %>%
   arrange(animalID)
+
+View(capHist %>% filter(species == "SIMP"))
 ```
 
 ## Export

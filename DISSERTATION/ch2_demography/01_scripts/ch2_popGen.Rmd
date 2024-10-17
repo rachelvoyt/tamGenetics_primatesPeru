@@ -3,6 +3,9 @@ title: "ch2_popGen"
 author: "Rachel Voyt"
 date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -13,8 +16,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Pop gen stats
 
-Resources:
--   Tom Jenkins tutorial (https://tomjenkins.netlify.app/tutorials/r-popgen-getting-started/)
+Resources: - Tom Jenkins tutorial
+(<https://tomjenkins.netlify.app/tutorials/r-popgen-getting-started/>)
 
 # 2 Packages
 
@@ -175,16 +178,10 @@ genos10x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singl
 
 quick overview --
 
-  species sex count
-1    LWED   F    64
-2    LWED   M    70
-3    SIMP   F    47
-4    SIMP   M    52
+species sex count 1 LWED F 64 2 LWED M 70 3 SIMP F 47 4 SIMP M 52
 
-samples from indivs born during study period:
-  species count
-1    LWED    62
-2    SIMP    52
+samples from indivs born during study period: species count 1 LWED 62 2
+SIMP 52
 
 ```{r}
 hairGenoData_overview <- md %>%
@@ -217,16 +214,18 @@ capHist_2009to2019
 
 ## Capture overview
 
-### Table
+### Tables
+
+**by group**
 
 Summary of captures for each year (a la Thorley et al. 2023)
 
 ```{r}
-capSummary_lwed <- get_capData_summary(capData_2009to2019, "LWED")
+lwed_capSummary_byGroup <- get_capData_summary(capData_2009to2019, "LWED")
 
-capSummary_simp <- get_capData_summary(capData_2009to2019, "SIMP")
+simp_capSummary_byGroup <- get_capData_summary(capData_2009to2019, "SIMP")
 
-capSummary_lwedSIMP <- rbind(capSummary_lwed, capSummary_simp) %>%
+lwedSIMP_capSummary_byGroup <- rbind(lwed_capSummary_byGroup, simp_capSummary_byGroup) %>%
   mutate(
     species = case_when(
       species == "LWED" ~ "Saddleback tamarins",
@@ -236,7 +235,7 @@ capSummary_lwedSIMP <- rbind(capSummary_lwed, capSummary_simp) %>%
 ```
 
 ```{r}
-capSummary_table <- capSummary_lwedSIMP %>%
+capSummary_table <- lwedSIMP_capSummary_byGroup %>%
   gt(groupname_col = "species",
      rowname_col = "captureYear") %>%
   cols_label(
@@ -253,15 +252,29 @@ capSummary_table <- capSummary_lwedSIMP %>%
     nNew = md("**nNew**"),
     propRecap = md("**propRecap**"),
     propNew = md("**propNew**")
-  )
+  ) %>%
+  fmt(
+    columns = everything(),
+    rows = 12:13,
+    fns = function(x) ifelse(x == "0", "—", NA)
+  ) %>%
+  sub_missing(columns = everything(),
+              rows = 12:13)
 
 capSummary_table %>%
   gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_capSummary.png", vwidth = 1500, vheight = 1000)
 ```
 
+**by indiv**
+
+```{r}
+
+```
+
 ### Plots
 
-Cleveland plot showing capture history for LWED and SIMP social groups from 2009 to 2019
+Cleveland plot showing capture history for LWED and SIMP social groups
+from 2009 to 2019
 
 ```{r}
 # keep all cap records
@@ -359,7 +372,8 @@ capData_2009to2023_first.lastEntry <- capData_2009to2023_antiSort[match(unique(c
   )
 ```
 
-Maybe good to get a list of who was present in the population each year??
+Maybe good to get a list of who was present in the population each
+year??
 
 ```{r}
 library(dplyr)
@@ -435,11 +449,25 @@ groupMembership <- capData_2009to2019 %>%
 
 # 4 Filter genos
 
+Prior to using genotyping results in additional analyses, I'm using the
+following filters for quality control:
+
+1.  Species mismatches - remove any that conflict w/metadata
+2.  Sex mismatches - remove any where majority of sex loci conflict
+    w/metadata
+3.  Duplicates - for any duplicate pairs identified, remove the sample
+    with lower geno success
+4.  Separate genos by species & filter loci to retain only those for individual identification, then (following Arpin et al. 2024):
+    1.  Remove loci with \>50% missing data
+    2.  Remove samples with \>50% missing data
+    3.  Remove loci with minor allele freq \<0.03
+
 ## 4.1 Species/sex checks
 
 ### species checks
 
-4 species mismatches, though each was genotyped at only one locus - will probably get filtered out when ditching poorly performing loci/samples
+4 species mismatches, though each was genotyped at only one locus - will
+probably get filtered out when ditching poorly performing loci/samples
 
 ```{r}
 genos_forChecks <- genos10x %>%
@@ -456,9 +484,15 @@ toRemove_speciesChecks <- speciesChecks %>%
 
 ### sex checks
 
-15 sex mismatches, though 12 of these are MIX. Vast majority clear up if go by the majority of calls -- not terribly worried about it though, bc when I tried before to first ditch poorly performing samples and then run assignSex, only got 3 mismatches and all were MIX (one 50/50, two with majority correct).
+15 sex mismatches, though 12 of these are MIX. Vast majority clear up if
+go by the majority of calls -- not terribly worried about it though, bc
+when I tried before to first ditch poorly performing samples and then
+run assignSex, only got 3 mismatches and all were MIX (one 50/50, two
+with majority correct).
 
---just checked the sampleSummary for the samples where mdMajMatch were either F or NA -- all of these had shit genoSuccess so they'll be ditched regardless
+--just checked the sampleSummary for the samples where mdMajMatch were
+either F or NA -- all of these had shit genoSuccess so they'll be
+ditched regardless
 
 ```{r}
 # run sexChecks (can use same geno file as speciesChecks)
@@ -482,9 +516,13 @@ toRemove_sexChecks <- sexChecks %>%
 
 ## 4.2 Dup checks
 
-Here I'm using my version of the GTscore "IDduplicateSamples" function; I modified it only slightly so that I could use a dataframe as input vs. the polygen output.
+Here I'm using my version of the GTscore "IDduplicateSamples" function;
+I modified it only slightly so that I could use a dataframe as input vs.
+the polygen output.
 
-Results show tamRun5.211/tamRun5.264 as the only likely duplicate pair - this is the set that I already caught in metadataReconciliation.Rmd for animalID 200
+Results show tamRun5.211/tamRun5.264 as the only likely duplicate pair -
+this is the set that I already caught in metadataReconciliation.Rmd for
+animalID 200
 
 **tamRun5.211 has the higher genotype success -- ditch tamRun5.264**
 
@@ -509,9 +547,14 @@ toRemove_dupChecks <- "tamRun5.264"
 
 ## 4.3 Poor performance
 
-I found that some of the loci that were supposed to be sex-specific sometimes showed some variation in the other species -- as such, I'm opting to ignore the species designation for INDID SNPs and instead add a blanket filter to remove any loci whose minAF is less than 0.03 (following Arpin et al. 2024, who used this cutoff)
+I found that some of the loci that were supposed to be sex-specific
+sometimes showed some variation in the other species -- as such, I'm
+opting to ignore the species designation for INDID SNPs and instead add
+a blanket filter to remove any loci whose minAF is less than 0.03
+(following Arpin et al. 2024, who used this cutoff)
 
-First though, apply filters based on species/sex checks, dupChecks, and genotype success--
+First though, apply filters based on species/sex checks, dupChecks, and
+genotype success--
 
 ```{r}
 lwed_genos_temp <- genos10x %>%
@@ -656,15 +699,11 @@ simp_genind@other$captureYear <- simp_genos$captureYear
 
 ## 4.5 Quick overview of filtered geno data:
 
-Retained LWED data include...
--   72 indivs + 53 loci
--   avg 94% geno success among samples
--   43 non-juvs, 29 juvs
+Retained LWED data include... - 72 indivs + 53 loci - avg 94% geno
+success among samples - 43 non-juvs, 29 juvs
 
-Retained SIMP data include...
--   55 indivs + 48 loci
--   avg 93% geno success among samples
--   27 non-juvs, 28 juvs
+Retained SIMP data include... - 55 indivs + 48 loci - avg 93% geno
+success among samples - 27 non-juvs, 28 juvs
 
 ```{r}
 # LWED
@@ -686,9 +725,82 @@ sum(!is.na(simp_genos$birthYear_est)) # 28 juvs remaining
 
 # 5 Basic popGen
 
-## 5.1 hierfstat::basic.stats
+## 5.1 adegenet summary
 
-Basic stats with hierfstat
+we can use the summary() function from 'adegenet' to provide the
+following: - Number of alleles per locus - Observed heterozygosity -
+Expected heterozygosity
+
+```{r}
+lwed_genind_sum <- summary(lwed_genind)
+simp_genind_sum <- summary(simp_genind)
+
+lwed_genind_sum
+simp_genind_sum
+```
+
+## Bartlett test
+
+We can then test whether there's a significant difference exists between
+mean observed and expected heterozygosity values using the **Bartlett
+test of homogeneity of variances**.
+
+There appears to be a significant different between observed and
+expected heterozygosity for both LWED and SIMP
+
+```{r}
+# LWED
+## p = 0.001065
+bartlett.test(list(lwed_genind_sum$Hexp, lwed_genind_sum$Hobs)) 
+
+t.test(lwed_genind_sum$Hexp, lwed_genind_sum$Hobs, paired = T, var.equal = T, alternative = "greater")
+
+# SIMP
+## p = 0.001576
+bartlett.test(list(simp_genind_sum$Hexp, simp_genind_sum$Hobs)) 
+
+t.test(simp_genind_sum$Hexp, simp_genind_sum$Hobs, paired = T, var.equal = T, alternative = "greater")
+```
+
+## HWE
+
+The Hardy-Weinberg test function in 'adegenet' has been removed and
+replaced by 'hw.test' in the package 'pegas'. This function uses both
+the classical chi-squared test based on expected genotype frequencies
+calculated from the allelic frequencies as well as an exact test based
+on Monte Carlo permutations of alleles.
+
+**NOTE** that B = 0 is used for the parametric version of the test;
+larger numbers will indicate the number of permutations to use for the
+Monte-Carlo version.
+
+```{r}
+library(pegas)
+lwed_hwt <- hw.test(lwed_genind, B = 0)
+simp_hwt <- hw.test(simp_genind, B = 0)
+```
+
+## Population structure
+
+As of version 2.0.0, adegenet relies on hierfstat and pegas for most F
+statistics.
+
+```{r}
+library(hierfstat)
+wc(lwed_genind) # FST 0, FIS -0.005851178
+wc(simp_genind) # FST 0, FIS 0.01158646
+```
+
+Use pegas to provide estimates by locus:
+
+```{r}
+library(pegas)
+lwed_ftab <- Fst(as.loci(lwed_genind))
+simp_ftab <- Fst(as.loci(simp_genind))
+
+lwed_ftab
+simp_ftab
+```
 
 ```{r}
 lwed_basicStats <- basic.stats(lwed_genind, diploid = T)
@@ -698,13 +810,11 @@ lwed_basicStats$overall
 simp_basicStats$overall
 ```
 
-lwed_basicStats$overall
-     Ho      Hs      Ht     Dst     Htp    Dstp     Fst    Fstp     Fis    Dest 
- 0.4599  0.4573  0.4573  0.0000     NaN     NaN  0.0000     NaN -0.0059     NaN 
+lwed_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4599
+0.4573 0.4573 0.0000 NaN NaN 0.0000 NaN -0.0059 NaN
 
-simp_basicStats$overall
-    Ho     Hs     Ht    Dst    Htp   Dstp    Fst   Fstp    Fis   Dest 
-0.4339 0.4390 0.4390 0.0000    NaN    NaN 0.0000    NaN 0.0116    NaN 
+simp_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4339
+0.4390 0.4390 0.0000 NaN NaN 0.0000 NaN 0.0116 NaN
 
 Fis
 
@@ -724,9 +834,6 @@ Pairwise Fst
 lwed_fst <- genet.dist(lwed_genind, method = "WC84")
 ```
 
-
-
-
 Is mean Hobs significantly lower than mean Hexp?
 
 ```{r}
@@ -736,7 +843,6 @@ names(lwed_genSum)
 bartlett.test(list(lwed_genSum$Hexp, lwed_genSum$Hobs))
 t.test(lwed_genSum$Hexp, lwed_genSum$Hobs, paired = T, var.equal = T, alternative = "greater")
 ```
-
 
 # 6 PID, PIDsibs
 
@@ -813,9 +919,10 @@ pidPerm_fig
 
 ## 6.1 Background
 
-Resources:
--   CKMRsim-example-1 https://eriqande.github.io/CKMRsim/articles/CKMRsim-example-1.html
--   Shedd et al. GitHub https://github.com/krshedd/Relative-fitness-of-Pink-Salmon/blob/main/analysis/8_Hogan_Stockdale_13_16_MS_CKMRSIM.Rmd 
+Resources: - CKMRsim-example-1
+<https://eriqande.github.io/CKMRsim/articles/CKMRsim-example-1.html> -
+Shedd et al. GitHub
+<https://github.com/krshedd/Relative-fitness-of-Pink-Salmon/blob/main/analysis/8_Hogan_Stockdale_13_16_MS_CKMRSIM.Rmd>
 
 ## 6.2 Packages
 
@@ -832,9 +939,10 @@ if(system.file("bin", package = "CKMRsim") == "") {
 
 ## 6.3 Format genos
 
-I'm using the LWED and SIMP genos that I filtered earlier since these are the data I'm using for FRANz.
+I'm using the LWED and SIMP genos that I filtered earlier since these
+are the data I'm using for FRANz.
 
----
+------------------------------------------------------------------------
 
 Long-format genos should have four columns: Indiv, Locus, gene_copy, and
 Allele.
@@ -1028,12 +1136,22 @@ simp_ckmr
 
 ## 6.6 Simulations & log-probabilities
 
-simulate_Qij() -- This function simulates genotypes from different relationships, and then for each simulated genotype pair it also calculates the log probability of the pair of genotypes conditional on the pair being of one or several relationships. This function has four main inputs that we discuss here (the others allow the addition of missing data and physical linkage, and are discussed in other vignettes).
+simulate_Qij() -- This function simulates genotypes from different
+relationships, and then for each simulated genotype pair it also
+calculates the log probability of the pair of genotypes conditional on
+the pair being of one or several relationships. This function has four
+main inputs that we discuss here (the others allow the addition of
+missing data and physical linkage, and are discussed in other
+vignettes).
 
--   **C** : the ckmr object to use for simulation and probabilty calculation.
--   **sim_relats** : the set of true relationships you want to simulate genotypes from.
--   **calc_relats** : the set of assumed relationships you wish to compute genotype probabilities for, from the simulated data.
--   **reps** : for each relationship in sim_relats, the number of genotype pairs to simulate. This is, by default 10,000.
+-   **C** : the ckmr object to use for simulation and probabilty
+    calculation.
+-   **sim_relats** : the set of true relationships you want to simulate
+    genotypes from.
+-   **calc_relats** : the set of assumed relationships you wish to
+    compute genotype probabilities for, from the simulated data.
+-   **reps** : for each relationship in sim_relats, the number of
+    genotype pairs to simulate. This is, by default 10,000.
 
 PO = parent-offspring FS = full sib HS = half sib HAN = half aunt-niece
 (or uncle/niece) U = unrelated
@@ -1064,9 +1182,14 @@ simp_Qs
 
 ### Extract logls
 
-extract_logls() function lets us get simulated log-likelihood ratios out of the Qij object we created above and plot a histogram or a density plot of the distributions. This is helpful for developing intuition about things and understanding what is going on.
+extract_logls() function lets us get simulated log-likelihood ratios out
+of the Qij object we created above and plot a histogram or a density
+plot of the distributions. This is helpful for developing intuition
+about things and understanding what is going on.
 
-In the following, we extract those genotype probabilities in different ways to calculate a variety of different log-likelihood ratios for different relationships.  
+In the following, we extract those genotype probabilities in different
+ways to calculate a variety of different log-likelihood ratios for
+different relationships.
 
 **LWED**
 
@@ -1110,7 +1233,8 @@ simp_FS_U_logls <- extract_logls(simp_Qs,
 
 ### Plots
 
-Plot the distribution of those logl ratios for each of the different true relationships -- 
+Plot the distribution of those logl ratios for each of the different
+true relationships --
 
 **LWED**
 
@@ -1188,9 +1312,15 @@ ggplot(simp_PO_U_logls %>% filter(true_relat %in% c("PO", "U")),
 
 ### Run mc_sample_simple()
 
-mc_sample_simple() lets you estimate false positive rates and false negative rates from the simulated values in an object of class Qij. The function is configured so that it will automatically compute both regular or “vanilla” Monte Carlo estimates of these probabilities, and also importance sampling (IS) Monte Carlo estimates, which are particularly good for estimating very small probabilities.
+mc_sample_simple() lets you estimate false positive rates and false
+negative rates from the simulated values in an object of class Qij. The
+function is configured so that it will automatically compute both
+regular or "vanilla" Monte Carlo estimates of these probabilities, and
+also importance sampling (IS) Monte Carlo estimates, which are
+particularly good for estimating very small probabilities.
 
-**estimate false-pos rates when true relationship is U but we're looking for PO pairs (uses importance sampling by default)**
+**estimate false-pos rates when true relationship is U but we're looking
+for PO pairs (uses importance sampling by default)**
 
 ```{r}
 # LWED
@@ -1206,15 +1336,22 @@ simp_PO_is <- mc_sample_simple(simp_Qs,
 simp_PO_is
 ```
 
-lwed_PO_is shows false positive rates (FPR) at ~0.006 and smaller when the false negative rate is 0.01 and greater
+lwed_PO_is shows false positive rates (FPR) at \~0.006 and smaller when
+the false negative rate is 0.01 and greater
 
-simp_PO_is shows false positive rates (FPR) at ~0.01 and smaller when the false negative rate is 0.01 and greater
+simp_PO_is shows false positive rates (FPR) at \~0.01 and smaller when
+the false negative rate is 0.01 and greater
 
 **find optimal FPR**
 
-Anderson's recommendation for being confident about not erroneously identifying unrelated individuals as related pairs is to require that the FPR be about 10 to 100 times smaller than the reciprocal of the number of comparisons--
+Anderson's recommendation for being confident about not erroneously
+identifying unrelated individuals as related pairs is to require that
+the FPR be about 10 to 100 times smaller than the reciprocal of the
+number of comparisons--
 
-For FRANz_run1, I'm not including any pedigree info so FRANz will be comparing every individual to every other individual. The number of pairs being compared can thus be calculated as follows:
+For FRANz_run1, I'm not including any pedigree info so FRANz will be
+comparing every individual to every other individual. The number of
+pairs being compared can thus be calculated as follows:
 
 ```{r}
 countComparisons <- function(n) {
@@ -1260,11 +1397,18 @@ simp_PO_is_test %>%
   dplyr::slice(1)
 ```
 
-The optimal logl ratio cutoffs for LWED = 8.1 and SIMP = 7.5 -- both, however, come with rather high FNR values (0.529 and 0.591, respectively). So these logl cutoffs would give us decent confidence in our assignments while having a higher chance of ditching true PO pairs.
+The optimal logl ratio cutoffs for LWED = 8.1 and SIMP = 7.5 -- both,
+however, come with rather high FNR values (0.529 and 0.591,
+respectively). So these logl cutoffs would give us decent confidence in
+our assignments while having a higher chance of ditching true PO pairs.
 
----
+------------------------------------------------------------------------
 
-Alternatively, we could choose a logl cutoff that optimizes the trade-off between false negative and false positive errors by identifying the logl ratio (LOD) that maximizes the product of the two (following McPhee et al. 2014; https://github.com/mvmcphee/Auke_sockeye_F1_RP/blob/main/scripts/SAUKE_F1_Rscript_01_CKMRsim.R)
+Alternatively, we could choose a logl cutoff that optimizes the
+trade-off between false negative and false positive errors by
+identifying the logl ratio (LOD) that maximizes the product of the two
+(following McPhee et al. 2014;
+<https://github.com/mvmcphee/Auke_sockeye_F1_RP/blob/main/scripts/SAUKE_F1_Rscript_01_CKMRsim.R>)
 
 ```{r}
 # LWED
@@ -1335,8 +1479,6 @@ allelic.richness(genind2hierfstat(lwed_gen))$Ar %>%
   apply(MARGIN = 2, FUN = mean) %>%
   round(digits = 3)
 ```
-
-
 
 INBREEDING COEFFICIENT (Fis)
 
@@ -1564,7 +1706,9 @@ simpF.js.models[[1]]
 simpM.js.models[[1]]
 ```
 
-But these estimates ^^ are not on probability scale (or in individuals for N) (e.g. Phi, p on logit scale, pent on mlogit scale) - so we need to use the *predict* function to estimate the real parameters:
+But these estimates \^\^ are not on probability scale (or in individuals
+for N) (e.g. Phi, p on logit scale, pent on mlogit scale) - so we need
+to use the *predict* function to estimate the real parameters:
 
 ```{r}
 # predict real values
@@ -1590,25 +1734,31 @@ lwedF.js.predicted$N$estimate # ~ 5 unmarked indiv
 
 ## Estimate pop size
 
-(from Paterson blog): There is no direct estimate of population size in the model. The estimate of “N” in the model output is for the number of unmarked individuals in the superpopulation.
+(from Paterson blog): There is no direct estimate of population size in
+the model. The estimate of "N" in the model output is for the number of
+unmarked individuals in the superpopulation.
 
 To estimate population size, we can derive it using the model estimates:
 
-```
+```         
 N_t+1 = (N_t * phi_t) + (N_super * pent_t)
 ```
 
-In words, this equation says that the **population size** is the **previous population size** times the **survival rate** (to calculate how many individuals survive) plus the **number of new individuals** from births and immigration.
+In words, this equation says that the **population size** is the
+**previous population size** times the **survival rate** (to calculate
+how many individuals survive) plus the **number of new individuals**
+from births and immigration.
 
 To get the inital population size, we estimate pent_1 by the constraint:
 
-```
+```         
 pent_1 = ` - SUM(pent_2..t)
 ```
 
-Abundance (N) is derived from the estimated parameters
-We will estimate population size at each time by making a dataframe of estimates and calculating N
-We will use the predicted estimates from the top-performing model (in this case: "dipper.js.predicted")
+Abundance (N) is derived from the estimated parameters We will estimate
+population size at each time by making a dataframe of estimates and
+calculating N We will use the predicted estimates from the
+top-performing model (in this case: "dipper.js.predicted")
 
 ```{r}
 # number of capture events
@@ -1653,14 +1803,12 @@ for(i in 2:nrow(lwedF_N.derived)){
 lwedF_N.derived
 ```
 
-^^I'm pretty sure what this is giving is the number of indivs PER YEAR vs. Nsuper = number of indivs across ALL YEARS in the pop
+\^\^I'm pretty sure what this is giving is the number of indivs PER YEAR
+vs. Nsuper = number of indivs across ALL YEARS in the pop
 
-We have now derived the population size (N) using the estimates form our Jolly-Seber model. But, how do we estimate standard error and confidence intervals?
-
-
-
-
-
+We have now derived the population size (N) using the estimates form our
+Jolly-Seber model. But, how do we estimate standard error and confidence
+intervals?
 
 ```{r}
 # and get estimates of unmarked individuals
@@ -1710,11 +1858,12 @@ simp_Nm # 60
 
 # FRANz
 
-Following Shedd et al GitHub 1_RRS_Hogan_13_15.Rmd<https://github.com/krshedd/Relative-fitness-of-Pink-Salmon/blob/main/analysis/1_RRS_Hogan_13_15.Rmd>
+Following Shedd et al GitHub
+1_RRS_Hogan_13_15.Rmd<https://github.com/krshedd/Relative-fitness-of-Pink-Salmon/blob/main/analysis/1_RRS_Hogan_13_15.Rmd>
 
 ## Create input files
 
-**Subset genos to samples with >= 70% genotyping success**
+**Subset genos to samples with \>= 70% genotyping success**
 
 ### Prep files
 
@@ -1834,13 +1983,9 @@ system2("perl",
 
 Quick overview of who all is included:
 
-LWED
-1 F        38 (out of Nf = 73)
-2 M        34 (out of Nm = 82)
+LWED 1 F 38 (out of Nf = 73) 2 M 34 (out of Nm = 82)
 
-SIMP
-1 F        27 (out of Nf = 52)
-2 M        28 (out of Nm = 60)
+SIMP 1 F 27 (out of Nf = 52) 2 M 28 (out of Nm = 60)
 
 ```{r}
 lwed_genos_franz %>%
@@ -1859,14 +2004,24 @@ sum(!is.na(simp_genos_franz$birthYear)) # 28
 sum(is.na(simp_genos_franz$birthYear)) # 27
 ```
 
-
 ## Assign Nf & Nm
 
-From FRANz manual: *N* is the number of candidate female (*Nf*) and male (*Nm*) parents in the population, equal to the sum of the average number of sampled (*n*) and unsampled (*N-n*) breeding females and males in the population (respectively). If unset, then estimated jointly with the pedigree. For parentage inference N=Nf=Nm (NOT Nf+Nm), but one can also specify Nf and Nm instead of N if these numbers differ. If N isnot known, use Nmax instead.
+From FRANz manual: *N* is the number of candidate female (*Nf*) and male
+(*Nm*) parents in the population, equal to the sum of the average number
+of sampled (*n*) and unsampled (*N-n*) breeding females and males in the
+population (respectively). If unset, then estimated jointly with the
+pedigree. For parentage inference N=Nf=Nm (NOT Nf+Nm), but one can also
+specify Nf and Nm instead of N if these numbers differ. If N isnot
+known, use Nmax instead.
 
-The FRANz manual suggests that if a good estimate of Nf/Nm is possible, specifying these variables is preferable to Nfmax/Nmmax (the maximum number of candidate female/male parents in the population). As such, I'm using the sex-specific abundance estimates calculated in ch2_demography.Rmd (currently in ch2_relatedness.Rmd tho, need to move it) based on capData records.
+The FRANz manual suggests that if a good estimate of Nf/Nm is possible,
+specifying these variables is preferable to Nfmax/Nmmax (the maximum
+number of candidate female/male parents in the population). As such, I'm
+using the sex-specific abundance estimates calculated in
+ch2_demography.Rmd (currently in ch2_relatedness.Rmd tho, need to move
+it) based on capData records.
 
-```
+```         
 lwed_Nf = 73
 lwed_Nm = 82
 
@@ -1890,20 +2045,31 @@ cd ./../../simp/franz_run1
 FRANz --femrepro 2:30 --malerepro 2:30 --Nf 52 --Nm 60 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/simp_genos_franz.dat
 ```
 
-FRANz parameters are defined as follows:
---femrepro and --malerepro specify the age ranges in which females and males can reproduce
+FRANz parameters are defined as follows: --femrepro and --malerepro
+specify the age ranges in which females and males can reproduce
 
---Nf and --Nm specify the number of candidate female and male parents in the population, which is the sum of the average number of sampled (n) and unsampled (N-n) breeding females/males in the population. The FRANz manual suggests that if a good estimate of Nf/Nm is possible, specifying these variables is preferable to Nfmax/Nmmax (the maximum number of candidate female/male parents in the population)
+--Nf and --Nm specify the number of candidate female and male parents in
+the population, which is the sum of the average number of sampled (n)
+and unsampled (N-n) breeding females/males in the population. The FRANz
+manual suggests that if a good estimate of Nf/Nm is possible, specifying
+these variables is preferable to Nfmax/Nmmax (the maximum number of
+candidate female/male parents in the population)
 
---fullsibtest specifies that FRANz should run the fullsib heuristic (as described in Riester et al. 2009)
+--fullsibtest specifies that FRANz should run the fullsib heuristic (as
+described in Riester et al. 2009)
 
---fullsibparental specifies that FRANz should also detect fullsibs in the parent generation
+--fullsibparental specifies that FRANz should also detect fullsibs in
+the parent generation
 
---updatefreqs specifies that FRANz should update allele frequencies using MCMC sampling
+--updatefreqs specifies that FRANz should update allele frequencies
+using MCMC sampling
 
---poutformat 2 specifies that parentage output files should include all with positive LOD (vs. just the most likely parentages)
+--poutformat 2 specifies that parentage output files should include all
+with positive LOD (vs. just the most likely parentages)
 
-**NOTE** that FRANz automatically sets --mintyped loci to (1+loci)/2; this also defines the min number of common typed loci for a pair of indivs. Other defaults include:
+**NOTE** that FRANz automatically sets --mintyped loci to (1+loci)/2;
+this also defines the min number of common typed loci for a pair of
+indivs. Other defaults include:
 
 -   typingerror = 0.01
 
@@ -1911,15 +2077,17 @@ FRANz parameters are defined as follows:
 
 #### Cumulative exclusion probability
 
-LWED: Cumulative exclusion probability when 1 to 7 fullsibs are genotyped
-  First Parent              : 0.9971977  0.9998257  0.9999910  0.9999988  0.9999994  0.9999995  0.9999995 
-  Second Parent             : 0.9999621  0.9999996  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000 
-  Parent Pair               : 0.9999999  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000
-  
-SIMP: Cumulative exclusion probability when 1 to 7 fullsibs are genotyped
-  First Parent              : 0.9925770  0.9992520  0.9999363  0.9999884  0.9999937  0.9999941  0.9999941 
-  Second Parent             : 0.9998635  0.9999972  0.9999999  1.0000000  1.0000000  1.0000000  1.0000000 
-  Parent Pair               : 0.9999994  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000  1.0000000
+LWED: Cumulative exclusion probability when 1 to 7 fullsibs are
+genotyped First Parent : 0.9971977 0.9998257 0.9999910 0.9999988
+0.9999994 0.9999995 0.9999995 Second Parent : 0.9999621 0.9999996
+1.0000000 1.0000000 1.0000000 1.0000000 1.0000000 Parent Pair :
+0.9999999 1.0000000 1.0000000 1.0000000 1.0000000 1.0000000 1.0000000
+
+SIMP: Cumulative exclusion probability when 1 to 7 fullsibs are
+genotyped First Parent : 0.9925770 0.9992520 0.9999363 0.9999884
+0.9999937 0.9999941 0.9999941 Second Parent : 0.9998635 0.9999972
+0.9999999 1.0000000 1.0000000 1.0000000 1.0000000 Parent Pair :
+0.9999994 1.0000000 1.0000000 1.0000000 1.0000000 1.0000000 1.0000000
 
 #### PO assignments
 
@@ -1988,7 +2156,9 @@ simp_po_run1_file <- read_csv("./DISSERTATION/ch2_demography/02_results/simp/fra
 
 **Take a peek at parentage posterior probabilities**
 
-Definitely a lot on the low side, but this makes sense since I opted to include all pairs w/a positive LOD score in the output (vs. most likely PO pairs)
+Definitely a lot on the low side, but this makes sense since I opted to
+include all pairs w/a positive LOD score in the output (vs. most likely
+PO pairs)
 
 ```{r}
 lwed_po_run1_file %>%
@@ -2103,10 +2273,10 @@ simp_po_run1 <- simp_po_run1_file %>%
 
 **PO pedigree.dat**
 
-Just filtering by groupMatch == T; filtering by diff_birth.parity gives too few I think
+Just filtering by groupMatch == T; filtering by diff_birth.parity gives
+too few I think
 
-LWED: F = 5, M = 5
-SIMP: F = 3, M = 1
+LWED: F = 5, M = 5 SIMP: F = 3, M = 1
 
 ```{r}
 lwed_po_run1_forPed <- lwed_po_run1 %>%
@@ -2291,7 +2461,6 @@ simp_po_run2 <- simp_po_run2_file %>%
   relocate(parent, offspring, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off)
 ```
 
-
 ```{r}
 # number of parents assigned to each offspring
 temp <- lwed_po_run2 %>%
@@ -2376,8 +2545,6 @@ lwed_clevFig <- presenceMatrix %>%
 lwed_clevFig
 ```
 
-
-
 # SCRAPS
 
 ## SambaR
@@ -2448,4 +2615,3 @@ build.colony.input(wd = getwd(), )
 ```{r}
 devtools::install_github("nicholasjclark/STRUCTURE.popgen")
 ```
-

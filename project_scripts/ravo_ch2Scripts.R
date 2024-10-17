@@ -10,7 +10,7 @@ get_capData_summary <- function(capData, whichSpecies) {
     captureYear = min(capData$captureYear):max(capData$captureYear),
     capPeriod_start = NA,
     capPeriod_end = NA,
-    capPeriod_days = NA,
+    capDuration_days = NA,
     nGroups = NA,
     nF = NA,
     nM = NA,
@@ -18,7 +18,9 @@ get_capData_summary <- function(capData, whichSpecies) {
     nRecap = NA,
     nNew = NA,
     propRecap = NA,
-    propNew = NA
+    propNew = NA,
+    capPeriod_mid = NA,
+    capInterval_days = NA
   )
   
   # basic info
@@ -35,13 +37,13 @@ get_capData_summary <- function(capData, whichSpecies) {
       ungroup() %>%
       as.data.frame()
     
-    # get cap start, end, and duration (days)
+    # get cap start, end, duration (days), and cap mid
     capPeriod_y <- data.frame(
       capPeriod_start = min(capData_y$captureDate),
       capPeriod_end = max(capData_y$captureDate)
     ) %>%
       mutate(
-        capPeriod_days = as.double(
+        capDuration_days = as.double(
           difftime(
             as.Date(capPeriod_end),
             as.Date(capPeriod_start),
@@ -59,10 +61,16 @@ get_capData_summary <- function(capData, whichSpecies) {
       )
     
     # count number of new indivs captured
-    if (y > min(capData$captureYear)) {
-      capData_prev <- capData %>%
-        filter(species == whichSpecies) %>%
-        filter(captureYear == (y - 1))
+#    if (y > min(capData$captureYear)) {
+#      capData_prev <- capData %>%
+#        filter(species == whichSpecies) %>%
+#        filter(captureYear == (y - 1))
+      
+      if (y > min(capData$captureYear)) {
+        capData_prev <- capData %>%
+          filter(species == whichSpecies) %>%
+          # subset captureYear to all prior to current year y
+          filter(captureYear %in% c(min(capData$captureYear):(y - 1)))
       nNew_y <- sum(!capData_y$animalID %in% capData_prev$animalID)
       nRecap_y <- sum(capData_y$animalID %in% capData_prev$animalID)
     } else {
@@ -71,13 +79,21 @@ get_capData_summary <- function(capData, whichSpecies) {
     }
     
     # append data for each "y" to df
-    df[df$captureYear == y, c("capPeriod_start", "capPeriod_end", "capPeriod_days", "nGroups", "nF", "nM", "nTotal", "nRecap", "nNew")] <- 
-      c(capPeriod_y$capPeriod_start, capPeriod_y$capPeriod_end, capPeriod_y$capPeriod_days, basicCounts_y$nGroups, basicCounts_y$nF, basicCounts_y$nM, basicCounts_y$nTotal, nRecap_y, nNew_y)
+    df[df$captureYear == y, c("capPeriod_start", "capPeriod_end", "capDuration_days", "nGroups", "nF", "nM", "nTotal", "nRecap", "nNew")] <- 
+      c(capPeriod_y$capPeriod_start, capPeriod_y$capPeriod_end, capPeriod_y$capDuration_days, basicCounts_y$nGroups, basicCounts_y$nF, basicCounts_y$nM, basicCounts_y$nTotal, nRecap_y, nNew_y)
   }
   
   # get propRecap & propNew
   df$propRecap <- round(ifelse(as.numeric(df$nTotal) > 0, as.numeric(df$nRecap) / as.numeric(df$nTotal), NA), 2)
   df$propNew <- round(ifelse(as.numeric(df$nTotal) > 0, as.numeric(df$nNew) / as.numeric(df$nTotal), NA), 2)
+  
+  # get interval b/t capPeriod_start and preceding captureYear's capPeriod_end
+  df <- df %>%
+    mutate(
+      capPeriod_mid = as.Date(capPeriod_start) + as.numeric(capDuration_days),
+      capInterval_days = as.numeric(as.Date(capPeriod_mid) - lag(as.Date(capPeriod_mid)))
+    ) %>%
+    relocate(c(capPeriod_mid, capInterval_days), .before = capDuration_days)
   
   return(df)
   
