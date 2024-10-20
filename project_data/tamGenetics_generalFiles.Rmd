@@ -394,5 +394,49 @@ sampleRef <- run1_md[, c("seqRun", "sampleID", "species", "sex", "sampleRef", "s
     sampleID_franz = str_pad(sampleID_franz, 10, pad = "_", side = "left")
   )
 
-write.csv(sampleRef, "./project_data/master_sampleInfo", row.names = F)
+write.csv(sampleRef, "./project_data/master_sampleInfo.csv", row.names = F)
 ```
+
+## Add birth/death data
+
+**Data** 
+
+```{r}
+capData_2009to2023 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
+  # ditch UNK animalIDs
+  filter(animalID != "UNK") %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4),
+    captureYear = as.numeric(captureYear)
+  ) %>%
+  relocate(captureYear, .after = captureDate)
+
+birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
+  # edit for animalID 90 ageClass recode to juvenile
+  mutate(
+    age_capData = case_when(
+      animalID == 90 ~ "juvenile",
+      .default = age_capData
+    ),
+    birthYear_est = case_when(
+      animalID == 90 ~ 2010,
+      .default = birthYear_est
+    )
+  )
+
+deathData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv")
+```
+
+**Update sampleRef**
+
+```{r}
+sampleRef2 <- read.csv("./project_data/master_sampleInfo.csv") %>%
+  merge(., birthData[, c("animalID", "birthDate_est", "birthYear_est")], by = "animalID", all.x = T) %>%
+  merge(., capData_2009to2023[, c("animalID", "captureYear", "groupName")], by.x = c("animalID", "birthYear_est"), by.y = c("animalID", "captureYear"), all.x = T) %>%
+  dplyr::rename("natalGroup" = "groupName") %>%
+  merge(., deathData[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  relocate(-c(birthDate_est, birthYear_est, natalGroup, deathYear_est))
+
+write.csv(sampleRef2, "./project_data/master_sampleInfo_v2.csv", row.names = F)
+```
+
