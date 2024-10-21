@@ -99,6 +99,128 @@ get_capData_summary <- function(capData, whichSpecies) {
   
 }
 
+############################
+### GET POPDATA PER YEAR ###
+############################
+
+get_popData_byYear <- function(
+    capData,
+    whichSpecies = c("LWED", "SIMP"),
+    whichYears, # e.g., 2009:2019
+    whichAnimalIDs = c("all", "with_hairSamples"), # all in capData? or just those with hair samples for genetics?
+    md_genoData = NULL,
+    birthData = NULL,
+    adultsOnly = NULL # subset to adults only?
+    ) {
+  
+  # initialize list to store dataframes for each year
+  popData_list <- list()
+  
+  # add birth data if provided
+  if(!is.null(birthData)){
+    capData <- merge(capData, birthData, by = "animalID", all.x = T)
+  }else{
+    capData <- capData %>%
+      mutate(
+        birthDate_est = NA,
+        birthYear_est = NA
+      )
+  }
+  
+  # get list of animalIDs
+  if(whichAnimalIDs == "all") {
+    animalID.list <- capData %>%
+      select(animalID) %>%
+      filter(animalID != "UNK") %>% # remove any "UNK" animalIDs
+      distinct() %>%
+      pull()
+  } else if(whichAnimalIDs == "with_hairSamples") {
+    animalID.list <- md_genoData %>%
+      filter(sampleType == "hair") %>%
+      select(animalID) %>%
+      distinct() %>%
+      pull()
+  }
+  
+  for (y in whichYears) {
+    
+    # create dataframe for population in captureYear "y"
+    popData_y <- capData %>%
+      filter(animalID %in% animalID.list) %>%
+      filter(captureYear == y) %>%
+      # select only first capture event per animalID in year y
+      group_by(animalID) %>%
+      slice_min(captureDate) %>%
+      ungroup() %>%
+      as.data.frame() %>%
+      select(animalID, groupName, ageClass, birthDate_est, birthYear_est) %>%
+      mutate(
+        born_thisSeason = case_when(
+          birthYear_est == y ~ TRUE,
+          .default = FALSE
+        )
+      )
+    
+    # subset to adults only if desired
+    if(!is.null(adultsOnly)){
+      popData_y <- popData_y %>%
+        filter(born_thisSeason == FALSE)
+    }else{
+      popData_y <- popData_y
+    }
+    
+    # add each dataframe to list w/year as name
+    popData_list[[as.character(y)]] <- popData_y
+    
+  }
+  
+  return(popData_list)
+  
+}
+
+####################################
+### GET HIERFSTAT GENOS PER YEAR ###
+####################################
+
+get_genos_perYear_forHierfstat <- function(
+    genoData_hf, # geno data already in hf format
+    popData,
+    sampleRef
+) {
+  
+  # assign animalIDs to genoData
+  genos <- genoData_hf %>%
+    merge(sampleRef[, c("sampleID", "animalID")], by.x = 0, by.y = "sampleID") %>%
+    relocate(animalID) %>%
+    select(-Row.names, -pop)
+  
+  # append geno data to popData  
+  genoData_perYear_temp <- lapply(popData, "[", 1:2) %>%
+    map(., ~ .x %>%
+          # rename cols
+          set_names(c("animalID", "pop")) %>% 
+          # add sex (code as factor)
+          merge(sampleRef[, c("animalID", "sex")], by = "animalID", all.x = T) %>%
+          mutate(sex = as.factor(sex)) %>%
+          # add genos
+          merge(genos, by = "animalID") %>%
+          arrange(pop, animalID)
+    )
+  
+  # Organize the results by year
+  genoData_perYear <- map2(names(popData), genoData_perYear_temp, ~ {
+    list(
+      genoData = select(.y, -c(animalID, sex)), 
+      sexData = .y$sex  
+    )
+  })
+  
+  # Name the list by years (assuming popData is named by years)
+  names(genoData_perYear) <- names(popData)
+  
+  return(genoData_perYear)
+}
+
 #########################
 ### GET PARITY STATUS ###
 #########################
