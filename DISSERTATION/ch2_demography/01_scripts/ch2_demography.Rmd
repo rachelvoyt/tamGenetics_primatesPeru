@@ -22,7 +22,9 @@ dissertation. Data used is from tamRun5, hair samples only.
 ```{r}
 library(janitor)
 library(tidyverse)
-source("project_scripts/ravo_gtScripts.R") # for my custom functions
+
+# for my custom functions
+source("project_scripts/ravo_gtScripts.R")
 source("./project_scripts/ravo_ch2Scripts.R")
 ```
 
@@ -46,39 +48,52 @@ capData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/cap
     captureYear = str_sub(captureDate, 1, 4),
     captureYear = as.numeric(captureYear)
   ) %>%
-  # adjust rowID 1 ageClass to "UNK"
-  mutate(
-    ageClass = case_when(
-      rowID == 1 ~ "UNK",
-      .default = ageClass
-    )
-  )
+  relocate(captureYear, .after = captureDate)
+  # adjust rowID 1 ageClass to "UNK" >> keep as adult for now
+  #mutate(
+  #  ageClass = case_when(
+  #    rowID == 1 ~ "UNK",
+  #    .default = ageClass
+  #  )
+  #)
 
 capData_2009to2019 <- capData %>%
   filter(rowID <= 613)
 
 capData_firstEntry <- capData[match(unique(capData$animalID), capData$animalID),] %>%
-  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
-
-capData_2009to2019_firstEntry <- capData[match(unique(capData$animalID), capData$animalID),] %>%
-  filter(rowID <= 613) %>%
-  select(rowID, captureDate, animalID, ageClass, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV) %>%
+  select(rowID, captureDate, captureYear, animalID, ageClass, ageClass_classifier, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV) %>%
   # remove UNK animalID
   filter(animalID != "UNK")
+
+capData_2009to2019_firstEntry <- capData_firstEntry %>%
+  filter(rowID <= 613)
 ```
 
 ## 3.2 Birth/death data
 
 ```{r}
-birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv")
+birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
+  # edit for animalID 90 ageClass recode to juvenile
+  mutate(
+    age_capData = case_when(
+      animalID == 90 ~ "juvenile",
+      .default = age_capData
+    ),
+    birthYear_est = case_when(
+      animalID == 90 ~ 2010,
+      .default = birthYear_est
+    )
+  )
 
-birthAssignments <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
+birthAssignments <- birthData %>%
   select(animalID, birthYear_est, species) %>%
   na.omit() %>%
   distinct() %>%
   arrange(animalID)
 
-deathAssignments <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv") %>%
+deathData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv")
+
+deathAssignments <- deathData %>%
   select(animalID, deathYear_est) %>%
   na.omit() %>%
   distinct() %>%
@@ -125,52 +140,40 @@ ageClass
 
 From 2009-2019:
 
-**LWED** - nGroups = 16 ageClass F M Total juvenile 26 44 70 nonJuv 42
-33 75 Total 68 77 145
+  species ageClass   F   M Total
+1    LWED juvenile  26  44    70
+2    LWED   nonJuv  42  33    75
+3    SIMP juvenile  26  27    53
+4    SIMP   nonJuv  22  27    49
+5   Total        - 116 131   247
 
-**SIMP** - nGroups = 10 ageClass F M Total juvenile 26 27 53 nonJuv 22
-27 49 Total 48 54 102
+  species nGroups
+1    LWED      15
+2    SIMP       9
 
 ```{r}
-# LWED
-capData_byIndiv_firstEntry_lwed %>%
+# all indivs captured from 2009 to 2019 by ageClass at first capture:
+capData_2009to2019_firstEntry %>%
   mutate(ageClass = case_when(
     is.na(ageClass) ~ "nonJuv",
     ageClass != "juvenile" ~ "nonJuv",
     .default = ageClass
-  )) %>%
-  group_by(ageClass, sex) %>%
-  summarise(
-    count = n()
-  ) %>%
+    )) %>%
+  group_by(species, ageClass, sex) %>%
+  summarise(count = n()) %>%
   pivot_wider(names_from = sex,
               values_from = count) %>%
   adorn_totals() %>%
-  mutate(
-    Total = F + M
-  )
+  mutate(Total = F + M) %>%
+  as.data.frame()
 
-n_distinct(capData_byIndiv_firstEntry_lwed$groupID)
-
-# SIMP
-capData_byIndiv_firstEntry_simp %>%
-  mutate(ageClass = case_when(
-    is.na(ageClass) ~ "nonJuv",
-    ageClass != "juvenile" ~ "nonJuv",
-    .default = ageClass
-  )) %>%
-  group_by(ageClass, sex) %>%
-  summarise(
-    count = n()
-  ) %>%
-  pivot_wider(names_from = sex,
-              values_from = count) %>%
-  adorn_totals() %>%
-  mutate(
-    Total = F + M
-  )
-
-n_distinct(capData_byIndiv_firstEntry_simp$groupID)
+# number of groups:
+capData_2009to2019_firstEntry %>%
+  # remove groupName for lone indivs
+  filter(groupName != "Loners") %>%
+  group_by(species) %>%
+  summarise(nGroups = n_distinct(groupName)) %>%
+  as.data.frame()
 ```
 
 ### Group size
@@ -200,7 +203,78 @@ can include field "freq" in capture history, which if negative
 represents loss on capture at the final capture occasion. If freq is
 missing, a value of 1 is assumed for all records.
 
-## Background
+## Model 1: Age-specific survival (CJS)
+
+### Data
+
+```{r}
+# 1) create capHist
+m1_lwed_capHist <- capHist_2009to2019 %>%
+  filter(species == "LWED") %>%
+  select(-species) %>%
+  # filter to indivs born during study period
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID") %>%
+  # recode any caps prior to normalized birthYear to 0
+  mutate(
+    temp = birthYear_est - 2009,
+    ch = case_when(
+      !is.na(temp) ~ `substr<-`(ch, temp, temp, "0"),
+      .default = ch
+      )
+  ) %>%
+  # now trim to 2010-2019 (since normalized birthYears start in 2010)
+  mutate(ch = str_sub(ch, 2, -1)) %>%
+  # remove any all-zero records
+  filter(ch != "0000000000") %>%
+  # recode grouping vars as factor
+  mutate(sex = as.factor(sex)) %>%
+  arrange(desc(ch)) %>%
+  select(ch, sex)
+
+table(m1_lwed_capHist$sex)
+#  F  M 
+# 26 44 
+
+# 2) get time intervals b/t sampling periods
+m1_lwed_capIntervals <- get_capData_summary(capData_2009to2019, "LWED") %>%
+  # only 2010-2019 to account for birthYear start
+  filter(captureYear %in% 2010:2019) %>%
+  # ditch interval for first year
+  mutate(
+    capInterval_days = case_when(
+      captureYear == min(captureYear) ~ NA,
+      .default = capInterval_days
+    )
+  ) %>%
+  select(capInterval_days) %>%
+  # normalized interval
+  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
+  select(intNorm) %>%
+  na.omit() %>%
+  pull()
+m1_lwed_capIntervals
+# 0.80 1.20 1.07 0.96 1.03 0.95 1.02 1.04 0.98
+
+# 3) get capDuration for each year
+m1_lwed_capDuration <- lwed_capSummary_byGroup %>%
+  select(captureYear, capDuration_days)
+m1_lwed_capDuration
+```
+
+Quick overview of birth dates vs. years --
+
+```{r}
+birthAssignments %>%
+  filter(species == "LWED") %>%
+  group_by(birthYear_est) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = as.factor(birthYear_est), y = count)) +
+  geom_bar(stat = "identity")
+```
+
+### GOF tests
+
+#### Background
 
 Following James Paterson blog (mostly..ish)
 
@@ -232,104 +306,45 @@ Following James Paterson blog (mostly..ish)
         recaptured depend on whether they were marked on or before time
         t?
 
-## Model 1: Age-specific survival (CJS)
+#### Run tests
 
-### Data
-
-```{r}
-# 1) create capHist
-m1_lwed_capHist <- capHist_2009to2019 %>%
-  filter(species == "LWED") %>%
-  select(-species) %>%
-  
-  # filter to those w/known birth years
-  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID") %>%
-  # recode any captures in year preceding normalized birthYear to 0
-  mutate(
-    temp = birthYear_est - 2009
-  ) %>%
-  mutate(
-    ch = `substr<-`(ch, temp, temp, "0")
-  ) %>%
-  # subset to 2010-2019 (since normalized birthYears start in 2010)
-  mutate(
-    ch = str_sub(ch, 2, -1)
-  ) %>%
-  select(ch, sex) %>%
-  mutate(sex = as.factor(sex)) %>%
-  arrange(desc(ch)) %>%
-  select(ch, sex)
-
-table(m1_lwed_capHist$sex)
-#  F  M 
-# 25 44 
-
-## get time intervals
-lwed_capSummary_byGroup <- get_capData_summary(capData_2009to2019, "LWED")
-
-m1_lwed_capIntervals <- lwed_capSummary_byGroup %>%
-  # only 2010-2019 to account for birthYear start
-  filter(captureYear %in% 2010:2019) %>%
-  # ditch interval for first year
-  mutate(
-    capInterval_days = case_when(
-      captureYear == min(captureYear) ~ NA,
-      .default = capInterval_days
-    )
-  ) %>%
-  select(capInterval_days) %>%
-  # normalized interval
-  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
-  select(intNorm) %>%
-  na.omit() %>%
-  pull()
-m1_lwed_capIntervals
-# 0.80 1.20 1.07 0.96 1.03 0.95 1.02 1.04 0.98
-```
-
-Quick overview of birth dates vs. years --
-
-```{r}
-birthAssignments %>%
-  filter(species == "LWED") %>%
-  group_by(birthYear_est) %>%
-  summarise(count = n()) %>%
-  ggplot(aes(x = as.factor(birthYear_est), y = count)) +
-  geom_bar(stat = "identity")
-```
-
-### GOF tests
+Need to run GOF tests with R2ucare - RMark uses the program RELEASE for GOF tests, which is for windows only
 
 **Prep data**
 
 Reformat data into matrix for R2ucare + create separate groups for F/M
 
 ```{r}
-#detach("package:RMark", unload=TRUE)
-library(marked)
 library(R2ucare)
 
 # set up matrix for r2ucare
-m1_lwed_capHist.r2Proc <- marked::process.data(m1_lwed_capHist,
-                                               model = "CJS",
-                                               begin.time = 2010,
-                                               time.intervals = m1_lwed_capIntervals,
-                                               accumulate = FALSE)
+detach("package:RMark", unload=TRUE)
+library(marked)
+m1_lwed.proc <- marked::process.data(
+  m1_lwed_capHist,
+  model = "CJS",
+  begin.time = 2010,
+  groups = "sex",
+  time.intervals = m1_lwed_capIntervals
+  )
 
-m1_lwed.hist <- matrix(as.numeric(unlist(strsplit(as.character(m1_lwed_capHist.r2Proc$data$ch), ","))),
-                   nrow = length(m1_lwed_capHist.r2Proc$data$ch),
+m1_lwed.hist <- matrix(as.numeric(unlist(strsplit(as.character(m1_lwed.proc$data$ch), ","))),
+                   nrow = length(m1_lwed.proc$data$ch),
                    byrow = T)
 
-m1_lwed.freq <- m1_lwed_capHist.r2Proc$data$freq
-m1_lwed.group <- m1_lwed_capHist.r2Proc$data$sex
+m1_lwed.freq <- m1_lwed.proc$data$freq
 
 # split dataset into F/M
+m1_lwed.group <- m1_lwed.proc$data$sex
 mask <- (m1_lwed.group == 'F')
 m1_lwedF.hist <- m1_lwed.hist[mask,]
 m1_lwedF.freq <- m1_lwed.freq[mask]
 mask <- (m1_lwed.group == 'M')
 m1_lwedM.hist <- m1_lwed.hist[mask,]
 m1_lwedM.freq <- m1_lwed.freq[mask]
+
+detach("package:marked", unload=TRUE)
+library(RMark)
 ```
 
 **GOF tests**
@@ -337,19 +352,49 @@ m1_lwedM.freq <- m1_lwed.freq[mask]
 GOF tests suggest that global model is likely a good fit; proceed to CJS model testing (as per Gimenez et al. 2018 flow chart)
 
 ```{r}
-# test1
+# test1 - fullset
+m1_lwed_test1 <- overall_CJS(m1_lwed.hist, m1_lwed.freq)
+m1_lwed_test1 ## p = 0.894 >> fit CJS model
+
+# test1 - by group
 m1_lwedF_test1 <- overall_CJS(m1_lwedF.hist, m1_lwedF.freq)
 m1_lwedM_test1 <- overall_CJS(m1_lwedM.hist, m1_lwedM.freq)
 
-m1_lwedF_test1 ## p = 0.994 >> fit CJS model
+m1_lwedF_test1 ## p = 0.998 >> fit CJS model
 m1_lwedM_test1 ## p = 0.567 >> fit CJS model
+```
+
+#### Table 
+
+ignore for now; did this when was trying out GOF tests by sex-group
+
+```{r}
+table_m1_lwed_gof <- data.frame(
+  chi2 = c(m1_lwedF_test1$chi2, m1_lwedM_test1$chi2),
+  df = c(m1_lwedF_test1$degree_of_freedom, m1_lwedM_test1$degree_of_freedom),
+  pValue = c(m1_lwedF_test1$p_value, m1_lwedM_test1$p_value)
+)
+
+table_m1_lwed_gof %>%
+  gt() %>%
+  cols_label(
+    chi2 = md("**Pearson's Chi2**"),
+    df = md("**Degrees of freedom**"),
+    pValue = md("**p-value**")
+  )
 ```
 
 ### c-hat
 
+**chi2 / df**
+
 C-hat is ~0.61; when c-hat < 1, general practice is to leave it at 1
 
 ```{r}
+# fullset
+m1_lwed.chat <- m1_lwed_test1$chi2 / m1_lwed_test1$degree_of_freedom
+m1_lwed.chat # 0.5343333
+
 # Overall chat for lwed (male test stat + female test stat) / (male df + female df)
 m1_lwedF_tStat <- m1_lwedF_test1$chi2
 m1_lwedM_tStat <- m1_lwedM_test1$chi2
@@ -359,10 +404,287 @@ m1_lwedM_dF <- m1_lwedM_test1$degree_of_freedom
 
 m1_lwed.chat <- (m1_lwedF_tStat + m1_lwedM_tStat) / (m1_lwedF_dF + m1_lwedM_dF)
 
-m1_lwed.chat # 0.6062941
+m1_lwed.chat # 0.5932353
 ```
 
-### Run models
+**median c-hat**
+
+```{r}
+library(AICcmodavg)
+
+m1.basic_lwed.proc <- process.data(
+  m1_lwed_capHist_forMARK,
+  model = "CJS",
+  begin.time = 2009,
+  #groups = c("sex", "ageClass1"),
+  time.intervals = m1_lwed_capIntervals
+  )
+
+m1.basic_lwed.ddl <- make.design.data(m1.basic_lwed.proc)
+
+m1_lwed.model <- mark(m1.basic_lwed.proc, m1.basic_lwed.ddl,
+                      model.parameters = )
+
+# export to mark for other c-hat estimators
+m1_lwed_capHist_forMARK <- m1_lwed_capHist %>%
+  select(ch)
+
+
+
+# if returns NULL, everything worked fine (as per Cooch & White 2024 C-97)
+export.MARK(m1_lwed.proc.MARK,
+            project.name = "./DISSERTATION/ch2_demography/02_results/01_mark/m1_lwed",
+            replace = TRUE)
+```
+
+Then in command line--
+
+```{bash}
+cd bin
+
+wine mark i=/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/m1_lwed.inp o=/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/m1_lwed_output.txt r=/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/m1_lwed_residuals.txt v=/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/m1_lwed_variance_cov.txt batch nocolor
+
+
+/home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/m1_lwed.inp
+```
+
+### RMark
+
+**Prep data**
+
+```{r}
+#detach("package:marked", unload=TRUE)
+library(RMark)
+
+# 1) create capture histories (already done above)
+m1_lwed_capHist
+
+# 1) process data
+m1_lwed.cjs.proc <- process.data(
+  m1_lwed_capHist,
+  begin.time = 2010,
+  model = "CJS",
+  groups = "sex",
+  time.intervals = m1_lwed_capIntervals
+  )
+
+# 2) design data
+m1_lwed.cjs.ddl <- make.design.data(rmark_m1_lwed.cjs.proc)
+
+## add ageClass
+library(combinat)
+# start subadult at ages (1 year in study):
+min(m1_lwed_capIntervals) # 0.8
+max(m1_lwed_capIntervals) # 1.2
+# end subadult at ages (3 years in study):
+subad <- combn(m1_lwed_capIntervals, m = 3, fun = sum) %>%
+  as.data.frame() %>%
+  dplyr::rename("combo" = ".") %>%
+  arrange(combo)
+min(subad$combo) # 2.71
+max(subad$combo) # 3.31
+
+m1_lwed.cjs.ddl <- add.design.data(rmark_m1_lwed.cjs.proc,
+                                   m1_lwed.cjs.ddl,
+                                   parameter = "Phi",
+                                   type = "age",
+                                   bins = c(0,0.5,2.7,15),
+                                   name = "ageClass")
+m1_lwed.cjs.ddl <- add.design.data(rmark_m1_lwed.cjs.proc,
+                                   m1_lwed.cjs.ddl,
+                                   parameter = "p",
+                                   type = "age",
+                                   bins = c(0,0.5,2.7,15),
+                                   name = "ageClass")
+
+## add effort covariate
+newTimes <- as.character(unique(c(rmark_m1_lwed.cjs.ddl$Phi$time, rmark_m1_lwed.cjs.ddl$p$time)))
+
+m1_lwed_covGrps <- data.frame(
+  time = newTimes,
+  nGrps = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2010:2019, "nGroups"]
+)
+
+m1_lwed.cjs.ddl$p <- merge_design.covariates(rmark_m1_lwed.cjs.ddl$p,
+                                             m1_lwed_covGrps)
+
+m1_lwed.cjs.ddl$Phi
+m1_lwed.cjs.ddl$p
+```
+
+**Optimal model for p**
+
+```{r}
+# 1) build fxn to create models
+m1.p_fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.dot <- list(formula=~1) # best model from above
+  
+  # Detection probability (p) formula
+  p.dot <- list(formula=~1) # constant detection
+  p.ageClass <- list(formula=~ageClass) # differs across ages
+  p.nGrps <- list(formula=~nGrps)
+  p.sex <- list(formula=~ageClass) # differs between males and females
+  p.time <- list(formula=~time) # differs between discrete times
+  
+  p.ageClass_nGrps <- list(formula=~ageClass+nGrps)
+  p.ageClass_sex <- list(formula=~ageClass+sex)
+  p.ageClass_time <- list(formula=~ageClass+time)
+  p.nGrps_sex <- list(formula=~nGrps+sex)
+  p.nGrps_time <- list(formula=~nGrps+time)
+  p.sex_time <- list(formula=~sex+time)
+  
+  p.ageClass.nGrps <- list(formula=~ageClass*nGrps)
+  p.ageClass.sex <- list(formula=~ageClass*sex)
+  p.ageClass.time <- list(formula=~ageClass*time)
+  p.nGrps.sex <- list(formula=~nGrps*sex)
+  p.nGrps.time <- list(formula=~nGrps*time)
+  p.sex.time <- list(formula=~sex*time)
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+
+# run the models
+m1.p_lwed.cjs.models <- m1.p_fit.cjs.models(m1_lwed.cjs.proc,
+                                            m1_lwed.cjs.ddl)
+
+View(m1.p_lwed.cjs.models$model.table)
+
+# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
+search.output.files(rmark_m1_lwed.cjs.models, "convergence") # NULL; apparently all converged?
+search.output.files(rmark_m1_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
+```
+
+```{r}
+# 1) build fxn to create models
+m1.phi_fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.dot <- list(formula=~1) # constant detection
+  Phi.ageClass <- list(formula=~ageClass) # differs across ages
+  Phi.nGrps <- list(formula=~nGrps)
+  Phi.sex <- list(formula=~ageClass) # differs between males and females
+  Phi.time <- list(formula=~time) # differs between discrete times
+  
+  Phi.ageClass_nGrps <- list(formula=~ageClass+nGrps)
+  Phi.ageClass_sex <- list(formula=~ageClass+sex)
+  Phi.ageClass_time <- list(formula=~ageClass+time)
+  Phi.nGrps_sex <- list(formula=~nGrps+sex)
+  Phi.nGrps_time <- list(formula=~nGrps+time)
+  Phi.sex_time <- list(formula=~sex+time)
+  
+  Phi.ageClass.nGrps <- list(formula=~ageClass*nGrps)
+  Phi.ageClass.sex <- list(formula=~ageClass*sex)
+  Phi.ageClass.time <- list(formula=~ageClass*time)
+  Phi.nGrps.sex <- list(formula=~nGrps*sex)
+  Phi.nGrps.time <- list(formula=~nGrps*time)
+  Phi.sex.time <- list(formula=~sex*time)
+  
+  # Detection probability (p) formula
+  p.nGrps_sex <- list(formula=~nGrps+sex)
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+
+# run the models
+m1.phi_lwed.cjs.models <- m1.phi_fit.cjs.models(m1_lwed.cjs.proc,
+                                                m1_lwed.cjs.ddl)
+
+View(m1.phi_lwed.cjs.models$model.table)
+
+# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
+search.output.files(rmark_m1_lwed.cjs.models, "convergence") # NULL; apparently all converged?
+search.output.files(rmark_m1_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
+```
+
+deviance = diff b/t null deviance and model deviance
+
+numerical underflow: "when the result of an arithmetic operation is so small that it cannot be stored in its intended destination format without suffering a rounding error that is larger than usual." (ieee arithmetic)
+
+I don't understand why I'm getting the duplicate error if I set accumulate to TRUE...
+
+"Why not trust the values computed by MARK? The ability of MARK to count the number of parameters correctly is impaired when using design matrices and it will often not count parameters that are estimable but are at a boundary (0 or 1 for 𝜑 or 𝑝) which can happen easily with sparse data sets (the technical details of how MARK counts parameters are presented in Chapter 4). Overly complex models that have numerous parameters that are at boundaries can appear to be the best model because the parameters are counted improperly. It is more conservative to assume that all parameters are estimable." (Cooch & White, C-36)
+-- wtf??
+
+#### Table
+
+```{r}
+table_m1_lwed.cjs.models <- m1.phi_lwed.cjs.models$model.table %>%
+  select(-Phi, -p, -AICc) %>%
+  mutate(rank = row_number(),
+         DeltaAICc = round(DeltaAICc, 2),
+         weight = round(weight, 2),
+         Deviance = round(Deviance, 2)) %>%
+  relocate(rank) %>%
+  gt() %>%
+  cols_label(
+    rank = md("**Rank**"),
+    model = md("**Model**"),
+    npar = md("**K**"),
+    DeltaAICc = md("**DeltaAICc**"),
+    weight = md("**Weight**"),
+    Deviance = md("**Deviance**")
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = everything()
+  )
+table_m1_lwed.cjs.models
+
+table_m1_lwed.cjs.models %>%
+  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_m1_lwed.cjs.models.png", vwidth = 1500, vheight = 1000)
+```
+
+### c-hat again
+
+blahhh I give up
+
+```{r}
+m1_lwed_topMod <- mark(
+  m1_lwed.cjs.proc,
+  m1_lwed.cjs.ddl,
+  model.parameters = list(Phi = list(formula=~sex+time),
+                          p = list(formula=~nGrps+sex))
+  )
+
+summary(m1_lwed_topMod)
+
+m1_lwed_resid.dev <- m1_lwed_topMod$results$deviance
+m1_lwed_resid.df <- m1_lwed_topMod$results$deviance.df
+
+library(AICcmodavg)
+m1_lwed_chat1 <- c_hat(???)
+```
+
+
+# XXXX
+
+### marked
 
 Note that CJS default fields include cohort, age, time which are factor variables and Cohort, Age, and Time which are numeric versions of the same fields. The values of these can be altered by values of begin.time, time.intervals and initial.ages set in the call to process.data. 
 
@@ -437,7 +759,7 @@ m1_lwed.cjs.models <- m1_fit.cjs.models(m1_lwed.cjs.proc, m1_lwed.cjs.ddl)
 View(m1_lwed.cjs.models$model.table)
 ```
 
-### Adjust for small sample size?
+**Adjust for small sample size?**
 
 Burnham and Anderson suggest correcting for small sample size when n/K < 40, where n = sample size and K = number of fitted parameters (including intercept); the ALSO say that you may as well just use the AICc since it becomes equal to AIC at large n anyway - so -- yes.
 
@@ -510,82 +832,7 @@ table_m1_lwed.cjs.models_aicc %>%
 
 The top two models are very similar with regard to AICc and weight_c, suggesting that it might be worthwhile to average them. 
 
-```{r}
-detach("package:marked", unload=TRUE)
-library(RMark)
 
-# 1) process data
-rmark_m1_lwed.cjs.proc <- RMark::process.data(m1_lwed_capHist,
-                                             begin.time = 2010,
-                                             model = "CJS",
-                                             groups = "sex",
-                                             time.intervals = m1_lwed_capIntervals)
-
-# 2) design data
-rmark_m1_lwed.cjs.ddl <- RMark::make.design.data(rmark_m1_lwed.cjs.proc)
-
-rmark_m1_lwed.cjs.ddl$Phi
-rmark_m1_lwed.cjs.ddl$p
-
-# 3) build fxn to create models
-rmark_m1_fit.cjs.models <- function(dataProc, dataDesign) {
-  
-  # Apparent survival (Phi) formula
-  Phi.age.sex <- list(formula=~age*sex) # "*" includes main effects + intxn (like other linear models)
-  Phi.age.time <- list(formula=~age*time) 
-  Phi.sex.time <- list(formula=~sex*time)
-  
-  Phi.age_sex <- list(formula=~age+sex)
-  Phi.age_time <- list(formula=~age+time) 
-  Phi.sex_time <- list(formula=~sex+time)
-  
-  Phi.age <- list(formula=~age) # differs across ages
-  Phi.sex <- list(formula=~sex) # differs between males and females
-  Phi.time <- list(formula=~time) # differs between discrete times
-  Phi.dot <- list(formula=~1) # constant survival
-  
-  # Detection probability (p) formula
-  p.age.sex <- list(formula=~age*sex)
-  p.age.time <- list(formula=~age*time)
-  p.sex.time <- list(formula=~sex*time)
-  
-  p.age_sex <- list(formula=~age+sex)
-  p.age_time <- list(formula=~age+time)
-  p.sex_time <- list(formula=~sex+time)
-  
-  p.age <- list(formula=~age)
-  p.sex <- list(formula=~sex)  # differs between males and females
-  p.time <- list(formula=~time)  # one discrete estimate of p per capture event
-  p.dot <- list(formula=~1) # constant detection
-  
-  # Construct all combinations and put into one model table
-  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
-  
-  # run & return list of models
-  results <- mark.wrapper(cml,
-                          data = dataProc,
-                          ddl = dataDesign,
-                          external = FALSE,
-                          accumulate = TRUE,
-                          hessian = TRUE)
-  
-  return(results)
-  
-}
-
-# run the models
-rmark_m1_lwed.cjs.models <- rmark_m1_fit.cjs.models(rmark_m1_lwed.cjs.proc, rmark_m1_lwed.cjs.ddl)
-
-# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
-search.output.files(rmark_m1_lwed.cjs.models, "convergence") # NULL; apparently all converged?
-search.output.files(rmark_m1_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
-
-View(rmark_m1_lwed.cjs.models$model.table)
-```
-
-numerical underflow: "when the result of an arithmetic operation is so small that it cannot be stored in its intended destination format without suffering a rounding error that is larger than usual." (ieee arithmetic)
-
-I don't understand why I'm getting the duplicate error if I set accumulate to TRUE...
 
 ```{r}
 head(m1_lwed.cjs.models_aicc$model.table)
@@ -2418,4 +2665,78 @@ writeSeq(
   OutFormat = "xls",
   folder = "./dissChapter_demography/sequoiaOutput",
   file = "sequoia_output_lwedPar.xlsx")
+```
+
+# SCRAPS
+
+```{r}
+#detach("package:marked", unload=TRUE)
+library(RMark)
+
+# 1) create capHist
+m1_lwed_capHist <- capHist_2009to2019 %>%
+  filter(species == "LWED") %>%
+  select(-species) %>%
+  merge(., capData_firstEntry[, c("animalID", "ageClass", "ageClass_classifier")], by = "animalID") %>%
+  # opting to recode animalID 90 as juv for first capture (see capData notes)
+  mutate(
+    ageClass = case_when(
+      animalID == 90 ~ "juvenile",
+      .default = ageClass
+    ),
+    # also update ageClass names for ease of use later
+    ageClass = case_when(
+      ageClass == "juvenile" ~ "age1",
+      ageClass == "subadult" ~ "age2",
+      ageClass_classifier == "adult_young" ~ "age2",
+      .default = "age3"
+      )
+  ) %>%
+  dplyr::rename("ageClass1" = "ageClass") %>%
+  # for indivs born during study period, recode any caps prior to normalized birthYear to 0
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  mutate(
+    temp = birthYear_est - 2009,
+    ch = case_when(
+      !is.na(temp) ~ `substr<-`(ch, temp, temp, "0"),
+      .default = ch
+      )
+  ) %>%
+  # remove any all-zero records
+  filter(ch != "00000000000") %>%
+  # grab ch and grouping variables >> recode grouping vars as factor
+  mutate(sex = as.factor(sex),
+         ageClass1 = as.factor(ageClass1)) %>%
+  arrange(desc(ch)) %>%
+  select(ch, sex, ageClass1)
+
+# 1) process data
+rmark_m1_lwed.cjs.proc <- process.data(
+  m1_lwed_capHist,
+  begin.time = 2009,
+  model = "CJS",
+  groups = "sex",
+  time.intervals = m1_lwed_capIntervals
+  )
+
+# 2) design data
+## 2a)
+rmark_m1_lwed.cjs.ddl <- Rmake.design.data(rmark_m1_lwed.cjs.proc)
+
+## 2b) add ageClass
+
+
+## add effort covariate
+#newTimes <- as.character(unique(c(rmark_m1_lwed.cjs.ddl$Phi$time, rmark_m1_lwed.cjs.ddl$p$time)))
+
+#temp <- data.frame(
+#  time = newTimes,
+#  effort = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2010:2019, "nGroups"]
+#)
+
+#rmark_m1_lwed.cjs.ddl$p <- merge_design.covariates(rmark_m1_lwed.cjs.ddl$p,
+#                                                   temp)
+
+rmark_m1_lwed.cjs.ddl$Phi
+rmark_m1_lwed.cjs.ddl$p
 ```
