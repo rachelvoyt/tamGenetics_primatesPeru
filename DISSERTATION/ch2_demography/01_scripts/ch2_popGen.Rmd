@@ -32,6 +32,7 @@ library(paletteer) # https://r-graph-gallery.com/color-palette-finder.html
 my_colors <- paletteer::paletteer_d("ghibli::PonyoLight")
 print(my_colors)
 
+library(plyr)
 #install_github("nikostourvas/PopGenUtils")
 library("PopGenUtils")
 library(poppr)
@@ -2711,7 +2712,7 @@ lwed_po_run2 <- lwed_po_run2_file %>%
     diff_birthOff.birthPar = as.numeric(birthYear_off) - as.numeric(birthYear_par)
   ) %>%
   
-  relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, diff_birthOff.birthPar, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off) %>%
+  relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
   arrange(offspring, parent) %>%
   # subset to dam/sire with highest posterior for each offspring
   group_by(offspring, sex_par) %>%
@@ -2735,8 +2736,8 @@ simp_po_run2 <- simp_po_run2_file %>%
   na.omit() %>%
   
   # add birthYear and sex
-  merge(., lwed_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
-  merge(., lwed_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
+  merge(., simp_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
+  merge(., simp_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
   
   # add groups
   mutate(
@@ -2768,7 +2769,7 @@ simp_po_run2 <- simp_po_run2_file %>%
     diff_birthOff.birthPar = as.numeric(birthYear_off) - as.numeric(birthYear_par)
   ) %>%
   
-  relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, diff_birthOff.birthPar, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off) %>%
+  relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
   arrange(offspring, parent) %>%
   # subset to dam/sire with highest posterior for each offspring
   group_by(offspring, sex_par) %>%
@@ -2779,6 +2780,7 @@ simp_po_run2 <- simp_po_run2_file %>%
 ```{r}
 # number of parents assigned to each offspring
 temp <- lwed_po_run2 %>%
+  filter(!is.na(birthYear_off)) %>%
   group_by(offspring) %>%
   summarise(count = n()) %>%
   as.data.frame() %>%
@@ -2786,6 +2788,7 @@ temp <- lwed_po_run2 %>%
 table(temp$count)
 
 temp2 <- simp_po_run2 %>%
+  filter(!is.na(birthYear_off)) %>%
   group_by(offspring) %>%
   summarise(count = n()) %>%
   as.data.frame() %>%
@@ -2834,6 +2837,70 @@ simp_sibs_run2 <- read_franzSibs("./DISSERTATION/ch2_demography/02_results/simp/
     twinSetMatch = twinSet_1 == twinSet_2
   ) %>%
   relocate(sample1)
+```
+
+# Reproductive success
+
+```{r}
+temp <- groupMembership %>%
+  pivot_longer(-animalID,
+               names_to = "captureYear",
+               values_to = "groupName") %>%
+  arrange(animalID, captureYear) %>%
+  mutate(fill_down = groupName,
+         fill_up = groupName) %>%
+  group_by(animalID) %>%
+  fill(fill_down) %>%
+  fill(fill_up, .direction = "up") %>%
+  mutate(groupName = if_else(fill_down == fill_up, fill_down, groupName)) %>%
+  ungroup() %>%
+  select(-fill_down, -fill_up) %>%
+ # pivot_wider(id_cols = animalID,
+ #             names_from = "captureYear",
+ #             values_from = "groupName") %>%
+  mutate(captureYear = gsub("grp", "", captureYear)) %>%
+  arrange(as.numeric(animalID), as.numeric(captureYear)) %>%
+  merge(., sampleRef[, c("animalID", "species", "sex", "natalGroup", "birthYear_est")], by = "animalID", all.x = T) %>%
+  distinct()
+
+
+lwedF_repVar <- lwed_po_run2 %>%
+  filter(!is.na(birthYear_off)) %>%
+  filter(sex_par == "F") %>%
+  merge(., temp, by.x = c("animalID_par", "birthYear_off"), by.y = c("animalID", "captureYear"), all.x = T)
+```
+
+## Plots
+
+```{r}
+plot_capOverview_byGroup <- ggplot(capOverview_discrete) +
+  geom_segment(aes(x = captureYear,
+                   xend = nextCapture,
+                   y = groupName,
+                   yend = groupName,
+                   color = as.factor(capID))) +
+  geom_point(aes(x = captureYear, y = groupName, color = as.factor(capID), size = nCaptured)) +
+  scale_x_continuous(breaks = 2009:2019) +
+  facet_grid(rows = vars(species), scales = "free_y") +
+  theme_bw()
+
+lwed_clevFig <- presenceMatrix %>%
+  filter(species == "LWED") %>%
+  mutate(temp = captureYear_last - captureYear_first) %>%
+  filter(temp > 0) %>%
+  arrange(desc(temp)) %>%
+  mutate(animalID = factor(animalID, animalID)) %>%
+  ggplot() +
+  geom_segment(aes(x = 0,
+                   xend = temp,
+                   y = animalID,
+                   yend = animalID,
+                   color = sex)) +
+  labs(x = "", y = "") +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+lwed_clevFig
 ```
 
 # Interbirth intervals
@@ -3170,32 +3237,6 @@ table_genoDispersal %>%
   gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_genoDispersal.png")
 ```
 
-
-
-# Plots
-
-Want to make a Cleveland dot plot
-
-```{r}
-lwed_clevFig <- presenceMatrix %>%
-  filter(species == "LWED") %>%
-  mutate(temp = captureYear_last - captureYear_first) %>%
-  filter(temp > 0) %>%
-  arrange(desc(temp)) %>%
-  mutate(animalID = factor(animalID, animalID)) %>%
-  ggplot() +
-  geom_segment(aes(x = 0,
-                   xend = temp,
-                   y = animalID,
-                   yend = animalID,
-                   color = sex)) +
-  labs(x = "", y = "") +
-  theme_bw() +
-  theme(axis.text.y = element_blank(),
-        axis.ticks.y = element_blank())
-lwed_clevFig
-```
-
 # Mark-recapture
 
 **NEED TO REMEMBER** to account for 1) animalID 87 (SIMP) died during
@@ -3383,7 +3424,7 @@ capOverview_discrete <- capData_2009to2019 %>%
 ```
 
 ```{r}
-ggplot(capOverview_discrete) +
+plot_capOverview_byGroup <- ggplot(capOverview_discrete) +
   geom_segment(aes(x = captureYear,
                    xend = nextCapture,
                    y = groupName,
@@ -3393,6 +3434,8 @@ ggplot(capOverview_discrete) +
   scale_x_continuous(breaks = 2009:2019) +
   facet_grid(rows = vars(species), scales = "free_y") +
   theme_bw()
+
+plot_capOverview_byGroup
 ```
 
 ## Model 1: Age-specific survival (CJS)
