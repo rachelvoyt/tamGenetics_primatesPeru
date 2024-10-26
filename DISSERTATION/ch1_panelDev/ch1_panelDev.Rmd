@@ -2322,23 +2322,23 @@ run4_lociOverview
 
 ```{r}
 # sample lists
-tamRun4_posSamples <- tamRun4_md %>%
+run4_posSamples <- run4_md %>%
   filter(species %in% c("LWED", "SIMP"))
 
-tamRun4_negSamples <- tamRun4_md %>%
+run4_negSamples <- run4_md %>%
   filter(!sampleID_ill %in% tamRun4_posSamples$sampleID_ill)
 
-tamRun4_lwedSamples <- tamRun4_md %>%
+run4_lwedSamples <- run4_md %>%
   filter(species == "LWED")
 
-tamRun4_simpSamples <- tamRun4_md %>%
+run4_simpSamples <- run4_md %>%
   filter(species == "SIMP")
 
 # loci lists
-tamRun4_lwedLoci <- tamRun4_primerProbeFile %>%
+run4_lwedLoci <- tamRun4_primerProbeFile %>%
   filter(!str_detect(Locus, "SIMP"))
 
-tamRun4_simpLoci <- tamRun4_primerProbeFile %>%
+run4_simpLoci <- tamRun4_primerProbeFile %>%
   filter(!str_detect(Locus, "LWED"))
 ```
 
@@ -3624,7 +3624,7 @@ D_j / A_het.j
 
 ```{r}
 library(gt)
-gVers_table <- data.frame(
+table_gVers <- data.frame(
   callType = c("A1HOM", "A2HOM", "HET"),
   v1 = c("[10, inf)", "[0, 0.1]", "(0.2, 5]"),
   v2 = c("[10, inf)", "[0, 0.1]", "(0.2, 2]"),
@@ -3643,9 +3643,341 @@ gVers_table <- data.frame(
     columns = 2:4
   ) %>%
   gt::tab_options(table.font.names = "Times New Roman")
-gVers_table
+table_gVers
 
-gVers_table %>%
+table_gVers %>%
   gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/SI_table1_alleleRatioVersions.png")
+```
+
+# Downsampling tests
+
+Want to see consistency in calls for gtseq vs. gtscore
+
+## Data
+
+```{r}
+run4_readCounts_gtscore <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+```
+
+## Functions
+
+**Coverage filter**
+
+Function to sum the read counts per allele for each locus, using package gsubfn
+
+```{r}
+library(gsubfn)
+
+get_readSum.Recode <- function(readCounts, coverageCutoff) {
+  
+  repl <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
+  
+  readSums <- replace(readCounts, TRUE, lapply(readCounts, repl)) %>%
+    mutate(across(everything(), as.numeric))
+  
+  readCounts[readSums < coverageCutoff] <- NA
+  
+  return(readCounts)
+}
+```
+
+**optimize_samplesLoci**
+
+For a given dataframe of genotypes, this function returns the number of loci genotyped at the desired proportion of n samples ("propSamples") for subsets of 2 to 30 samples
+
+```{r}
+# number of loci genotyped at propSamples (0 to 1.0) of samples from 2 to 30 samples
+optimize_samplesLoci <- function(df, propSamples) {
+  # Initialize an empty list to store results
+  result_list <- list()
+
+  for (n in 2:ncol(df)) {
+    # create matrix where NAs are 0 and non-NAs are 1
+    is_na_vector <- ifelse(is.na(df), 0, 1)
+
+    crossprod_vector <- crossprod(is_na_vector)
+    col_sums <- colSums(crossprod_vector)
+
+    x_df <- as.data.frame(df)  # to get meaningful colnames
+    
+    # use colSums vector to select n columns;
+    # will rank all columns and give the n first;
+    # gives n columns w/the max number of non-NA rows
+    res <- x_df[, rank(-col_sums, ties.method = "first") <= n]
+
+    # Store the result in the list
+    result_list[[as.character(n)]] <- c(n, nrow(res[which(rowMeans(!is.na(res)) >= propSamples), ]))
+  }
+
+  # Convert the list to a dataframe
+  result_df <- do.call(rbind, result_list) %>%
+    as.data.frame()
+
+  # Rename columns
+  colnames(result_df) <- c("samples", "loci")
+
+  return(result_df)
+}
+```
+
+**Subset to optimal samples/loci**
+
+For a given dataframe of genotypes, this function returns an optimized set of genotypes for n_samples, where the number of samples and the proportion of those n samples successfully genotyped per locus (propSamples) is chosen based on the results of function 1 above
+
+```{r}
+optimized_genos <- function(df, n_samples, propSamples) {
+  matrix <- ifelse(is.na(df), 0, 1)
+  crossprod_vector <- crossprod(matrix)
+  col_sums <- colSums(crossprod_vector)
+
+  x_df <- as.data.frame(df)
+  res <- x_df[, rank(-col_sums, ties.method = "first") <= n_samples]
+
+  result <- res[which(rowMeans(!is.na(res)) >= propSamples), ]
+  return(result)
+}
+```
+
+## Analysis
+
+```{r}
+# 1) filter to >= 100x cutoff
+run4_readCounts_gtscore100x <- get_readSum.Recode(run4_readCounts_gtscore, 100) %>%
+  # filter to indid only & remove negs
+  select(run4_posSamples$sampleID_ill) %>%
+  rownames_to_column("locus") %>%
+  # subset to dual-species indid only
+  filter(!str_detect(locus, "LWED|SIMP")) %>%
+  filter(str_detect(locus, "INDID")) %>%
+  column_to_rownames("locus")
+
+# 2) find optimum sample/loci combo given loci are genotyped at 90% of the sample subset
+run4_optSamplesLoci_gtscore100x <- optimize_samplesLoci(run4_readCounts_gtscore100x, 0.9)
+
+# 3) subset readCounts df to optimal sample/loci combo identified above
+run4_readCounts.opt_gtscore100x <- optimized_genos(run4_readCounts_gtscore100x, n_samples = 50, propSamples = 0.9)
+```
+
+**FUNCTION FOR GENO COMPARISON**
+```{r}
+get_dsReadCounts.genoConsistency <- function(
+    alleleReads_file, locusTable, n_reads, n_iterations
+    ) {
+  
+  library(stringi)
+  source("./project_scripts/GTscore/GTscore_modified.R")
+  
+  # prep locus table & reformat locus names
+  locusTable <- locusTable %>%
+    mutate(locus = sub('[_][^_]+$', '', Locus_ID)) %>%
+    filter(locus %in% row.names(alleleReads_file))
+  alleleReads_file <- alleleReads_file %>%
+    rownames_to_column("locus") %>%
+    merge(., locusTable[, c("locus", "Locus_ID")], by = "locus") %>%
+    column_to_rownames("Locus_ID") %>%
+    select(-locus)
+  locusTable <- locusTable %>%
+    select(-locus)
+  
+  # set up a/b string version of read counts
+  df1 <- alleleReads_file %>%
+    rownames_to_column("locus") %>%
+    pivot_longer(!locus,
+                 names_to = "sampleID",
+                 values_to = "readCounts") %>%
+    relocate(sampleID) %>%
+    arrange(sampleID) %>%
+    # separate read counts for allele 1 and allele 2
+    separate(readCounts, into = c("readCounts_a1", "readCounts_a2"), sep = ",") %>%
+    mutate(
+      readCounts_a1 = as.numeric(readCounts_a1),
+      readCounts_a2 = as.numeric(readCounts_a2),
+      
+      # replace NA w/0
+      readCounts_a1 = replace_na(readCounts_a1, 0),
+      readCounts_a2 = replace_na(readCounts_a2, 0)
+    ) %>%
+    # create "a/b" character strings based on allele counts
+    rowwise() %>%
+    mutate(
+      vec_a1 = case_when(
+        readCounts_a1 > 0 ~ paste(replicate(readCounts_a1, "a"), collapse = ""),
+        .default = NA),
+      vec_a2 = case_when(
+        readCounts_a2 > 0 ~ paste(replicate(readCounts_a2, "b"), collapse = ""),
+        .default = NA
+        )
+    )
+  
+  # get downsampled read counts x n_iterations
+  df3 <- data.frame() # initialize empty df
+  
+  for (i in 1:n_iterations) {
+    
+    df2 <- df1 %>%
+      mutate(
+        n_iter = i,
+        # randomly combine "a" and "b" allele strings & combine as a list
+        vec_a1a2 = stri_rand_shuffle(str_c(vec_a1, vec_a2)),
+        # downsample by extracting the first "n_reads" characters
+        # from each string in the list
+        ds_vec_a1a2 = list(substr(vec_a1a2, 1, n_reads)),
+        # count the number of a's & b's in each string in the list,
+        # then convert to read counts
+        ds_readCounts = str_c(str_count(ds_vec_a1a2, "a"),
+                              str_count(ds_vec_a1a2, "b"),
+                              sep = ",")
+        ) %>%
+      select(sampleID, locus, n_iter, ds_readCounts)
+    
+    # append data for each "i"
+    df3 <- bind_rows(df3, df2)
+    
+  }
+  
+  # once we have have df with downsampled read counts for all n_iterations,
+  # reformat for input into GTscore polygen function
+  alleleReads_all.iter <- df3 %>%
+    unite(sampleID, c("sampleID", "n_iter"), sep = "_") %>%
+    pivot_wider(id_cols = locus,
+                names_from = "sampleID",
+                values_from = "ds_readCounts") %>%
+    column_to_rownames("locus")
+  alleleReads_all.iter[is.na(alleleReads_all.iter)] <- "0,0"
+  
+  # genotype w/polygen
+  genos_all.iter <- polyGen(locusTable, alleleReads_all.iter) %>%
+    as.data.frame()
+  
+  # compare genos
+  ## get colnames for later
+  colNames <- str_c("iter_", 1:n_iterations)
+  
+  genoCompare_all.iter <- genos_all.iter %>%
+    t() %>%
+    as.data.frame() %>%
+    rownames_to_column("sampleID") %>%
+    pivot_longer(-sampleID,
+                 names_to = "locus",
+                 values_to = "genos") %>%
+    mutate(genos = na_if(genos, "0")) %>%
+    separate(sampleID, into = c("sampleID", "n_iter"), sep = "_") %>%
+    mutate(n_iter = str_c("iter_", n_iter)) %>%
+    pivot_wider(id_cols = c(sampleID, locus),
+                names_from = n_iter,
+                values_from = genos) %>%
+    merge(., locusTable, by.x = "locus", by.y = "Locus_ID") %>%
+    # Set up genotypes to check against
+    separate(alleles, into = c("allele1", "allele2"), sep = ",") %>%
+    mutate(
+      a1hom = str_c(allele1, allele1, sep = ","),
+      a2hom = str_c(allele2, allele2, sep = ","),
+      het = str_c(allele1, allele2, sep = ",")
+    ) %>%
+    # Generate the counts for each genotype category
+    mutate(
+      n_a1hom = rowSums(select(., all_of(colNames)) == a1hom, na.rm = TRUE),
+      n_a2hom = rowSums(select(., all_of(colNames)) == a2hom, na.rm = TRUE),
+      n_het = rowSums(select(., all_of(colNames)) == het, na.rm = TRUE),
+      
+      totalGenos = rowSums(across(c("n_a1hom", "n_a2hom", "n_het")), na.rm = TRUE),
+      
+      prop_a1hom = n_a1hom / totalGenos,
+      prop_a2hom = n_a2hom / totalGenos,
+      prop_het = n_het / totalGenos
+    ) %>%
+    # remove those w/zero genos assigned
+    filter(totalGenos > 0) %>%
+    # Calculate the max genotype class and proportion match
+    rowwise() %>%
+    mutate(
+      max_genoClass = paste0(names(.[, c("n_a1hom", "n_a2hom", "n_het")])[c_across(n_a1hom:n_het) == max(c_across(n_a1hom:n_het))], collapse = '/'),
+      max_propMatch = max(prop_a1hom, prop_a2hom, prop_het, na.rm = TRUE)
+      ) %>%
+    ungroup() %>%
+    # Select final columns
+    select(sampleID, locus, allele1, allele2, max_genoClass, max_propMatch, totalGenos, prop_a1hom, prop_a2hom, prop_het, n_a1hom, n_a2hom, n_het)
+
+  
+  return(genoCompare_all.iter)
+  
+}
+```
+
+**TEST FUNCTION**
+```{r}
+run4_dsGenoCompare_locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+run4_dsGenoCompare_ds6 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 6,
+  n_iterations = 1000)
+
+run4_dsGenoCompare_ds10 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 10,
+  n_iterations = 1000)
+
+run4_dsGenoCompare_ds15 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 15,
+  n_iterations = 1000)
+
+run4_dsGenoCompare_ds20 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 20,
+  n_iterations = 1000)
+
+run4_dsGenoCompare_ds30 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 30,
+  n_iterations = 1000)
+
+run4_dsGenoCompare_ds50 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 50,
+  n_iterations = 1000)
+
+run4_dsGenoCompare_ds100 <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_gtscore100x,
+  run4_dsGenoCompare_locusTable,
+  n_reads = 100,
+  n_iterations = 1000)
+```
+
+quick look at results:
+
+```{r}
+run4_dsGenoCompare_dsAll <- rbind(
+  run4_dsGenoCompare_ds6 %>% mutate(ds = "6x"),
+  run4_dsGenoCompare_ds10 %>% mutate(ds = "10x"),
+  run4_dsGenoCompare_ds15 %>% mutate(ds = "15x"),
+  run4_dsGenoCompare_ds20 %>% mutate(ds = "20x"),
+  run4_dsGenoCompare_ds30 %>% mutate(ds = "30x"),
+  run4_dsGenoCompare_ds50 %>% mutate(ds = "50x"),
+  run4_dsGenoCompare_ds100 %>% mutate(ds = "100x")
+)
+
+run4_dsGenoCompare_dsAll$ds <- factor(run4_dsGenoCompare_dsAll$ds, levels = c("6x", "10x", "15x", "20x", "30x", "50x", "100x"))
+
+ggplot(run4_dsGenoCompare_dsAll, aes(x = factor(ds), y = max_propMatch)) +
+  geom_boxplot()
+
+run4_dsGenoCompare_dsAll %>%
+  group_by(ds, locus) %>%
+  summarise(
+    mean_maxMatch = mean(max_propMatch)
+  ) %>%
+  ggplot(aes(x = factor(ds), y = mean_maxMatch)) +
+  geom_boxplot()
 ```
 
