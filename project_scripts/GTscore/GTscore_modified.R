@@ -44,7 +44,7 @@ genoSetup<-function(genoData,epsilon=0.01,p_thresh=0.05){
   alleleList<-as.vector(alleleList)    
   alleleList<-sort(as.numeric(alleleList))
   alleleList<-as.character(alleleList)
-  genoCombos<-combn(alleleList,ploidy)
+  genoCombos<-utils::combn(alleleList,ploidy)
   #print(genoCombos)
   GenotypeList<-t(genoCombos)
   possibleGenotypes<-unique(GenotypeList)
@@ -1115,7 +1115,7 @@ IDduplicateSamples<-function(genotypes,MAF=NULL){
   class(genotypes_NAmatrix)<-"numeric"
   
   #identify all unique pairs of samples
-  allPairs<-combn(dim(genotypes)[2], 2)
+  allPairs<-utils::combn(dim(genotypes)[2], 2)
   ncombo<-dim(allPairs)[2]
   nloci<-dim(genotypes)[1]
   message(paste("number of samples:",dim(genotypes)[2],sep=" "))
