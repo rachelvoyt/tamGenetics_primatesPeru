@@ -28,6 +28,12 @@ library(janitor)
 library(seqinr)
 library(tidyverse)
 
+library(paletteer) # https://r-graph-gallery.com/color-palette-finder.html
+my_colors_light <- paletteer::paletteer_d("ghibli::MononokeLight")
+my_colors_med <- paletteer::paletteer_d("ghibli::MononokeMedium")
+print(my_colors_light)
+print(my_colors_med)
+
 source("project_scripts/ggplot_theme_Publication-2.R") # for pretty ggplot themes
 source("project_scripts/ravo_gtScripts.R") # for my custom functions
 ```
@@ -59,7 +65,7 @@ pp_tamRun5 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.
 ## 3.3 sampleRef
 
 ```{r}
-sampleRef <- read.csv("./project_data/sampleID_reference.csv")
+sampleRef <- read.csv("./project_data/master_sampleInfo.csv")
 ```
 
 # 4 SNP panel prep
@@ -2250,9 +2256,6 @@ run3_gtscore0x_genoError_bySample %>%
 
 ```{r}
 run4_md <- read.csv("./04_tamRun4/tamRun4_metadata_illONT.csv")
-
-View(run4_md %>%
-       filter(str_detect(sampleID_unique, "fecal")))
 ```
 
 **Metrics**
@@ -2334,11 +2337,26 @@ run4_lwedSamples <- run4_md %>%
 run4_simpSamples <- run4_md %>%
   filter(species == "SIMP")
 
+run4_bloodSamples <- run4_md %>%
+  filter(sampleType == "blood")
+run4_fecalSamples <- run4_md %>%
+  filter(sampleType == "fecal")
+run4_hairSamples <- run4_md %>%
+  filter(sampleType == "hair")
+
+run4_bfhSamples <- run4_bloodSamples[, c("animalID", "sampleID_ill")] %>%
+  merge(., run4_fecalSamples[, c("animalID", "sampleID_ill")], by = "animalID") %>%
+  dplyr::rename("sampleID_blood" = "sampleID_ill.x",
+                "sampleID_fecal" = "sampleID_ill.y") %>%
+  merge(., run4_hairSamples[, c("animalID", "sampleID_ill")], by = "animalID") %>%
+  dplyr::rename("sampleID_hair" = "sampleID_ill") %>%
+  arrange(sampleID_blood)
+
 # loci lists
-run4_lwedLoci <- tamRun4_primerProbeFile %>%
+run4_lwedLoci <- run4_primerProbeFile %>%
   filter(!str_detect(Locus, "SIMP"))
 
-run4_simpLoci <- tamRun4_primerProbeFile %>%
+run4_simpLoci <- run4_primerProbeFile %>%
   filter(!str_detect(Locus, "LWED"))
 ```
 
@@ -2364,6 +2382,13 @@ run4_readCounts_gtscore <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/i
 Includes genos for gtscore0x, gtscore10x, and gtseq (genotyper_v2)
 
 ```{r, warning=FALSE}
+# gtseq
+run4_genos_gtseq <- get_gtseqGenos_v2(readCounts_df = run4_readCounts_gtseq,
+                                      lociInfo = run4_primerProbeFile,
+                                      mdFile = run4_md,
+                                      sampleID_colName = "sampleID_ill",
+                                      exclude_nonTargetSp = "yes")
+
 # gtscore
 run4_genos_gtscore0x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
   rownames_to_column("locus") %>%
@@ -2374,13 +2399,6 @@ run4_genos_gtscore10x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill
   rownames_to_column("locus") %>%
   mutate(locus = sub('[_][^_]+$', '', locus)) %>%
   column_to_rownames("locus")
-
-# gtseq
-run4_genos_gtseq <- get_gtseqGenos_v2(readCounts_df = run4_readCounts_gtseq,
-                                      lociInfo = run4_primerProbeFile,
-                                      mdFile = run4_md,
-                                      sampleID_colName = "sampleID_ill",
-                                      exclude_nonTargetSp = "yes")
 ```
 
 ### Summaries
@@ -2426,7 +2444,7 @@ run4_gtscore_locusSum_fullSet <- read.csv("./04_tamRun4/00_illumina/03_run4GTsco
 
 run4_gtscore_sampleSum_fullSet <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_individualSummary.txt", sep = "\t") %>%
   mutate(Sample = gsub("-", "\\.", Sample)) %>%
-  merge(., tamRun4_md[, c("sampleID_ill", "species")], by.x = "Sample", by.y = "sampleID_ill") %>%
+  merge(., run4_md[, c("sampleID_ill", "species")], by.x = "Sample", by.y = "sampleID_ill") %>%
   relocate(species, .after = Sample)
 ```
 
@@ -2439,7 +2457,7 @@ run4_gtscore_sampleSum_fullSet <- read.csv("./04_tamRun4/00_illumina/03_run4GTsc
 **all samples + sp-specific loci sets**
 
 ```{r}
-tamRun4_ill_gtscore_sampleSum %>%
+run4_gtscore_sampleSum %>%
   #filter(GenotypeRate_0x >= 0.5) %>%
   group_by(lociSet) %>%
   summarise(
@@ -2459,7 +2477,7 @@ tamRun4_ill_gtscore_sampleSum %>%
 **pos only (no negs) + sp-specific loci sets**
 
 ```{r}
-tamRun4_ill_gtscore_sampleSum %>%
+run4_gtscore_sampleSum %>%
   filter(lociSet != "fullSet") %>%
   #filter(GenotypeRate_0x >= 0.5) %>%
   group_by(lociSet) %>%
@@ -2480,7 +2498,7 @@ tamRun4_ill_gtscore_sampleSum %>%
 **pos only (no negs) + all loci**
 
 ```{r}
-tamRun4_ill_gtscore_sampleSum_lociAll %>%
+run4_gtscore_sampleSum_lociAll %>%
   summarise(
     totalReads = sum(Total.Reads),
     primerReads = sum(Primer.Only.Reads) + sum(Primer.Probe.Reads),
@@ -2499,7 +2517,7 @@ tamRun4_ill_gtscore_sampleSum_lociAll %>%
 **performance by sampleType only**
 
 ```{r}
-tamRun4_ill_gtscore_sampleSum %>%
+run4_gtscore_sampleSum %>%
   filter(lociSet != "fullSet") %>%
   #filter(GenotypeRate_0x >= 0.5) %>%
   group_by(sampleType) %>%
@@ -2988,7 +3006,7 @@ run4_genoCompare_sampleTypes_gtseq_sampleSum %>%
   ylim(0, 100)
 ```
 
-## byLocus
+### byLocus
 
 ```{r}
 
@@ -3620,35 +3638,6 @@ A_het.j = nrow(temp)
 D_j / A_het.j
 ```
 
-# GTseq_Genotyper versions
-
-```{r}
-library(gt)
-table_gVers <- data.frame(
-  callType = c("A1HOM", "A2HOM", "HET"),
-  v1 = c("[10, inf)", "[0, 0.1]", "(0.2, 5]"),
-  v2 = c("[10, inf)", "[0, 0.1]", "(0.2, 2]"),
-  v3 = c("[10, inf)", "[0, 0.1]", "(0.5, 2]")
-) %>%
-  gt() %>%
-  cols_label(
-    callType = md("**Call type**"),
-    # unicode superscript 1, 2, 3
-    v1 = md("Version 1\U00B9"),
-    v2 = md("Version 2\U00B2"),
-    v3 = md("Version 3\U00B3")
-  ) %>%
-  tab_spanner(
-    label = md("**_GTseq_Genotyper.pl_ version**"),
-    columns = 2:4
-  ) %>%
-  gt::tab_options(table.font.names = "Times New Roman")
-table_gVers
-
-table_gVers %>%
-  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/SI_table1_alleleRatioVersions.png")
-```
-
 # Downsampling tests
 
 Want to see consistency in calls for gtseq vs. gtscore
@@ -3664,9 +3653,124 @@ run4_readCounts_gtscore <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/i
 
 ## Functions
 
-**Coverage filter**
+I'll be using the following functions from ravo_ch2Scripts.R:
 
-Function to sum the read counts per allele for each locus, using package gsubfn
+```{r}
+get_readSum.Recode()
+getOptions_optSamplesLoci_bfh()
+getData_optSamplesLoci_bfh()
+get_dsReadCounts.genoConsistency()
+```
+
+optimize three datasets?
+
+**Function 1b:** This function does the same as Function 1a, but allows for optimization based on two genotype files. This means that the specific samples included in any given "n" of "propSamples" are the **same** samples in both the Illumina and Nanopore datasets.
+
+**NOTE:** The two genotype files must be formatted such that the rows and columns are in the exact same order.
+
+210_LWED and 74_SIMP fecal samples
+
+```{r}
+getOptions_optSamplesLoci_bfh <- function(df_blood, df_fecal, df_hair, propSamples) {
+  
+  # Initialize an empty list to store results
+  result_list <- list()
+  
+  # convert genos to binary matrix (NAs = 0, non-NAs = 1)
+  matrix1 <- ifelse(is.na(df_blood), 0, 1)
+  matrix2 <- ifelse(is.na(df_fecal), 0, 1)
+  matrix3 <- ifelse(is.na(df_hair), 0, 1)
+    
+  # multiply matrices
+  matrix_prod <- matrix1 * matrix2 * matrix3
+  
+  # create new combo df (turn 0 back to NA)
+  df4 <- as.data.frame(matrix_prod) %>%
+    mutate(across(everything(), ~na_if(., 0)))
+
+  # identify sample/loci counts w/100% geno success
+  for (n_samples in 2:ncol(df_blood)) {
+  
+    crossprod_vector <- crossprod(matrix_prod)
+    col_sums <- colSums(crossprod_vector)
+
+    x_df <- as.data.frame(df4)  # to get meaningful colnames
+    
+    # use colSums vector to select n columns;
+    # will rank all columns and give the n first;
+    # gives n columns w/the max number of non-NA rows
+    res <- x_df[, rank(-col_sums, ties.method = "first") <= n_samples]
+
+    # Store the result in the list
+    result_list[[as.character(n_samples)]] <- c(n_samples, nrow(res[which(rowMeans(!is.na(res)) >= propSamples), ]))
+  }
+
+  # Convert the list to a dataframe
+  result_df <- do.call(rbind, result_list) %>%
+    as.data.frame()
+
+  # Rename columns
+  colnames(result_df) <- c("samples", "loci")
+
+  return(result_df)
+}
+
+# then get the actual data
+getData_optSamplesLoci_bfh <- function(df_blood, df_fecal, df_hair, colKey, n_samples, propSamples) {
+
+  colnames(df_blood) <- colKey$animalID
+  colnames(df_fecal) <- colKey$animalID
+  colnames(df_hair) <- colKey$animalID
+  
+  # create combo geno matrix
+  matrix1 <- ifelse(is.na(df_blood), 0, 1)
+  matrix2 <- ifelse(is.na(df_fecal), 0, 1)
+  matrix3 <- ifelse(is.na(df_hair), 0, 1)
+  matrix_prod <- matrix1 * matrix2 * matrix3
+  
+  # obtain crossproducts & col sums
+  crossprod_vector <- crossprod(matrix_prod)
+  col_sums <- colSums(crossprod_vector)
+
+  x_df <- as.data.frame(matrix_prod) %>%
+    mutate(across(everything(), ~na_if(., 0)))
+  
+  res <- x_df[, rank(-col_sums, ties.method = "first") <= n_samples]
+
+  result <- res[which(rowMeans(!is.na(res)) >= propSamples), ]
+  
+  # subset each geno file to optimized sample/loci
+  optData_blood <- df_blood %>%
+    filter(row.names(.) %in% rownames(result)) %>%
+    select(colnames(result))
+  
+  optData_fecal <- df_fecal %>%
+    filter(row.names(.) %in% rownames(result)) %>%
+    select(colnames(result))
+  
+  optData_hair <- df_hair %>%
+    filter(row.names(.) %in% rownames(result)) %>%
+    select(colnames(result))
+  
+  # revert colnames to sampleID
+  colKey_opt <- colKey %>%
+    filter(animalID %in% colnames(result))
+  
+  colnames(optData_blood) <- colKey_opt$sampleID_blood
+  colnames(optData_fecal) <- colKey_opt$sampleID_fecal
+  colnames(optData_hair) <- colKey_opt$sampleID_hair
+  
+  optData_fullSet <- cbind(optData_blood, optData_fecal, optData_hair)
+  
+  return(optData_fullSet)
+}
+```
+
+
+
+**get_readSum.Recode**
+
+Function to sum the read counts per allele for each locus, using package gsubfn, then recode all those under the cutoff to "0,0"
 
 ```{r}
 library(gsubfn)
@@ -3689,7 +3793,7 @@ get_readSum.Recode <- function(readCounts, coverageCutoff) {
 For a given dataframe of genotypes, this function returns the number of loci genotyped at the desired proportion of n samples ("propSamples") for subsets of 2 to 30 samples
 
 ```{r}
-# number of loci genotyped at propSamples (0 to 1.0) of samples from 2 to 30 samples
+# number of loci genotyped at propSamples (0 to 1.0) of samples from 2 to ncol(df) samples
 optimize_samplesLoci <- function(df, propSamples) {
   # Initialize an empty list to store results
   result_list <- list()
@@ -3741,10 +3845,12 @@ optimized_genos <- function(df, n_samples, propSamples) {
 }
 ```
 
-## Analysis
+## Run functions
+
+**1) filter to >= 100x coverage**
 
 ```{r}
-# 1) filter to >= 100x cutoff
+# full set
 run4_readCounts_gtscore100x <- get_readSum.Recode(run4_readCounts_gtscore, 100) %>%
   # filter to indid only & remove negs
   select(run4_posSamples$sampleID_ill) %>%
@@ -3754,33 +3860,67 @@ run4_readCounts_gtscore100x <- get_readSum.Recode(run4_readCounts_gtscore, 100) 
   filter(str_detect(locus, "INDID")) %>%
   column_to_rownames("locus")
 
-# 2) find optimum sample/loci combo given loci are genotyped at 90% of the sample subset
+# sample type subsets
+run4_readCounts_gtscore100x_blood <- run4_readCounts_gtscore100x %>%
+  select(run4_bfhSamples$sampleID_blood)
+run4_readCounts_gtscore100x_fecal <- run4_readCounts_gtscore100x %>%
+  select(run4_bfhSamples$sampleID_fecal)
+run4_readCounts_gtscore100x_hair <- run4_readCounts_gtscore100x %>%
+  select(run4_bfhSamples$sampleID_hair)
+```
+
+**2) find optimum sample/loci combo given loci are genotyped at 90% of the sample subset**
+
+```{r}
+# full set
 run4_optSamplesLoci_gtscore100x <- optimize_samplesLoci(run4_readCounts_gtscore100x, 0.9)
 
-# 3) subset readCounts df to optimal sample/loci combo identified above
+# by sample type - drop to 0.7 to get 10 samples + 41 loci
+run4_optSamplesLoci_100x <- getOptions_optSamplesLoci_bfh(
+  run4_readCounts_gtscore100x_blood,
+  run4_readCounts_gtscore100x_fecal,
+  run4_readCounts_gtscore100x_hair, 0.7)
+```
+
+**3) subset readCounts df to optimal sample/loci combo identified above**
+
+```{r}
+# full set
 run4_readCounts.opt_gtscore100x <- optimized_genos(run4_readCounts_gtscore100x, n_samples = 50, propSamples = 0.9)
+
+# by sample type
+run4_readCounts.opt_100x <- getData_optSamplesLoci_bfh(
+  run4_readCounts_gtscore100x_blood,
+  run4_readCounts_gtscore100x_fecal,
+  run4_readCounts_gtscore100x_hair,
+  colKey = run4_bfhSamples,
+  n_samples = 10,
+  propSamples = 0.7)
 ```
 
 **FUNCTION FOR GENO COMPARISON**
 ```{r}
-get_dsReadCounts.genoConsistency <- function(
-    alleleReads_file, locusTable, n_reads, n_iterations
-    ) {
+get_dsReadCounts.genoConsistency <- function(alleleReads_file,
+                                             locusTable,
+                                             whichPipeline = c("gtseq", "gtscore"),
+                                             n_reads,
+                                             n_iterations
+                                             ) {
   
   library(stringi)
   source("./project_scripts/GTscore/GTscore_modified.R")
   
   # prep locus table & reformat locus names
-  locusTable <- locusTable %>%
+  lociKey <- locusTable %>%
     mutate(locus = sub('[_][^_]+$', '', Locus_ID)) %>%
     filter(locus %in% row.names(alleleReads_file))
   alleleReads_file <- alleleReads_file %>%
     rownames_to_column("locus") %>%
-    merge(., locusTable[, c("locus", "Locus_ID")], by = "locus") %>%
+    merge(., lociKey[, c("locus", "Locus_ID")], by = "locus") %>%
     column_to_rownames("Locus_ID") %>%
     select(-locus)
   locusTable <- locusTable %>%
-    select(-locus)
+    filter(Locus_ID %in% rownames(alleleReads_file))
   
   # set up a/b string version of read counts
   df1 <- alleleReads_file %>%
@@ -3848,9 +3988,13 @@ get_dsReadCounts.genoConsistency <- function(
     column_to_rownames("locus")
   alleleReads_all.iter[is.na(alleleReads_all.iter)] <- "0,0"
   
-  # genotype w/polygen
-  genos_all.iter <- polyGen(locusTable, alleleReads_all.iter) %>%
-    as.data.frame()
+  # genotype w/allele-ratio (gtseq) or max-likelihood (gtscore)
+  if (whichPipeline == "gtseq") {
+    genos_all.iter <- get_gtseqGenos_v2_simple(locusTable, alleleReads_all.iter)
+  } else {
+    genos_all.iter <- polyGen(locusTable, alleleReads_all.iter) %>%
+      as.data.frame()
+  }
   
   # compare genos
   ## get colnames for later
@@ -3898,86 +4042,424 @@ get_dsReadCounts.genoConsistency <- function(
       max_propMatch = max(prop_a1hom, prop_a2hom, prop_het, na.rm = TRUE)
       ) %>%
     ungroup() %>%
-    # Select final columns
-    select(sampleID, locus, allele1, allele2, max_genoClass, max_propMatch, totalGenos, prop_a1hom, prop_a2hom, prop_het, n_a1hom, n_a2hom, n_het)
-
+    # make note of pipeline used
+    mutate(pipeline = as.character(whichPipeline)) %>%
+    # select final columns
+    select(pipeline, sampleID, locus, allele1, allele2, max_genoClass, max_propMatch, totalGenos, prop_a1hom, prop_a2hom, prop_het, n_a1hom, n_a2hom, n_het)
   
   return(genoCompare_all.iter)
   
 }
 ```
 
-**TEST FUNCTION**
+**4) Run geno comparison function**
+
 ```{r}
+source("project_scripts/ravo_gtScripts.R") # for my custom functions
+
 run4_dsGenoCompare_locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
 
-run4_dsGenoCompare_ds6 <- get_dsReadCounts.genoConsistency(
+# gtseq
+## (can't do ds6x w/gtseq due to 10x cutoff)
+
+run4_dsGenoCompare_ds10.ar <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtseq",
+  n_reads = 10,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds20.ar <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtseq",
+  n_reads = 20,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds30.ar <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtseq",
+  n_reads = 30,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds50.ar <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtseq",
+  n_reads = 50,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds100.ar <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtseq",
+  n_reads = 100,
+  n_iterations = 100)
+
+# GTSCORE
+run4_dsGenoCompare_ds6.ml <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtscore",
+  n_reads = 6,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds10.ml <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtscore",
+  n_reads = 10,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds20.ml <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtscore",
+  n_reads = 20,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds30.ml <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtscore",
+  n_reads = 30,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds50.ml <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtscore",
+  n_reads = 50,
+  n_iterations = 100)
+
+run4_dsGenoCompare_ds100.ml <- get_dsReadCounts.genoConsistency(
+  run4_readCounts.opt_100x,
+  run4_dsGenoCompare_locusTable,
+  whichPipeline = "gtscore",
+  n_reads = 100,
+  n_iterations = 100)
+```
+
+1000 iteration version below (gtscore only):
+```{r}
+# OLD!!!
+# 1000 iterations - just keep for now
+run4_dsGenoCompare_locusTable <- read.delim("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+run4_dsGenoCompare_ds6_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 6,
   n_iterations = 1000)
 
-run4_dsGenoCompare_ds10 <- get_dsReadCounts.genoConsistency(
+run4_dsGenoCompare_ds10_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 10,
   n_iterations = 1000)
 
-run4_dsGenoCompare_ds15 <- get_dsReadCounts.genoConsistency(
+run4_dsGenoCompare_ds15_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 15,
   n_iterations = 1000)
 
-run4_dsGenoCompare_ds20 <- get_dsReadCounts.genoConsistency(
+run4_dsGenoCompare_ds20_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 20,
   n_iterations = 1000)
 
-run4_dsGenoCompare_ds30 <- get_dsReadCounts.genoConsistency(
+run4_dsGenoCompare_ds30_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 30,
   n_iterations = 1000)
 
-run4_dsGenoCompare_ds50 <- get_dsReadCounts.genoConsistency(
+run4_dsGenoCompare_ds50_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 50,
   n_iterations = 1000)
 
-run4_dsGenoCompare_ds100 <- get_dsReadCounts.genoConsistency(
+run4_dsGenoCompare_ds100_1k <- get_dsReadCounts.genoConsistency(
   run4_readCounts.opt_gtscore100x,
   run4_dsGenoCompare_locusTable,
   n_reads = 100,
   n_iterations = 1000)
 ```
 
-quick look at results:
+## Analysis
+
+### Reformat data
 
 ```{r}
-run4_dsGenoCompare_dsAll <- rbind(
-  run4_dsGenoCompare_ds6 %>% mutate(ds = "6x"),
-  run4_dsGenoCompare_ds10 %>% mutate(ds = "10x"),
-  run4_dsGenoCompare_ds15 %>% mutate(ds = "15x"),
-  run4_dsGenoCompare_ds20 %>% mutate(ds = "20x"),
-  run4_dsGenoCompare_ds30 %>% mutate(ds = "30x"),
-  run4_dsGenoCompare_ds50 %>% mutate(ds = "50x"),
-  run4_dsGenoCompare_ds100 %>% mutate(ds = "100x")
-)
+run4_dsGenoCompare_dsAll.ar <- rbind(
+  run4_dsGenoCompare_ds10.ar %>% mutate(ds = "10x"),
+  run4_dsGenoCompare_ds20.ar %>% mutate(ds = "20x"),
+  run4_dsGenoCompare_ds30.ar %>% mutate(ds = "30x"),
+  run4_dsGenoCompare_ds50.ar %>% mutate(ds = "50x"),
+  run4_dsGenoCompare_ds100.ar %>% mutate(ds = "100x")
+) %>%
+  mutate(
+    max_genoClass = gsub("n_", "", max_genoClass),
+    pipeline = factor(pipeline, levels = c("gtseq", "gtscore")),
+    ds = factor(ds, levels = c("6x", "10x", "15x", "20x", "30x", "50x", "100x"))
+    ) %>%
+  merge(., sampleRef[, c("sampleID", "sampleType")], by = "sampleID") %>%
+  relocate(pipeline, ds, sampleID, sampleType) %>%
+  arrange(ds, sampleID, locus) %>%
+  mutate(ttestID = row_number()) %>%
+  relocate(ttestID)
 
-run4_dsGenoCompare_dsAll$ds <- factor(run4_dsGenoCompare_dsAll$ds, levels = c("6x", "10x", "15x", "20x", "30x", "50x", "100x"))
+run4_dsGenoCompare_dsAll.ml <- rbind(
+  run4_dsGenoCompare_ds6.ml %>% mutate(ds = "6x"),
+  run4_dsGenoCompare_ds10.ml %>% mutate(ds = "10x"),
+  run4_dsGenoCompare_ds20.ml %>% mutate(ds = "20x"),
+  run4_dsGenoCompare_ds30.ml %>% mutate(ds = "30x"),
+  run4_dsGenoCompare_ds50.ml %>% mutate(ds = "50x"),
+  run4_dsGenoCompare_ds100.ml %>% mutate(ds = "100x")
+) %>%
+  mutate(
+    max_genoClass = gsub("n_", "", max_genoClass),
+    pipeline = factor(pipeline, levels = c("gtseq", "gtscore")),
+    ds = factor(ds, levels = c("6x", "10x", "15x", "20x", "30x", "50x", "100x"))
+    ) %>%
+  merge(., sampleRef[, c("sampleID", "sampleType")], by = "sampleID") %>%
+  relocate(pipeline, ds, sampleID, sampleType) %>%
+  arrange(ds, sampleID, locus) %>%
+  mutate(ttestID = row_number() - 1055,
+         ttestID = case_when(
+           ttestID < 0 ~ NA,
+           .default = ttestID
+         )) %>%
+  relocate(ttestID)
 
-ggplot(run4_dsGenoCompare_dsAll, aes(x = factor(ds), y = max_propMatch)) +
-  geom_boxplot()
+run4_dsGenoCompare_dsAll.arML <- rbind(run4_dsGenoCompare_dsAll.ar,
+                                       run4_dsGenoCompare_dsAll.ml)
+```
 
-run4_dsGenoCompare_dsAll %>%
-  group_by(ds, locus) %>%
+### Quick metrics
+
+GTseq (AR):
+-   low = 10x = 0.963 +/- 0.0936
+-   high = 100x = 0.991 +/- 0.0518
+
+GTscore (ML):
+-   low = 6x = 0.923 +/- 0.113
+-   10x = 0.963 +/- 0.0943
+-   high = 100x = 0.985 +/- 0.0654
+
+```{r}
+run4_dsGenoCompare_dsAll.arML %>%
+  group_by(pipeline, ds) %>%
+  summarise(
+    mean = mean(max_propMatch),
+    sd = sd(max_propMatch)
+  )
+```
+
+### Overall AR vs. ML
+
+```{r}
+# 10x - p = 0.932
+ttest.10x <- t.test(run4_dsGenoCompare_ds10.ar$max_propMatch, run4_dsGenoCompare_ds10.ml$max_propMatch, paired = T, alternative = "two.sided")
+
+# 20x - p = < 2.2e-16
+ttest.20x <- t.test(run4_dsGenoCompare_ds20.ar$max_propMatch, run4_dsGenoCompare_ds20.ml$max_propMatch, paired = T, alternative = "two.sided")
+
+# 30x - p < 2.2e-16
+ttest.30x <- t.test(run4_dsGenoCompare_ds30.ar$max_propMatch, run4_dsGenoCompare_ds30.ml$max_propMatch, paired = T, alternative = "two.sided")
+
+# 50x - p = 1.537e-09
+ttest.50x <- t.test(run4_dsGenoCompare_ds50.ar$max_propMatch, run4_dsGenoCompare_ds50.ml$max_propMatch, paired = T, alternative = "two.sided")
+
+# 100x - p = 1.767e-07
+ttest.100x <- t.test(run4_dsGenoCompare_ds100.ar$max_propMatch, run4_dsGenoCompare_ds100.ml$max_propMatch, paired = T, alternative = "two.sided")
+```
+
+### Geno class separated
+
+```{r}
+test <- run4_dsGenoCompare_dsAll.arML %>%
+  filter(ds != "6x") %>%
+  filter(!str_detect(max_genoClass, "/")) %>%
+  group_by(ds, max_genoClass) %>%
+  summarise(
+    tidy(t.test(max_propMatch ~ pipeline))
+  )
+
+View(test %>% filter(p.value < 0.05))
+```
+
+## Tables
+
+```{r}
+table_ttest_dsGenoCompare <- data.frame(
+  t = c(ttest.10x$statistic, ttest.20x$statistic, ttest.30x$statistic, ttest.50x$statistic, ttest.100x$statistic),
+  #df = c(ttest.10x$parameter, ttest.20x$parameter, ttest.30x$parameter, ttest.50x$parameter, ttest.100x$parameter),
+  p = c(ttest.10x$p.value, ttest.20x$p.value, ttest.30x$p.value, ttest.50x$p.value, ttest.100x$p.value),
+  d = c(ttest.10x$estimate, ttest.20x$estimate, ttest.30x$estimate, ttest.50x$estimate, ttest.100x$estimate),
+  lci = c(ttest.10x$conf.int[1], ttest.20x$conf.int[1], ttest.30x$conf.int[1], ttest.50x$conf.int[1], ttest.100x$conf.int[1]),
+  uci = c(ttest.10x$conf.int[2], ttest.20x$conf.int[2], ttest.30x$conf.int[2], ttest.50x$conf.int[2], ttest.100x$conf.int[2])
+) %>%
+  round(., 3) %>%
+  mutate(depth = c("10x", "20x", "30x", "50x", "100x")) %>%
+  relocate(depth) %>%
+  mutate(
+    p = case_when(
+      p < 0.001 ~ "< 0.001***",
+      .default = as.character(p)
+      ),
+    ci = str_c("[", as.character(lci), ",", as.character(uci), "]")
+    ) %>%
+  select(-lci, -uci) %>%
+  
+  gt() %>%
+  cols_label(
+    depth = "Depth",
+    t = md("*t*"),
+    p = md("*p*"),
+    d = md("*d*"),
+    ci = "95% CI"
+  ) %>%
+  cols_align(., align = "center", columns = everything())
+
+table_ttest_dsGenoCompare
+
+table_ttest_dsGenoCompare %>%
+  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/table_ttest_dsGenoCompare.png")
+```
+
+
+## Plots
+
+```{r}
+# Variation in mean geno consistency for gtseq vs. gtscore
+plot1_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  #filter(ds != "6x") %>%
+  group_by(pipeline, ds, locus) %>%
   summarise(
     mean_maxMatch = mean(max_propMatch)
   ) %>%
-  ggplot(aes(x = factor(ds), y = mean_maxMatch)) +
-  geom_boxplot()
+  ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = pipeline)) +
+  geom_boxplot(position = position_dodge2(preserve = "single")) +
+  theme_bw() +
+  scale_fill_manual(values = c("#9FA7BEFF", "#E7A79BFF")) +
+  labs(x = "Read depth",
+       y = "Mean genotype concordance") +
+  guides(fill = guide_legend(title = "Pipeline"))
+plot1_dsGenoCompare_ar.vs.ml
+
+# Variation in mean geno consistency for each sample type for AR vs. ML
+plot2_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  filter(ds != "6x") %>%
+  group_by(sampleType, pipeline, ds, locus) %>%
+  summarise(
+    mean_maxMatch = mean(max_propMatch)
+  ) %>%
+  ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = sampleType)) +
+  geom_boxplot(position = position_dodge2(preserve = "single")) +
+  theme_bw() +
+  scale_fill_manual(values = c("#E7A79BFF", "#9FA7BEFF", "#F2C695FF")) +
+  labs(x = "Read depth",
+       y = "Mean genotype concordance") +
+  guides(fill = guide_legend(title = "Sample type")) +
+  facet_grid(rows = vars(pipeline))
+plot2_dsGenoCompare_ar.vs.ml
+
+# Variation in mean geno consistency for each geno class for AR vs. ML
+plot3_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  filter(ds != "6x") %>%
+  filter(!str_detect(max_genoClass, "/")) %>%
+  group_by(max_genoClass, pipeline, ds, locus) %>%
+  summarise(
+    mean_maxMatch = mean(max_propMatch)
+  ) %>%
+  ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = pipeline)) +
+  geom_boxplot(position = position_dodge2(preserve = "single")) +
+  theme_bw() +
+  scale_fill_manual(values = c("#E7A79BFF", "#9FA7BEFF", "#F2C695FF")) +
+  labs(x = "Read depth",
+       y = "Mean genotype concordance") +
+  guides(fill = guide_legend(title = "Pipeline")) +
+  facet_grid(cols = vars(max_genoClass))
+plot3_dsGenoCompare_ar.vs.ml
+
+# Variation in mean geno consistency for each geno class for AR vs. ML
+plot4_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  filter(ds != "6x") %>%
+  filter(!str_detect(max_genoClass, "/")) %>%
+  group_by(pipeline, sampleType, max_genoClass, ds, locus) %>%
+  summarise(
+    mean_maxMatch = mean(max_propMatch)
+  ) %>%
+  ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = pipeline)) +
+  geom_boxplot(position = position_dodge2(preserve = "single")) +
+  theme_bw() +
+  scale_fill_manual(values = c("#9FA7BEFF", "#E7A79BFF")) +
+  labs(x = "Read depth",
+       y = "Mean genotype concordance") +
+  guides(fill = guide_legend(title = "Pipeline")) +
+  facet_grid(cols = vars(max_genoClass), rows = vars(sampleType))
+plot4_dsGenoCompare_ar.vs.ml
 ```
+
+# Plots (general)
+
+## Panel optimization
+
+```{r}
+table_panelDev <- data.frame(
+  
+)
+```
+
+## GTseq_Genotyper versions
+
+```{r}
+library(gt)
+table_gVers <- data.frame(
+  callType = c("A1HOM", "A2HOM", "HET"),
+  v1 = c("[10, inf)", "[0, 0.1]", "(0.2, 5]"),
+  v2 = c("[10, inf)", "[0, 0.1]", "(0.2, 2]"),
+  v3 = c("[10, inf)", "[0, 0.1]", "(0.5, 2]")
+) %>%
+  gt() %>%
+  cols_label(
+    callType = md("**Call type**"),
+    # unicode superscript 1, 2, 3
+    v1 = md("Version 1\U00B9"),
+    v2 = md("Version 2\U00B2"),
+    v3 = md("Version 3\U00B3")
+  ) %>%
+  tab_spanner(
+    label = md("**_GTseq_Genotyper.pl_ version**"),
+    columns = 2:4
+  ) %>%
+  gt::tab_options(table.font.names = "Times New Roman")
+table_gVers
+
+table_gVers %>%
+  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/SI_table1_alleleRatioVersions.png")
+```
+
+
 
