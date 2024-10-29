@@ -479,7 +479,6 @@ data.frame(
 )
 ```
 
-
 # 4 Filter genos
 
 Prior to using genotyping results in additional analyses, I'm using the
