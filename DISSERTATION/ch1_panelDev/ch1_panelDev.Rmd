@@ -2374,16 +2374,11 @@ run4_readCounts_gtseq <- read.csv("./04_tamRun4/00_illumina/04_run4GTseq/gtseq_r
   mutate(across(everything(), \(x) gsub("/", ",", x))) %>%
   t() %>%
   as.data.frame()
-
-run4_readCounts_gtscore <- read.delim("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE) %>%
-  rownames_to_column("locus") %>%
-  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
-  column_to_rownames("locus")
 ```
 
 ### Genos
 
-Includes genos for gtscore0x, gtscore10x, and gtseq (genotyper_v2)
+Includes genos for gtseq (genotyper_v2)
 
 ```{r, warning=FALSE}
 # gtseq
@@ -2392,17 +2387,6 @@ run4_genos_gtseq <- get_gtseqGenos_v2(readCounts_df = run4_readCounts_gtseq,
                                       mdFile = run4_md,
                                       sampleID_colName = "sampleID_ill",
                                       exclude_nonTargetSp = "yes")
-
-# gtscore
-run4_genos_gtscore0x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
-  rownames_to_column("locus") %>%
-  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
-  column_to_rownames("locus")
-
-run4_genos_gtscore10x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
-  rownames_to_column("locus") %>%
-  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
-  column_to_rownames("locus")
 ```
 
 ### Summaries
@@ -2419,11 +2403,11 @@ run4_gtseq_locusSum <- get_genoSuccess(genoFile = run4_genos_gtseq,
                                            exclude_nonTargetSp = "yes")
 
 run4_gtseq_sampleSum <- get_genoSuccess(genoFile = run4_genos_gtseq,
-                                            lociFile = run4_primerProbeFile,
-                                            mdFile = run4_md,
-                                            by = "bySample",
-                                            sampleID_colName = "sampleID_ill",
-                                            exclude_nonTargetSp = "yes") %>%
+                                        lociFile = run4_primerProbeFile,
+                                        mdFile = run4_md,
+                                        by = "bySample",
+                                        sampleID_colName = "sampleID_ill",
+                                        exclude_nonTargetSp = "yes") %>%
   merge(., run4_md[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill")
 
 # gtscore
@@ -2650,7 +2634,132 @@ tamRun4_ill_gtscore_locusSum %>%
   )
 ```
 
-## 7.4 Geno success
+## 7.4 Filter genos
+
+### Poor performance
+
+```{r}
+run4_lwed_genos_temp <- run4_genos_gtseq %>%
+  # 1. subset to lwed samples only
+  select(run4_lwedSamples$sampleID_ill) %>%
+  # 2. remove simp-specific loci
+  filter(!str_detect(rownames(.), "SIMP")) %>%
+  # 3. remove SNPs with >50% missing data
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.5)) %>%
+  # 4. remove samples with >50% missing data
+  filter((rowSums(!is.na(.)) / ncol(.)) >= 0.5)
+
+run4_simp_genos_temp <- run4_genos_gtseq %>%
+  # 1. subset to simp samples only
+  select(run4_simpSamples$sampleID_ill) %>%
+  # 2. remove simp-specific loci
+  filter(!str_detect(rownames(.), "LWED")) %>%
+  # 3. remove SNPs with >50% missing data
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.5)) %>%
+  # 4. remove samples with >50% missing data
+  filter((rowSums(!is.na(.)) / ncol(.)) >= 0.5)
+```
+
+### Species/sex checks
+
+**Species checks**
+
+One to remove - fecal sample tamRun4.053/animalID 210 (in the lwed subset)
+
+```{r}
+run4_speciesChecks_lwed <- assignSpecies(
+  genoFile = run4_lwed_genos_temp,
+  mdFile = run4_md,
+  sampleID_colName = "sampleID_ill") %>%
+  filter(sampleID %in% run4_posSamples$sampleID_ill)
+
+run4_speciesChecks_simp <- assignSpecies(
+  genoFile = run4_simp_genos_temp,
+  mdFile = run4_md,
+  sampleID_colName = "sampleID_ill") %>%
+  filter(sampleID %in% run4_posSamples$sampleID_ill)
+
+# tamRun4.053 to remove
+run4_toRemove_speciesChecks_lwed <- run4_speciesChecks_lwed %>%
+  filter(mdMatch == F) %>%
+  select(sampleID) %>%
+  pull()
+
+# none to remove
+run4_toRemove_speciesChecks_simp <- run4_speciesChecks_simp %>%
+  filter(mdMatch == F) %>%
+  select(sampleID) %>%
+  pull()
+```
+
+**Sex checks**
+
+tamRun4.022 (lwed set) & tamRun4.027 (simp set) both had majority mismatch; both are blood samples though so nbd
+
+```{r}
+run4_sexChecks_lwed <- assignSex(run4_lwed_genos_temp, run4_md, "sampleID_ill", exclude_nonTargetSp = "yes") %>%
+  #filter(mdMatch == FALSE) %>%
+  mutate(
+    majSex = case_when(
+      propF > propM ~ "F",
+      propM > propF ~ "M",
+      .default = NA
+    ),
+    mdMajMatch = mdSex == majSex
+  ) %>%
+  relocate(c(majSex, mdMajMatch), .after = "mdSex")
+
+run4_sexChecks_simp <- assignSex(run4_simp_genos_temp, run4_md, "sampleID_ill", exclude_nonTargetSp = "yes") %>%
+  #filter(mdMatch == FALSE) %>%
+  mutate(
+    majSex = case_when(
+      propF > propM ~ "F",
+      propM > propF ~ "M",
+      .default = NA
+    ),
+    mdMajMatch = mdSex == majSex
+  ) %>%
+  relocate(c(majSex, mdMajMatch), .after = "mdSex")
+```
+
+### Clean genos
+
+```{r}
+run4_genos_clean_lwed <- run4_lwed_genos_temp %>%
+  select(!all_of(run4_toRemove_speciesChecks_lwed))
+
+run4_genos_clean_simp <- run4_simp_genos_temp
+```
+
+### Clean summaries
+
+```{r}
+temp1 <- run4_genos_clean_lwed %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(possibleGenos = ncol(.),
+         totalGenos = rowSums(!is.na(.))-1,
+         genoSuccess = totalGenos / possibleGenos) %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID, genoSuccess)
+temp2 <- run4_genos_clean_simp %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(possibleGenos = ncol(.),
+         totalGenos = rowSums(!is.na(.))-1,
+         genoSuccess = totalGenos / possibleGenos) %>%
+  rownames_to_column("sampleID") %>%
+  select(sampleID, genoSuccess)
+
+run4_gtseq_sampleSum_clean <- rbind(temp1, temp2) %>%
+  merge(., sampleRef[, c("sampleID", "animalID", "sampleType")], by = "sampleID") %>%
+  relocate(animalID) %>%
+  select(-sampleID)
+
+table(run4_gtseq_sampleSum_clean$sampleType)
+```
+
+## 7.5 Geno success
 
 ### overall
 
@@ -2660,12 +2769,6 @@ mean(run4_gtseq_sampleSum$genoSuccess) # 0.6384836
 
 # remove underperforming loci, then samples
 
-
-
-# 3. remove SNPs with >50% missing data
-  select(where(~sum(!is.na(.x))/length(.x) >= 0.5)) %>%
-  # 4. remove samples with >50% missing data
-  filter((rowSums(!is.na(.)) / ncol(.)) >= 0.5)
 ```
 
 ### by_sampleType
@@ -3083,6 +3186,7 @@ run4_readCounts_posDual_gtscore <- run4_readCounts_gtscore %>%
 ### Genos
 
 ```{r}
+# gtseq
 run4_genos_posDual_gtseq <- run4_genos_gtseq %>%
   select(run4_posSamples$sampleID_ill) %>%
   rownames_to_column("locus") %>%
@@ -3090,6 +3194,18 @@ run4_genos_posDual_gtseq <- run4_genos_gtseq %>%
   pivot_longer(!locus,
                names_to = "sampleID",
                values_to = "genos_gt")
+
+# gtscore
+# gtscore
+run4_genos_gtscore0x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_0x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
+
+run4_genos_gtscore10x <- read.table("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
+  column_to_rownames("locus")
 
 run4_genos_posDual_gtscore <- run4_genos_gtscore0x %>%
   select(run4_posSamples$sampleID_ill) %>%
@@ -4188,6 +4304,36 @@ plot2b_dsGenoCompare_arOnly <- run4_dsGenoCompare_dsAll.arML %>%
        y = "Mean genotype concordance") +
   guides(fill = guide_legend(title = "Sample type"))
 plot2b_dsGenoCompare_arOnly
+
+# booo no signif diffs 
+test <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  filter(pipeline == "Allele-ratio") %>%
+  filter(!ds %in% c("3x", "6x")) %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by = "sampleID") %>%
+  pivot_wider(id_cols = c(ds, animalID, locus),
+              names_from = sampleType,
+              values_from = max_propMatch) %>%
+  pivot_longer(-c(ds, animalID, locus),
+               names_to = "sampleType",
+               values_to = "max_propMatch") %>%
+  nest_by(ds) %>%
+  mutate(w.test = list(rstatix::pairwise_wilcox_test(
+    detailed = T,
+    formula = max_propMatch ~ sampleType,
+    paired = T,
+    data = data))) %>%
+  select(-data) %>%
+  ungroup %>%
+  unnest(c(w.test))
+test %>%
+  select(ds, group1, group2, estimate, statistic, p, p.adj.signif) %>%
+  gt()
+
+
 
 # Variation in mean geno consistency for each geno class for AR vs. ML
 plot3_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
