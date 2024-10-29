@@ -500,13 +500,69 @@ get_gtseqGenos_v2 <- function(readCounts_df, lociInfo, mdFile, sampleID_colName 
   
 }
 
-# 1) get_gtseqGenos_v2 - based on GTseq_Genotyper_v2.pl
+# 1) get_gtseqGenos_v2_simple - based on GTseq_Genotyper_v2.pl;
+# "simple" version just does the calculations, doesn't separate
+# by species or anything
 ## Inputs:
 ### - "readCounts" column name; readCounts should be formatted as "x,x"
 ### - "locus" column name; loci names should match those in the lociInfo file
-### - "lociInfo" dataframe; with columns Locus, Allele1, Allele2
+### - "locusTable" dataframe; use the one from GTscore w/cols Locus_ID, ploidy, alleles
 
-get_gtseqGenos_v2_OLD <- function(readCounts, locus, lociInfo) {
+get_gtseqGenos_v2_simple <- function(locusTable, readCounts_df) {
+  
+  # assign genos
+  geno_df <- readCounts_df %>%
+    rownames_to_column("locus") %>%
+    pivot_longer(!locus,
+                 names_to = "sampleID",
+                 values_to = "readCounts") %>%
+    # calculate allele ratios
+    separate(readCounts, into = c("a1", "a2")) %>%
+    mutate(
+      a1 = as.numeric(a1),
+      a2 = as.numeric(a2),
+      
+      a1 = case_when(
+        a1 == 0 ~ 0.1,
+        .default = a1
+      ),
+      a2 = case_when(
+        a2 == 0 ~ 0.1,
+        .default = a2
+      ),
+      
+      ratio = case_when(
+        a1 + a2 < 10 ~ NA,
+        .default = round(a1 / a2, 3)
+      )
+    ) %>%
+    # assign genos
+    merge(., locusTable[, c("Locus_ID", "alleles")], by.x = "locus", by.y = "Locus_ID") %>%
+    separate(alleles, into = c("allele1", "allele2")) %>%
+    mutate(
+      genos = case_when(
+        ratio >= 10 ~ str_c(allele1, allele1, sep = ","),
+        ratio <= 0.1 ~ str_c(allele2, allele2, sep = ","),
+        ratio <= 0.2 ~ NA_character_,
+        ratio <= 5 ~ str_c(allele1, allele2, sep = ","),
+        TRUE ~ NA_character_  # Default case
+      )
+    ) %>%
+    select(sampleID, locus, genos) %>%
+    pivot_wider(names_from = sampleID,
+                values_from = genos) %>%
+    column_to_rownames("locus")
+  
+  return(geno_df)
+}
+
+
+## version of gtseq v2 genotyper when dealing with long-format columns:
+
+get_gtseqGenos_v2_byColumn <- function(readCounts_colName, locus_colName, lociInfo) {
+  
+  readCounts <- readCounts_colName
+  locus <- locus_colName
   
   # Get allele ratio and genotype for one entry
   getRatio_and_assignGeno <- function(rc, locus) {
