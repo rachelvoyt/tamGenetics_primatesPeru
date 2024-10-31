@@ -435,7 +435,8 @@ sampleRef2 <- read.csv("./project_data/master_sampleInfo.csv") %>%
   merge(., capData_2009to2023[, c("animalID", "captureYear", "groupName")], by.x = c("animalID", "birthYear_est"), by.y = c("animalID", "captureYear"), all.x = T) %>%
   dplyr::rename("natalGroup" = "groupName") %>%
   merge(., deathData[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
-  relocate(-c(birthDate_est, birthYear_est, natalGroup, deathYear_est))
+  relocate(-c(birthDate_est, birthYear_est, natalGroup, deathYear_est)) %>%
+  distinct()
 
 write.csv(sampleRef2, "./project_data/master_sampleInfo_v2.csv", row.names = F)
 ```
