@@ -68,7 +68,7 @@ pp_tamRun5 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.
 ## 3.3 sampleRef
 
 ```{r}
-sampleRef <- read.csv("./project_data/master_sampleInfo.csv")
+sampleRef <- read.csv("./project_data/master_sampleInfo_v2.csv")
 ```
 
 # 4 SNP panel prep
@@ -2386,7 +2386,8 @@ run4_genos_gtseq <- get_gtseqGenos_v2(readCounts_df = run4_readCounts_gtseq,
                                       lociInfo = run4_primerProbeFile,
                                       mdFile = run4_md,
                                       sampleID_colName = "sampleID_ill",
-                                      exclude_nonTargetSp = "yes")
+                                      exclude_nonTargetSp = "yes") %>%
+  select(run4_posSamples$sampleID_ill)
 ```
 
 ### Summaries
@@ -2409,42 +2410,38 @@ run4_gtseq_sampleSum <- get_genoSuccess(genoFile = run4_genos_gtseq,
                                         sampleID_colName = "sampleID_ill",
                                         exclude_nonTargetSp = "yes") %>%
   merge(., run4_md[, c("sampleID_ill", "sampleType")], by.x = "sampleID", by.y = "sampleID_ill")
-
-# gtscore
-run4_gtscore_locusSum <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_locusSummary.csv")
-
-run4_gtscore_sampleSum <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/summaryFiles/ill_master_sampleSummary.csv")
-```
-
-**metrics include other combos - fullset samples/loci, etc.**
-
-```{r}
-# gtscore
-run4_gtscore_locusSum_lwed_simpSpec <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_lwed_simpSpec_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
-  mutate(sampleSet = "lwedSamples") %>%
-  relocate(sampleSet, .after = Locus)
-
-run4_gtscore_locusSum_simp_lwedSpec <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_simp_lwedSpec_GTscore_locusSummary.txt", header = T, sep = "\t") %>%
-  mutate(sampleSet = "simpSamples") %>%
-  relocate(sampleSet, .after = Locus)
-
-run4_gtscore_locusSum_fullSet <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_locusSummary.txt", sep = "\t")
-
-run4_gtscore_sampleSum_fullSet <- read.csv("./04_tamRun4/00_illumina/03_run4GTscore/ill_fullSet_GTscore_individualSummary.txt", sep = "\t") %>%
-  mutate(Sample = gsub("-", "\\.", Sample)) %>%
-  merge(., run4_md[, c("sampleID_ill", "species")], by.x = "Sample", by.y = "sampleID_ill") %>%
-  relocate(species, .after = Sample)
 ```
 
 ## 7.3 Read metrics
 
-### bySample
+## by_sampleType
+
+ahhh I've messed up and put geno success stuff here...
+
+```{r}
+run4_gtseq_sampleSum %>%
+  group_by(sampleType) %>%
+  summarise(
+    mean_genoSuccess = mean(genoSuccess, na.rm = T),
+    sd_genoSuccess = sd(genoSuccess, na.rm = T)
+  )
+```
+
+### bySample OLD STUFF BELOW
 
 #### lociSets
 
+```{r}
+
+```
+
+
+skip stuff below -- OLD
 **all samples + sp-specific loci sets**
 
 ```{r}
+# SKIP
+
 run4_gtscore_sampleSum %>%
   #filter(GenotypeRate_0x >= 0.5) %>%
   group_by(lociSet) %>%
@@ -2465,22 +2462,7 @@ run4_gtscore_sampleSum %>%
 **pos only (no negs) + sp-specific loci sets**
 
 ```{r}
-run4_gtscore_sampleSum %>%
-  filter(lociSet != "fullSet") %>%
-  #filter(GenotypeRate_0x >= 0.5) %>%
-  group_by(lociSet) %>%
-  summarise(
-    totalReads = sum(Total.Reads),
-    primerReads = sum(Primer.Only.Reads) + sum(Primer.Probe.Reads),
-    otReads = sum(Primer.Probe.Reads)
-  ) %>%
-  as.data.frame() %>%
-  janitor::adorn_totals() %>%
-  mutate(
-    otProp = round(otReads/primerReads, 2),
-    primerProp = round(primerReads/totalReads, 2)
-  ) %>%
-  relocate(lociSet, otProp, otReads, primerProp, primerReads, totalReads)
+
 ```
 
 **pos only (no negs) + all loci**
@@ -2761,47 +2743,76 @@ table(run4_gtseq_sampleSum_clean$sampleType)
 
 ## 7.5 Geno success
 
-### overall
+### Pre-filter
 
 ```{r}
-# raw
-mean(run4_gtseq_sampleSum$genoSuccess) # 0.6384836
-
-# remove underperforming loci, then samples
-
+run4_gtseq_sampleSum %>%
+  group_by(sampleType) %>%
+  summarise(
+    mean_genoSuccess = mean(genoSuccess, na.rm = T),
+    sd_genoSuccess = sd(genoSuccess, na.rm = T)
+  )
 ```
 
-### by_sampleType
+#### Stats
 
-**gtseq**
-
-before ditching failed samples: sampleType mean_genoSuccess
-min_genoSuccess max_genoSuccess med_genoSuccess <chr> <dbl> <dbl> <dbl>
-<dbl> 1 blood 0.816 0 0.977 0.893 2 fecal 0.727 0.0694 0.983 0.815 3
-hair 0.488 0 0.909 0.601
-
-after: sampleType mean_genoSuccess min_genoSuccess max_genoSuccess
-med_genoSuccess <chr> <dbl> <dbl> <dbl> <dbl> 1 blood 0.887 0.571 0.977
-0.903 2 fecal 0.804 0.526 0.983 0.828 3 hair 0.736 0.583 0.909 0.723
+Below I'm using the pairwise_wilcox_test() from package rstatix. Choice is based on the following:
+1.    Shapiro tests shows that data is not normally distributed, so need a non-parametric test
+2.    pairwise_wilcox_test() (vs. regular wilcox_test) automatically adjusts for multiple comparisons (e.g., across all different sample types)
+3.    paired = T lets me utilize each indiv's paired values, ensures test follows paired data structure
+4.    adjusted p-value output applies corrections for multiple testing
 
 ```{r}
 run4_gtseq_genoSuccess_bySample <- run4_gtseq_sampleSum %>%
   merge(., run4_md[, c("sampleID_ill", "animalID", "species")], by.x = "sampleID", by.y = "sampleID_ill") %>%
   filter(!str_detect(animalID, "Neg")) %>%
-  select(animalID, sampleType, genoSuccess) #%>%
-  #pivot_wider(id_cols = animalID,
-#              names_from = sampleType,
-#              values_from = genoSuccess)
+  select(animalID, sampleType, genoSuccess)
 
-run4_gtseq_genoSuccess_bySample %>%
-  group_by(sampleType) %>%
-  summarise(
-    mean_genoSuccess = mean(genoSuccess),
-    min_genoSuccess = min(genoSuccess),
-    max_genoSuccess = max(genoSuccess),
-    med_genoSuccess = median(genoSuccess)
-    )
+temp <- run4_gtseq_genoSuccess_bySample %>%
+  pivot_wider(id_cols = animalID,
+              names_from = sampleType,
+              values_from = genoSuccess)
 
+# none are normally distributed >> run wilcox vs. t-test
+shapiro.test(temp$blood) # 1.468e-07
+shapiro.test(temp$fecal) # 0.000103
+shapiro.test(temp$hair) # 0.001348
+
+run4_stat.test_genoSuccess_bySampleType <- run4_gtseq_genoSuccess_bySample %>%
+  rstatix::pairwise_wilcox_test(genoSuccess ~ sampleType, paired = T) %>%
+  rstatix::add_xy_position(x = "sampleType")
+run4_stat.test_genoSuccess_bySampleType$groups
+```
+
+#### Plots
+
+make a figure like Burgess et al., 2022 fig. 5a/b
+
+```{r}
+# gtseq -- FIGURE_1.1
+run4_gtseq_sampleSum %>%
+  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
+  mutate(genoSuccess = genoSuccess*100) %>%
+  ggplot(aes(x = sampleType, y = genoSuccess, shape = sampleType, color = sampleType)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_jitter(0.2)) +
+  scale_shape_manual(values = c(1, 17, 19)) +
+  geom_hline(yintercept = 50, linetype = 2) +
+  stat_pvalue_manual(run4_stat.test_genoSuccess_bySampleType, label = "p.adj.signif", tip.length = 0.01, inherit.aes = F, bracket.nudge.y = 100, step.increase = 0.07) +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
+  scale_color_manual(values = c("#CD4F38FF", "#3D4F7DFF", "#E48C2AFF")) +
+  theme_bw() +
+  labs(x = "Sample type",
+       y = "Percent loci genotyped") +
+  theme(legend.position = "none")
+
+my_colors_med
+my_colors_light
+```
+
+### Post-filter
+
+```{r}
 run4_gtseq_genoSuccess_bySample_over50 <- run4_gtseq_genoSuccess_bySample %>%
   filter(genoSuccess >= 0.5) %>%
   merge(., run4_md[, c("sampleID_ill", "sampleType", "animalID")], by = c("animalID", "sampleType")) %>%
@@ -2813,6 +2824,7 @@ run4_gtseq_genoSuccess_bySample_over50 %>%
   group_by(sampleType) %>%
   summarise(
     mean_genoSuccess = mean(genoSuccess),
+    sd_genoSuccess = sd(genoSuccess),
     min_genoSuccess = min(genoSuccess),
     max_genoSuccess = max(genoSuccess),
     med_genoSuccess = median(genoSuccess)
@@ -2827,92 +2839,7 @@ run4_gtseq_genoSuccess_bySample_setsOver50 <- run4_gtseq_genoSuccess_bySample %>
          hair >= 0.5)
 ```
 
-**gtscore**
-
-```{r}
-run4_gtscore_sampleSum %>%
-  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
-  group_by(sampleType) %>%
-  summarise(
-    mean_genoSuccess_0x = round(mean(GenotypeRate_0x), 2),
-    mean_genoSuccess_10x = round(mean(GenotypeRate_10x), 2)
-  )
-```
-
-#### Stats
-
-Below I'm using the pairwise_wilcox_test() from package rstatix. Choice is based on the following:
-1.    Shapiro tests shows that data is not normally distributed, so need a non-parametric test
-2.    pairwise_wilcox_test() (vs. regular wilcox_test) automatically adjusts for multiple comparisons (e.g., across all different sample types)
-3.    paired = T lets me utilize each indiv's paired values, ensures test follows paired data structure
-4.    adjusted p-value output applies corrections for multiple testing
-
-```{r}
-temp <- run4_gtseq_genoSuccess_bySample %>%
-  pivot_wider(id_cols = animalID,
-              names_from = sampleType,
-              values_from = genoSuccess)
-
-shapiro.test(temp$blood) # 1.468e-07
-shapiro.test(temp$fecal) # 0.000103
-shapiro.test(temp$hair) # 0.001348
-
-run4_stat.test_genoSuccess_bySampleType <- run4_gtseq_genoSuccess_bySample %>%
-  rstatix::pairwise_wilcox_test(genoSuccess ~ sampleType, paired = T) %>%
-  add_xy_position(x = "sampleType")
-run4_stat.test_genoSuccess_bySampleType
-```
-
-### Plots
-
-make a figure like Burgess et al., 2022 fig. 5a/b
-
-```{r}
-# gtseq -- FIGURE_1.1
-run4_gtseq_sampleSum %>%
-  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
-  mutate(genoSuccess = genoSuccess*100) %>%
-  ggplot(aes(x = sampleType, y = genoSuccess, shape = sampleType, color = sampleType)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position = position_jitter(0.2)) +
-  scale_shape_manual(values = c(1, 17, 19)) +
-  geom_hline(yintercept = 50, linetype = 2) +
-  stat_pvalue_manual(run4_stat.test_genoSuccess_bySampleType, label = "p.adj.signif", tip.length = 0.01) +
-  scale_color_manual(values = c("#CD4F38FF", "#3D4F7DFF", "#E48C2AFF")) +
-  theme_bw() +
-  labs(x = "Sample type",
-       y = "Percent loci genotyped") +
-  theme(legend.position = "none")
-
-my_colors_med
-my_colors_light
-```
-
-```{r}
-# gtscore0x
-run4_gtscore_sampleSum %>%
-  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
-  ggplot(aes(x = sampleType, y = GenotypeRate_0x, shape = sampleType, color = sampleType)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position = position_jitter(0.2)) +
-  scale_shape_manual(values = c(1, 17, 19)) +
-  scale_colour_Publication() +
-  theme_Publication()
-```
-
-```{r}
-# gtscore10x
-run4_gtscore_sampleSum %>%
-  filter(sampleType %in% c("blood", "fecal", "hair")) %>%
-  ggplot(aes(x = sampleType, y = GenotypeRate_10x, shape = sampleType, color = sampleType)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position = position_jitter(0.2)) +
-  scale_shape_manual(values = c(1, 17, 19)) +
-  scale_colour_Publication() +
-  theme_Publication()
-```
-
-## 7.5 Species/sex assignments
+## 7.6 Species/sex assignments
 
 ### Species
 
@@ -2987,6 +2914,13 @@ run4_sexAssignments_gtseq %>%
     maxGenos = max(totalGenos_sex)
   )
 
+# all sex genos matched metadata - 
+table(run4_sexAssignments_gtseq$mdMatch)
+60/68 # 88.2
+# majority sex genos matched metadata - 97.0%
+table(run4_sexAssignments_gtseq$mdMatch_sexMajority)
+64/68 # 94.1
+
 run4_sexAssignments_gtseq %>%
   group_by(sampleType) %>%
   summarise(
@@ -2998,11 +2932,204 @@ run4_sexAssignments_gtseq %>%
   ) %>%
   as.data.frame() %>%
   mutate(
-    totalGenos = mdMatch + mdMismatch,
-    propMatch = mdMatch/totalGenos,
-    propMatch_majority = mdMatch_maj/totalGenos
+    totalSamples = mdMatch + mdMismatch,
+    propMatch = mdMatch/totalSamples,
+    propMatch_majority = mdMatch_maj/totalSamples
   )
 ```
+
+## 7.7 Filter genos
+
+Remove those with < 50% geno success AND tamRun4.053 (mismatch species assignment)
+
+```{r}
+run4_genos_gtseq_clean <- run4_genos_gtseq %>%
+  select(run4_gtseq_genoSuccess_bySample_over50$sampleID) %>%
+  select(-tamRun4.053)
+```
+
+## 7.7 PID, PIDsibs
+
+### Create genind
+
+```{r}
+run4_lwed_genos_forGenind <- run4_genos_gtseq_clean %>%
+  # indid for lwed only
+  filter(!str_detect(rownames(.), "SIMP|SPECIES|SEX")) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "sampleType")], by = "sampleID") %>%
+  relocate(sampleType, .after = sampleID)
+run4_simp_genos_forGenind <- run4_genos_gtseq_clean %>%
+  # indid for simp only
+  filter(!str_detect(rownames(.), "LWED|SPECIES|SEX")) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "sampleType")], by = "sampleID") %>%
+  relocate(sampleType, .after = sampleID)
+
+# by sample type
+run4_lwed_genos_forGenind_b <- run4_lwed_genos_forGenind %>%
+  filter(sampleType == "blood") %>% select(-sampleType)
+run4_lwed_genos_forGenind_f <- run4_lwed_genos_forGenind %>%
+  filter(sampleType == "fecal") %>% select(-sampleType)
+run4_lwed_genos_forGenind_h <- run4_lwed_genos_forGenind %>%
+  filter(sampleType == "hair") %>% select(-sampleType)
+
+run4_simp_genos_forGenind_b <- run4_simp_genos_forGenind %>%
+  filter(sampleType == "blood") %>% select(-sampleType)
+run4_simp_genos_forGenind_f <- run4_simp_genos_forGenind %>%
+  filter(sampleType == "fecal") %>% select(-sampleType)
+run4_simp_genos_forGenind_h <- run4_simp_genos_forGenind %>%
+  filter(sampleType == "hair") %>% select(-sampleType)
+
+# genind
+run4_lwed_genind_blood <- adegenet::df2genind(X = run4_lwed_genos_forGenind_b[,c(2:155)],
+                                  sep = ",",
+                                  ind.names = run4_lwed_genos_forGenind_b$sampleID,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+run4_lwed_genind_fecal <- adegenet::df2genind(X = run4_lwed_genos_forGenind_f[,c(2:155)],
+                                  sep = ",",
+                                  ind.names = run4_lwed_genos_forGenind_f$sampleID,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+run4_lwed_genind_hair <- adegenet::df2genind(X = run4_lwed_genos_forGenind_h[,c(2:155)],
+                                  sep = ",",
+                                  ind.names = run4_lwed_genos_forGenind_h$sampleID,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+
+run4_simp_genind_blood <- adegenet::df2genind(X = run4_simp_genos_forGenind_b[,c(2:155)],
+                                  sep = ",",
+                                  ind.names = run4_simp_genos_forGenind_b$sampleID,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+run4_simp_genind_fecal <- adegenet::df2genind(X = run4_simp_genos_forGenind_f[,c(2:155)],
+                                  sep = ",",
+                                  ind.names = run4_simp_genos_forGenind_f$sampleID,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+run4_simp_genind_hair <- adegenet::df2genind(X = run4_simp_genos_forGenind_h[,c(2:155)],
+                                  sep = ",",
+                                  ind.names = run4_simp_genos_forGenind_h$sampleID,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+```
+
+### Calculations
+
+```{r}
+run4_lwed_pidPerm_blood <- PopGenUtils::pid_permute(obj = run4_lwed_genind_blood, nrep = 1000)
+run4_lwed_pidPerm_fecal <- PopGenUtils::pid_permute(obj = run4_lwed_genind_fecal, nrep = 1000)
+run4_lwed_pidPerm_hair <- PopGenUtils::pid_permute(obj = run4_lwed_genind_hair, nrep = 1000)
+
+run4_simp_pidPerm_blood <- PopGenUtils::pid_permute(obj = run4_simp_genind_blood, nrep = 1000)
+run4_simp_pidPerm_fecal <- PopGenUtils::pid_permute(obj = run4_simp_genind_fecal, nrep = 1000)
+run4_simp_pidPerm_hair <- PopGenUtils::pid_permute(obj = run4_simp_genind_hair, nrep = 1000)
+```
+
+### Analysis
+
+```{r}
+# LWED
+run4_lwed_pidPerm_data <- rbind(
+  run4_lwed_pidPerm_blood$median_values %>% mutate(sampleType = "blood"),
+  run4_lwed_pidPerm_fecal$median_values %>% mutate(sampleType = "fecal"),
+  run4_lwed_pidPerm_hair$median_values %>% mutate(sampleType = "hair"))
+
+## PID meets 0.0001 threshold at 11 (blood) or 12 loci (fecal/hair)
+run4_lwed_pid.thresh <- run4_lwed_pidPerm_data %>%
+  group_by(sampleType) %>%
+  filter(PID < 0.0001) %>%
+  summarise(
+    nLoci = loci[1], # First locus where PID meets threshold
+    pidThresh = PID[1]
+  )
+  
+# original code for above (w/o splitting by sampleType): as.numeric(run4_lwed_pidPerm_data[which(run4_lwed_pidPerm_data$PID < 0.0001, arr.ind=TRUE)[1],][[1]])
+
+## PIDsibs meets 0.0001 threshold at 21 (blood), 22 (fecal), and 23 (hair) loci
+run4_lwed_pidSibs.thresh <- run4_lwed_pidPerm_data %>%
+  group_by(sampleType) %>%
+  filter(PIDsibs < 0.0001) %>%
+  summarise(
+    nLoci = loci[1], # First locus where PID meets threshold
+    pidThresh = PIDsibs[1]
+  )
+
+# SIMP
+run4_simp_pidPerm_data <- rbind(
+  run4_simp_pidPerm_blood$median_values %>% mutate(sampleType = "blood"),
+  run4_simp_pidPerm_fecal$median_values %>% mutate(sampleType = "fecal"),
+  run4_simp_pidPerm_hair$median_values %>% mutate(sampleType = "hair"))
+
+## PID meets 0.0001 threshold at 11 (blood/fecal) or 12 loci (hair)
+run4_simp_pid.thresh <- run4_simp_pidPerm_data %>%
+  group_by(sampleType) %>%
+  filter(PID < 0.0001) %>%
+  summarise(
+    nLoci = loci[1],
+    pidThresh = PID[1]
+  )
+
+## PIDsibs meets 0.0001 threshold at 21 (blood/fecal) and 23 (hair) loci
+run4_simp_pidSibs.thresh <- run4_simp_pidPerm_data %>%
+  group_by(sampleType) %>%
+  filter(PIDsibs < 0.0001) %>%
+  summarise(
+    nLoci = loci[1], # First locus where PID meets threshold
+    pidThresh = PIDsibs[1]
+  )
+```
+
+## 5.3 Plots
+
+```{r}
+pidPerm_data_forFig <- lwed_pidPerm$results %>%
+  mutate(species = "LWED") %>%
+  rbind(., simp_pidPerm$results %>% mutate(species = "SIMP"))
+
+pidThreshLines_forFig <- data.frame(species = c("LWED", "SIMP"),
+                                    vline = c(lwed_pid.thresh,
+                                              simp_pid.thresh))
+pidSibThreshLines_forFig <- data.frame(species = c("LWED", "SIMP"),
+                                    vline = c(lwed_pidSibs.thresh,
+                                              simp_pidSibs.thresh))
+
+pidPerm_fig <- ggplot(pidPerm_data_forFig,
+                      aes(y = value,
+                          x = loci,
+                          color = statistic)) +
+  geom_boxplot() +
+  scale_colour_Publication() +
+  theme_Publication() +
+  
+  scale_x_discrete(limits = as.character(1:25)) +
+  geom_vline(data = pidThreshLines_forFig,
+             aes(xintercept = vline),
+                 color = "#386cb0") +
+  geom_vline(data = pidSibThreshLines_forFig,
+             aes(xintercept = vline),
+             color = "#fdb462") +
+  
+  labs(x = "Number of loci",
+       y = "Probability of identity") +
+  facet_grid(rows = vars(species))
+
+pidPerm_fig
+
+  xlab("Number of loci")
+```
+
 
 ## 7.6 Sample type discordance
 
