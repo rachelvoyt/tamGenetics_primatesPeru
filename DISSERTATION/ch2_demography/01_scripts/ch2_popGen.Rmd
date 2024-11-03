@@ -29,10 +29,13 @@ library(gtExtras)
 library(hierfstat)
 
 library(paletteer) # https://r-graph-gallery.com/color-palette-finder.html
-my_colors <- paletteer::paletteer_d("ghibli::PonyoLight")
-print(my_colors)
+my_colors_light <- paletteer::paletteer_d("ghibli::PonyoLight")
+my_colors_med <- paletteer::paletteer_d("ghibli::PonyoMedium")
+my_colors_peru <- paletteer::paletteer_d("MetBrewer::Peru1")
+my_colors_klein <- paletteer::paletteer_d("MoMAColors::Klein")
+my_colors_cont <- paletteer::paletteer_c("ggthemes::Sunset-Sunrise Diverging", n = 1)
 
-library(plyr)
+#library(plyr)
 #install_github("nikostourvas/PopGenUtils")
 library("PopGenUtils")
 library(poppr)
@@ -59,6 +62,12 @@ source("./project_scripts/ravo_gtScripts.R")
 source("./project_scripts/GTscore/GTscore_modified.R")
 source("project_scripts/ggplot_theme_Publication-2.R") # for pretty ggplot themes
 ```
+
+nice colors:
+khroma::batlowK for continuous
+
+MoMAColors::Klein -- pretty and bright
+MetBrewer::Peru1
 
 # 3 Data
 
@@ -338,7 +347,6 @@ capData_2009to2019_first.lastEntry <- capData_2009to2019_antiSort[match(unique(c
   )
 ```
 
-
 ## Indivs present per year
 
 Maybe good to get a list of who was present in the population each year??
@@ -415,71 +423,7 @@ groupMembership <- capData_2009to2019 %>%
   relocate(c(animalID, grp2009, grp2010, grp2011, grp2012, grp2013, grp2014))
 ```
 
-## Age at first dispersal
-
-```{r}
-dispersal <- groupMembership %>%
-  # filter to known birth years only
-  filter(animalID %in% birthAssignments$animalID) %>%
-  pivot_longer(!animalID,
-               names_to = "year",
-               values_to = "groupName") %>%
-  na.omit() %>%
-  merge(., birthAssignments, by = "animalID") %>%
-  mutate(
-    year = as.numeric(gsub("grp", "", year)),
-    age = year - birthYear_est
-    ) %>%
-  # ditch age -1 (just the two in 2009 and they have other values that make it so doing this doesn't matter)
-  filter(age >= 0) %>%
-  select(species, animalID, age, groupName, year) %>%
-  # remove indivs captured only once
-  group_by(animalID) %>%
-  filter(n()>1) %>%
-  ungroup() %>%
-  arrange(species, animalID, age)
-  
-  
-  mutate(
-    year = gsub("grp", "", year),
-    grp_age0 = case_when(
-      year == birthYear_est ~ groupName,
-      .default = NA
-    ),
-    grp_age1 = case_when(
-      year == birthYear_est + 1 ~ groupName,
-      .default = NA
-    ),
-    grp_age2 = case_when(
-      year == birthYear_est + 2 ~ groupName,
-      .default = NA
-    )
-  )
-  
-mutate(
-    year = gsub("grp", "", year),
-    grp_age0 = case_when(
-      year == birthYear_est ~ groupName,
-      .default = NA
-    ),
-    grp_age1 = case_when(
-      year == birthYear_est + 1 ~ groupName,
-      .default = NA
-    ),
-    grp_age2 = case_when(
-      year == birthYear_est + 2 ~ groupName,
-      .default = NA
-    )
-  )
-
-data.frame(
-  grp_yr0 = xxx,
-  grp_yr1 = xxx,
-  grp_yr2 = xxx
-)
-```
-
-# 4 Filter genos
+# 5 Filter genos
 
 Prior to using genotyping results in additional analyses, I'm using the
 following filters for quality control:
@@ -494,7 +438,7 @@ following filters for quality control:
     2.  Remove samples with \>50% missing data
     3.  Remove loci with minor allele freq \<0.03
 
-## 4.1 Species/sex checks
+## 5.1 Species/sex checks
 
 ### species checks
 
@@ -546,7 +490,7 @@ toRemove_sexChecks <- sexChecks %>%
   pull()
 ```
 
-## 4.2 Dup checks
+## 5.2 Dup checks
 
 Here I'm using my version of the GTscore "IDduplicateSamples" function;
 I modified it only slightly so that I could use a dataframe as input vs.
@@ -577,7 +521,7 @@ run5_sampleSum %>% filter(Sample %in% c(run5_likelyDups$Sample1, run5_likelyDups
 toRemove_dupChecks <- "tamRun5.264"
 ```
 
-## 4.3 Poor performance
+## 5.3 Poor performance
 
 I found that some of the loci that were supposed to be sex-specific
 sometimes showed some variation in the other species -- as such, I'm
@@ -681,7 +625,7 @@ simp_toRemove_afChecks <- simp_alleleFreqs %>%
   pull()
 ```
 
-## 4.4 Final genos
+## 5.4 Final genos
 
 ### genos
 
@@ -729,7 +673,7 @@ simp_genind@other$birthYear <- simp_genos$birthYear_est
 simp_genind@other$captureYear <- simp_genos$captureYear
 ```
 
-## 4.5 Quick overview of filtered geno data:
+## 5.5 Quick overview of filtered geno data:
 
 Retained LWED data include... - 72 indivs + 53 loci - avg 94% geno
 success among samples - 43 non-juvs, 29 juvs
@@ -755,293 +699,9 @@ sum(is.na(simp_genos$birthYear_est)) # 27 non-juvs remaining
 sum(!is.na(simp_genos$birthYear_est)) # 28 juvs remaining
 ```
 
-# 5 Basic popGen
-
-adegenet hierfstat, inbreedR
-
-## Data
-
-```{r}
-lwed_genos_popgen.hf <- genind2hierfstat(lwed_genind) %>%
-  filter(pop != "dumpop") %>%
-  select(-pop) %>%
-  rownames_to_column("sampleID")
-
-simp_genos_popgen.hf <- genind2hierfstat(simp_genind) %>%
-  filter(pop != "dumpop") %>%
-  select(-pop) %>%
-  rownames_to_column("sampleID")
-```
-
-## 5.1 Descriptive stats
-
-we can use the summary() function from 'adegenet' to provide the
-following: - Number of alleles per locus - Observed heterozygosity -
-Expected heterozygosity
-
-Ho - observed heterozygosity; proportion of heterozygotes observed at each locus
-Hs - gene diversity w/in subpops (expected heterozygosity w/in groups); calculated based on allele freqs
-Ht - gene diversity across entire pop; total expected heterozygosity
-Dst - genetic diversity b/t subpops
-Htp - total gene diversity accounting for diffs among pops (NA b/c no b/t-subpop diversity)
-Dstp - prop of total gene diversity due to diffs b/t pops
-Fst - fixation index; measures pop differentiation due to genetic structure; 0 here indicates no differentiation b/t subpops
-Fstp - similar to Fst, but accounts for differentiation b/t pops (NA b/c no subpops)
-Fis - inbreeding coefficient w/in subpops, compares Ho to Hs; + values suggest deficit of hets (inbreeding), (-) values suggest excess hets
-Dest - Jost's D (measure of differentiation); NA b/c no differentiation detected
-
-```{r}
-# LWED
-lwed_genind_sum <- adegenet::summary(lwed_genind)
-lwed_genind_sum
-
-lwed_basicStats <- basic.stats(lwed_genind)
-lwed_basicStats
-
-mean(lwed_basicStats$Ho, na.rm = T) # 0.460
-min(lwed_basicStats$Ho, na.rm = T) # 0.169
-max(lwed_basicStats$Ho, na.rm = T) # 0.612
-
-mean(lwed_basicStats$Hs, na.rm = T) # 0.457
-min(lwed_basicStats$Hs, na.rm = T) # 0.179
-max(lwed_basicStats$Hs, na.rm = T) # 0.504
-
-lwed_basicStats$overall # Ht = 0.457
-
-# SIMP
-simp_genind_sum <- adegenet::summary(simp_genind)
-simp_genind_sum
-simp_basicStats <- basic.stats(simp_genind)
-simp_basicStats
-
-mean(simp_basicStats$Ho, na.rm = T) # 0.434
-min(simp_basicStats$Ho, na.rm = T) # 0.058
-max(simp_basicStats$Ho, na.rm = T) # 0.611
-
-mean(simp_basicStats$Hs, na.rm = T) # 0.439
-min(simp_basicStats$Hs, na.rm = T) # 0.128
-max(simp_basicStats$Hs, na.rm = T) # 0.505
-
-simp_basicStats$overall # Ht 0.4390
-```
-
-## F-stats
-
-The fixation index (FST)
-
-Get per-locus f-stats w/pegas:
-
-```{r}
-library(pegas)
-lwed_ftab <- Fst(as.loci(lwed_genind))
-lwed_ftab
-wc(lwed_genind)
-
-simp_ftab <- Fst(as.loci(simp_genind))
-simp_ftab
-wc(simp_genind)
-
-data("microbov")
-microbov$tab
-seppop(microbov)$Salers
-```
-
-## Inbreeding
-
-**With adegenet:**
-
-LWED:
-```{r}
-# compute mean inbreeding for each individual
-lwed_meanInbreed <- adegenet::inbreeding(lwed_genind, res.type = "estimate")
-
-# plot resulting distribution:
-lwed_Fbar <- sapply(lwed_meanInbreed, mean)
-hist(lwed_Fbar, main = "Avg inbreeding in saddleback tamarins")
-
-# someone has high inbreeding (>0.4); that someone is tamaRun5.360
-which(lwed_Fbar > 0.4)
-
-# tamRun5.360 distribution def shows inbreeding, w/~50% chance of being homozygote through inheritance from a common ancestor of its parents
-lwed_F <- inbreeding(lwed_genind, res.type = "function")[which(lwed_Fbar>0.4)]
-lwed_F
-plot(lwed_F$tamRun5.360, main = "Inbreeding of individual", xlab = "Inbreeding (F)", ylab = "Probability density")
-```
-
-SIMP:
-```{r}
-# compute mean inbreeding for each individual
-simp_meanInbreed <- adegenet::inbreeding(simp_genind, res.type = "estimate")
-
-# plot resulting distribution:
-simp_Fbar <- sapply(simp_meanInbreed, mean)
-hist(simp_Fbar, main = "Avg inbreeding in emperor tamarins")
-
-# someone has high inbreeding (>0.4); that someone is tamRun5.197 & tamRun5.249 
-which(simp_Fbar > 0.4)
-
-# tamRun5.197 also has 50%ish chance of being homozygote, while tamRun5.249 has 60%ish chance
-simp_F <- inbreeding(simp_genind, res.type = "function")[which(simp_Fbar>0.4)]
-simp_F
-plot(simp_F$tamRun5.197, main = "Inbreeding of tamRun5.197", xlab = "Inbreeding (F)", ylab = "Probability density")
-plot(simp_F$tamRun5.249, main = "Inbreeding of tamRun5.249", xlab = "Inbreeding (F)", ylab = "Probability density")
-```
-
-**With inbreedR:**
-
-```{r}
-library(inbreedR)
-```
-
-LWED:
-```{r}
-lwed_genos_ir <- lwed_genind$tab %>%
-  convert_raw(.)
-
-# g2
-g2_lwed <- g2_snps(lwed_genos_ir, nperm = 1000, nboot = 1000, CI = 0.95, parallel = F, ncores = NULL)
-g2_lwed
-# calculate sMLH
-het_lwed <- sMLH(lwed_genos_ir)
-het_lwed
-# variance in sMLH
-het.var_lwed <- var(het_lwed)
-het.var_lwed
-# r2 b/t inbreeding and heterozygosity
-hf_lwed <- r2_hf(lwed_genos_ir, type = "snps", nboot = 10)
-
-hhc_lwed <- HHC(lwed_genos_ir, reps = 100)
-
-plot(g2_lwed, col = "#94C5CCFF")
-plot(hhc_lwed, col = "#94C5CCFF")
-```
-
-SIMP:
-```{r}
-simp_genos_ir <- simp_genind$tab %>%
-  convert_raw(.)
-
-# g2
-g2_simp <- g2_snps(simp_genos_ir, nperm = 1000, nboot = 1000, CI = 0.95, parallel = F, ncores = NULL)
-g2_simp
-# calculate sMLH
-het_simp <- sMLH(simp_genos_ir)
-het_simp
-# variance in sMLH
-het.var_simp <- var(het_simp)
-het.var_simp
-# r2 b/t inbreeding and heterozygosity
-hf_simp <- r2_hf(simp_genos_ir, type = "snps", nboot = 10)
-
-plot(g2_simp, col = "#94C5CCFF")
-```
-
-## Bartlett test
-
-We can then test whether there's a significant difference exists between
-mean observed and expected heterozygosity values using the **Bartlett
-test of homogeneity of variances**.
-
-There appears to be a significant different between observed and
-expected heterozygosity for both LWED and SIMP
-
-```{r}
-# LWED
-## p = 0.001065
-bartlett.test(list(lwed_genind_sum$Hexp, lwed_genind_sum$Hobs)) 
-
-t.test(lwed_genind_sum$Hexp, lwed_genind_sum$Hobs, paired = T, var.equal = T, alternative = "greater")
-
-# SIMP
-## p = 0.001576
-bartlett.test(list(simp_genind_sum$Hexp, simp_genind_sum$Hobs)) 
-
-t.test(simp_genind_sum$Hexp, simp_genind_sum$Hobs, paired = T, var.equal = T, alternative = "greater")
-```
-
-## HWE
-
-The Hardy-Weinberg test function in 'adegenet' has been removed and
-replaced by 'hw.test' in the package 'pegas'. This function uses both
-the classical chi-squared test based on expected genotype frequencies
-calculated from the allelic frequencies as well as an exact test based
-on Monte Carlo permutations of alleles.
-
-**NOTE** that B = 0 is used for the parametric version of the test;
-larger numbers will indicate the number of permutations to use for the
-Monte-Carlo version.
-
-```{r}
-library(pegas)
-lwed_hwt <- hw.test(lwed_genind, B = 0)
-simp_hwt <- hw.test(simp_genind, B = 0)
-```
-
-## Population structure
-
-As of version 2.0.0, adegenet relies on hierfstat and pegas for most F
-statistics.
-
-```{r}
-library(hierfstat)
-wc(lwed_genind) # FST 0, FIS -0.005851178
-wc(simp_genind) # FST 0, FIS 0.01158646
-```
-
-Use pegas to provide estimates by locus:
-
-```{r}
-library(pegas)
-lwed_ftab <- Fst(as.loci(lwed_genind))
-simp_ftab <- Fst(as.loci(simp_genind))
-
-lwed_ftab
-simp_ftab
-```
-
-```{r}
-lwed_basicStats <- basic.stats(lwed_genind, diploid = T)
-simp_basicStats <- basic.stats(simp_genind, diploid = T)
-
-lwed_basicStats$overall
-simp_basicStats$overall
-```
-
-lwed_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4599
-0.4573 0.4573 0.0000 NaN NaN 0.0000 NaN -0.0059 NaN
-
-simp_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4339
-0.4390 0.4390 0.0000 NaN NaN 0.0000 NaN 0.0116 NaN
-
-Fis
-
-```{r}
-# Fis per locus
-lwed_basicStats$Fis
-simp_basicStats$Fis
-
-# mean Fis
-apply(lwed_basicStats$Fis, MARGIN = 2, FUN = mean, na.rm = T) # -0.0013
-apply(simp_basicStats$Fis, MARGIN = 2, FUN = mean, na.rm = T) # 0.020525
-```
-
-Pairwise Fst
-
-```{r}
-lwed_fst <- genet.dist(lwed_genind, method = "WC84")
-```
-
-Is mean Hobs significantly lower than mean Hexp?
-
-```{r}
-lwed_genSum <- summary(lwed_genind)
-names(lwed_genSum)
-
-bartlett.test(list(lwed_genSum$Hexp, lwed_genSum$Hobs))
-t.test(lwed_genSum$Hexp, lwed_genSum$Hobs, paired = T, var.equal = T, alternative = "greater")
-```
-
 # 6 PID, PIDsibs
+
+Make sure that filtered dataset is still fine for distinguishing b/t individuals
 
 ## 6.1 Calculations
 
@@ -1112,6 +772,879 @@ pidPerm_fig
   xlab("Number of loci")
 ```
 
+# 7 Genetic diversity
+
+## Prep data
+
+Prior to assessing genetic diversity, dispersal, etc., I need to create data subsets for each year of the study, saying who was in what group each year. Since genetic diversity and dispersal estimates generally rely on adults only, I'll be removing juvs from each year.
+
+The function for doing this (get_popData_byYear) is in ravo_ch2Scripts.R
+
+**LWED**
+
+```{r}
+# first find the indivs we need
+lwed_popData_perYear_adultsOnly <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "LWED",
+  whichYears = 2009:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = T)
+
+# now get the geno data for each subset
+## get geno data for adults present in each year; format as genind
+lwed_genoList_genind <- get_genos_perYear(
+  genoData_df = lwed_genos,
+  genos_startCol = 7,
+  popData = lwed_popData_perYear_adultsOnly,
+  sampleRef = sampleRef,
+  outputFormat = "genind")
+
+# doesn't work yet
+lwed_genoList_hf <- get_genos_perYear(
+  genoData_df = lwed_genos,
+  genos_startCol = 7,
+  popData = lwed_popData_perYear_adultsOnly,
+  sampleRef = sampleRef,
+  outputFormat = "hierfstat")
+```
+
+**SIMP**
+
+```{r}
+# first find the indivs we need
+simp_popData_perYear_adultsOnly <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "SIMP",
+  whichYears = 2011:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = T)
+
+simp_popData_perYear_adultsOnly[["2014"]]
+
+# now get the geno data for each subset
+## get geno data for adults present in each year; format as genind
+simp_genoList_genind <- get_genos_perYear(
+  genoData_df = simp_genos,
+  genos_startCol = 7,
+  popData = simp_popData_perYear_adultsOnly,
+  sampleRef = sampleRef,
+  outputFormat = "genind")
+```
+
+## Descriptive stats
+
+we can use the summary() function from 'adegenet' to provide the
+following: - Number of alleles per locus - Observed heterozygosity -
+Expected heterozygosity
+
+Ho - observed heterozygosity; proportion of heterozygotes observed at each locus
+Hs - gene diversity w/in subpops (expected heterozygosity w/in groups); calculated based on allele freqs
+Ht - gene diversity across entire pop; total expected heterozygosity
+Dst - genetic diversity b/t subpops
+Htp - total gene diversity accounting for diffs among pops (NA b/c no b/t-subpop diversity)
+Dstp - prop of total gene diversity due to diffs b/t pops
+Fst - fixation index; measures pop differentiation due to genetic structure; 0 here indicates no differentiation b/t subpops
+Fstp - similar to Fst, but accounts for differentiation b/t pops (NA b/c no subpops)
+Fis - inbreeding coefficient w/in subpops, compares Ho to Hs; + values suggest deficit of hets (inbreeding), (-) values suggest excess hets
+Dest - Jost's D (measure of differentiation); NA b/c no differentiation detected
+
+```{r}
+# LWED
+lwed_genind_sum <- adegenet::summary(lwed_genind)
+lwed_genind_sum
+
+lwed_basicStats <- basic.stats(lwed_genind)
+lwed_basicStats
+
+mean(lwed_basicStats$Ho, na.rm = T) # 0.460
+min(lwed_basicStats$Ho, na.rm = T) # 0.169
+max(lwed_basicStats$Ho, na.rm = T) # 0.621
+
+mean(lwed_basicStats$Hs, na.rm = T) # 0.457
+min(lwed_basicStats$Hs, na.rm = T) # 0.179
+max(lwed_basicStats$Hs, na.rm = T) # 0.504
+
+lwed_basicStats$overall # Ht = 0.457
+
+# SIMP
+simp_genind_sum <- adegenet::summary(simp_genind)
+simp_genind_sum
+simp_basicStats <- basic.stats(simp_genind)
+simp_basicStats
+
+mean(simp_basicStats$Ho, na.rm = T) # 0.434
+min(simp_basicStats$Ho, na.rm = T) # 0.058
+max(simp_basicStats$Ho, na.rm = T) # 0.611
+
+mean(simp_basicStats$Hs, na.rm = T) # 0.439
+min(simp_basicStats$Hs, na.rm = T) # 0.128
+max(simp_basicStats$Hs, na.rm = T) # 0.505
+
+simp_basicStats$overall # Ht 0.4390
+```
+
+## HWE
+
+### Levene's test test
+
+**Population-wide test for heterozygosity**
+
+Levene's test is an alternative to the Bartlett test to test whether the variance among two or more groups is equal. Relative to the Bartlett test, Levene's test is less sensitive to departures from normality.
+
+I'm using Levene's test here to compare observed vs. expected heterozygosity, where a significant result indicates that the population departs from HWE. 
+
+RESULTS: There appears to be a significant different between observed and
+expected heterozygosity for both LWED and SIMP for every single year.
+
+Function:
+```{r}
+get_multi.leveneTest <- function(genoList_genind) {
+  
+  # get necessary packages
+  library(car)
+  
+  # initialize df for results by year
+  results_perYear <- data.frame()
+  
+  for (year_name in names(genoList_genind)) {
+    
+    year_data <- genoList_genind[[year_name]]
+    
+    # Get summary
+    year_summary <- adegenet::summary(year_data)
+    year_summary_df <- data.frame(
+      type = c(rep("Hobs", length(year_summary$Hobs)),
+               rep("Hexp", length(year_summary$Hexp))),
+      value = c(year_summary$Hobs,
+                year_summary$Hexp)
+      ) %>%
+      mutate(type = factor(type))
+    
+    # Run test
+    year_result <- with(year_summary_df, leveneTest(value, type)) %>%
+      `colnames<-`(c("df", "F.value", "p.value")) %>%
+      mutate(year = year_name,
+             nInd = year_summary$n,
+             nGrps = length(year_summary$n.by.pop)) %>%
+      relocate(c(year, nInd, nGrps))
+    
+    # Store results in list with year_name as the key
+    results_perYear <- rbind(results_perYear, year_result) %>%
+      na.omit()
+  }
+  
+  rownames(results_perYear) <- NULL
+  return(results_perYear)
+}
+```
+
+**Run function:**
+
+```{r}
+lwed_multi.leveneTest <- get_multi.leveneTest(lwed_genoList_genind) %>%
+  mutate(species = "Saddleback tamarins") %>% as.data.frame()
+simp_multi.leveneTest <- get_multi.leveneTest(simp_genoList_genind) %>%
+  mutate(species = "Emperor tamarins") %>% as.data.frame()
+```
+
+**Table**
+
+```{r}
+table_leveneTest <- base::rbind(lwed_multi.leveneTest, simp_multi.leveneTest) %>%
+  mutate(
+    F.value = round(F.value, 2),
+    p.value = format.pval(p.value, digits = 2, eps = 0.001, nsmall = 3)) %>%
+  select(-df) %>%
+  gt(groupname_col = "species") %>%
+  cols_label(
+    year = md("**Year**"),
+    nInd = md("**#Indivs**"),
+    nGrps = md("**#Grps**"),
+    F.value = md("**_F_**"),
+    p.value = md("**_p_**")
+  ) %>%
+  cols_align(., align = "center", columns = everything())
+table_leveneTest
+
+# export
+table_leveneTest %>%
+  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_leveneTest.png")
+```
+
+### hw.test
+
+The Hardy-Weinberg test function in 'adegenet' has been removed and
+replaced by 'hw.test' in the package 'pegas'. This function uses both
+the classical chi-squared test based on expected genotype frequencies
+calculated from the allelic frequencies as well as an exact test based
+on Monte Carlo permutations of alleles.
+
+**NOTE** that B = 0 is used for the parametric version of the test;
+larger numbers will indicate the number of permutations to use for the
+Monte-Carlo version.
+
+**Function:**
+
+```{r}
+get_multi.hweTest <- function(genoList_genind, B) {
+  
+  # Initialize empty dataframe for results by year
+  results_perYear <- data.frame()
+  
+  for (year_name in names(genoList_genind)) {
+    
+    year_data <- genoList_genind[[year_name]]
+    
+    # Run Hardy-Weinberg equilibrium test
+    year_result <- pegas::hw.test(year_data, B) %>%
+      as.data.frame() %>%
+      `colnames<-`(c("chi2", "df", "p.value", "p.exact")) %>%
+      rownames_to_column("locus") %>%
+      mutate(year = year_name)
+    
+    # Append results for this year using dplyr::bind_rows
+    results_perYear <- dplyr::bind_rows(results_perYear, year_result)
+  }
+  
+  return(results_perYear)
+}
+```
+
+**Run function**
+
+Pr(chi^2>)= analytical p-value
+Pr.exact = permuted value
+```{r}
+lwed_multi.hweTest <- get_multi.hweTest(lwed_genoList_genind, B = 1000)
+simp_multi.hweTest <- get_multi.hweTest(simp_genoList_genind, B = 1000)
+
+lwed_multi.hweTest_signif1 <- lwed_multi.hweTest %>%
+  filter(`Pr(chi^2 >)` < 0.05)
+lwed_multi.hweTest_signif2 <- lwed_multi.hweTest %>%
+  filter(Pr.exact < 0.05)
+```
+
+### Plots
+
+still fighting to make this plot prettier...
+
+```{r}
+library(lattice)
+
+alpha  <- 0.05
+
+lwed_mat <- lwed_multi.hweTest %>%
+  select(locus, year, p.exact) %>%
+  pivot_wider(id_cols = locus,
+              names_from = year,
+              values_from = p.exact) %>%
+  column_to_rownames("locus")
+lwed_newmat <- as.matrix(lwed_mat)
+lwed_newmat[lwed_newmat > alpha] <- 1
+
+simp_mat <- simp_multi.hweTest %>%
+  select(locus, year, p.exact) %>%
+  pivot_wider(id_cols = locus,
+              names_from = year,
+              values_from = p.exact) %>%
+  column_to_rownames("locus")
+simp_newmat <- as.matrix(simp_mat)
+simp_newmat[simp_newmat > alpha] <- 1
+
+# plot!
+library(gridExtra)
+
+plot1 <- levelplot(lwed_newmat, 
+                   scales = list(draw = FALSE), # Remove tick labels
+                   xlab = NULL, ylab = NULL,
+                   colorkey = list(space = "top")) # Remove axis labels
+
+plot2 <- levelplot(simp_newmat, 
+                   scales = list(draw = FALSE), 
+                   xlab = NULL, ylab = NULL,
+                   colorkey = F)
+
+# Arrange both plots in a single layout (side by side in this example)
+grid.arrange(plot1, plot2, nrow = 2)
+
+
+# ggplot version:
+# Convert your matrix to a dataframe
+lwed_multi.hweTest
+
+lwed_df <- as.data.frame(as.table(lwed_newmat)) %>%
+  dplyr::rename("locus" = "Var1",
+                "year" = "Var2",
+                "p.exact" = "Freq")
+simp_df <- as.data.frame(as.table(simp_newmat)) %>%
+  dplyr::rename("locus" = "Var1",
+                "year" = "Var2",
+                "p.exact" = "Freq")
+
+# Plot using ggplot2
+ggplot(lwed_multi.hweTest, aes(x = year, y = locus, fill = p.exact)) +
+  geom_tile() +
+  #scale_fill_viridis_c(option = "D", direction = 1) +
+  paletteer::scale_color_paletteer_c("ggthemes::Sunset-Sunrise Diverging", direction = 1) +
+  theme_minimal() +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "top") + # Move color legend to the top
+  labs(fill = "p.exact") # legend title
+```
+
+for heatmap: https://grunwaldlab.github.io/Population_Genetics_in_R/Locus_Stats.html
+
+## F-stats
+
+The fixation index (FST)
+
+Get per-locus f-stats w/pegas:
+
+```{r}
+library(pegas)
+lwed_ftab <- Fst(as.loci(lwed_genind))
+lwed_ftab
+wc(lwed_genind)
+
+simp_ftab <- Fst(as.loci(simp_genind))
+simp_ftab
+wc(simp_genind)
+
+data("microbov")
+microbov$tab
+seppop(microbov)$Salers
+```
+
+## Inbreeding
+
+(from intro to adegenet) Inbreeding = excess homozygosity in a given individual due to the mating of genetically related parents. The excess homozygosity is due to the fact that there are non-negligible chances of inheriting two identical alleles from a recent common ancestor.
+
+Inbreeding can lead to loss of fitness leading to "inbreeding depression"; usually due to recessive deleterious alleles that have low freq in pop, but for which inbred indivs are more likely to be homozygotes
+
+See: Jombart, T. 2022. "An introduction to adegenet 2.1.6" https://app.paperpile.com/view/?id=64975a16-d802-435d-877d-11f3bcbc4dcc
+
+### adegenet::inbreeding()
+
+**Inbreeding coefficient F:** the probability that at a given locus, two identical alleles have been inherited from a common ancestor. 
+
+adegenet::inbreeding() will return, based on "res.type" argument, either a function giving the density of probability of F values ("function"), the maximum likelihood estimate of F from this distribution ("estimate"), or a sample of F values taken from this distribution ("sample", default).
+
+**LWED**
+
+```{r}
+# return sample of F values
+lwed_inbreed.Fsamp <- inbreeding(lwed_genind)
+invisible(sapply(lwed_inbreed.Fsamp[1:10], function(e) plot(density(e), xlab = "F", xlim = c(0,1), main = "Density of the sampled F values")))
+
+# comput means for all indivs
+lwed_inbreed.Fmean = sapply(lwed_inbreed.Fsamp, mean)
+hist(lwed_inbreed.Fmean, col = "orange", xlab = "mean value of F")
+
+# estimate inbreeding - return probability density functions
+lwed_inbreed.Fdens <- adegenet::inbreeding(lwed_genind, res.type = "function")
+
+# estimate inbreeding - return max-likelihood estimates
+lwed_inbreed.Fest <- adegenet::inbreeding(lwed_genind, res.type = "estimate")
+
+lwed_mostInbred <- which.max(lwed_inbreed.Fest)
+plot(lwed_inbreed.Fdens[[lwed_mostInbred]], ylab = "Density", xlab = "F")
+abline(v = lwed_inbreed.Fest[lwed_mostInbred], col = "red", lty = 2)
+legend("topright", legend = "MLE", col = "red", lty = 2)
+
+# plot resulting distribution:
+lwed_Fbar <- sapply(lwed_meanInbreed, mean)
+hist(lwed_Fbar, main = "Mean inbreeding in saddleback tamarins")
+
+# someone has high inbreeding (>0.4); that someone is tamRun5.360
+which(lwed_Fbar > 0.4)
+
+# tamRun5.360 (animalID 60_lwed_M) distribution def shows inbreeding, w/~50% chance of being homozygote through inheritance from a common ancestor of its parents
+lwed_F <- inbreeding(lwed_genind, res.type = "function")[which(lwed_Fbar>0.4)]
+lwed_F
+plot(lwed_F$tamRun5.360, main = "Inbreeding of individual", xlab = "Inbreeding (F)", ylab = "Probability density")
+
+# get the actual inbreeding coefficient:
+lwed_meanInbreed[["tamRun5.360"]] # 0.4892183
+```
+
+**SIMP**
+
+```{r}
+# compute mean inbreeding for each individual
+simp_meanInbreed <- adegenet::inbreeding(simp_genind, res.type = "estimate")
+
+# plot resulting distribution:
+simp_Fbar <- sapply(simp_meanInbreed, mean)
+hist(simp_Fbar, main = "Mean inbreeding in emperor tamarins")
+
+# someone has high inbreeding (>0.4); that someone is tamRun5.197 & tamRun5.249 
+which(simp_Fbar > 0.4)
+
+# tamRun5.197 also has 50%ish chance of being homozygote, while tamRun5.249 has 60%ish chance
+simp_F <- inbreeding(simp_genind, res.type = "function")[which(simp_Fbar>0.4)]
+simp_F
+plot(simp_F$tamRun5.197, main = "Inbreeding of tamRun5.197", xlab = "Inbreeding (F)", ylab = "Probability density")
+plot(simp_F$tamRun5.249, main = "Inbreeding of tamRun5.249", xlab = "Inbreeding (F)", ylab = "Probability density")
+```
+
+What's the genoSuccess look like for the indivs flagged as having high inbreeding?
+
+```{r}
+highInbreed_list <- c("tamRun5.360", "tamRun5.197", "tamRun5.249")
+
+temp <- lwed_genos %>%
+  filter(sampleID %in% highInbreed_list) %>%
+  column_to_rownames("sampleID") %>%
+  select(any_of(lociRef$locus)) %>%
+  mutate(genoSuccess = rowSums(!is.na(.)) / ncol(.)) %>%
+  relocate(genoSuccess)
+
+temp2 <- simp_genos %>%
+  filter(sampleID %in% highInbreed_list) %>%
+  column_to_rownames("sampleID") %>%
+  select(any_of(lociRef$locus)) %>%
+  mutate(genoSuccess = rowSums(!is.na(.)) / ncol(.)) %>%
+  relocate(genoSuccess)
+
+View(md %>% filter(sampleID %in% highInbreed_list))
+
+gtscore_sampleSum <- read.csv("./05_tamRun5/03_run5GTscore/summaryFiles/master_sampleSummary_10x.csv")
+
+View(gtscore_sampleSum %>% filter(Sample %in% highInbreed_list))
+```
+
+### inbreedR
+
+```{r}
+library(inbreedR)
+```
+
+LWED:
+```{r}
+lwed_genos_ir <- lwed_genind$tab %>%
+  convert_raw(.)
+
+# g2
+g2_lwed <- g2_snps(lwed_genos_ir, nperm = 1000, nboot = 1000, CI = 0.95, parallel = F, ncores = NULL)
+g2_lwed
+# calculate sMLH
+het_lwed <- sMLH(lwed_genos_ir)
+het_lwed
+# variance in sMLH
+het.var_lwed <- var(het_lwed)
+het.var_lwed
+# r2 b/t inbreeding and heterozygosity
+hf_lwed <- r2_hf(lwed_genos_ir, type = "snps", nboot = 10)
+
+hhc_lwed <- HHC(lwed_genos_ir, reps = 100)
+
+plot(g2_lwed, col = "#94C5CCFF")
+plot(hhc_lwed, col = "#94C5CCFF")
+```
+
+SIMP:
+```{r}
+simp_genos_ir <- simp_genind$tab %>%
+  convert_raw(.)
+
+# g2
+g2_simp <- g2_snps(simp_genos_ir, nperm = 1000, nboot = 1000, CI = 0.95, parallel = F, ncores = NULL)
+g2_simp
+# calculate sMLH
+het_simp <- sMLH(simp_genos_ir)
+het_simp
+# variance in sMLH
+het.var_simp <- var(het_simp)
+het.var_simp
+# r2 b/t inbreeding and heterozygosity
+hf_simp <- r2_hf(simp_genos_ir, type = "snps", nboot = 10)
+
+plot(g2_simp, col = "#94C5CCFF")
+```
+
+## Population structure
+
+As of version 2.0.0, adegenet relies on hierfstat and pegas for most F
+statistics.
+
+```{r}
+library(hierfstat)
+wc(lwed_genind) # FST 0, FIS -0.005851178
+wc(simp_genind) # FST 0, FIS 0.01158646
+```
+
+Use pegas to provide estimates by locus:
+
+```{r}
+library(pegas)
+lwed_ftab <- Fst(as.loci(lwed_genind))
+simp_ftab <- Fst(as.loci(simp_genind))
+
+lwed_ftab
+simp_ftab
+```
+
+```{r}
+lwed_basicStats <- basic.stats(lwed_genind, diploid = T)
+simp_basicStats <- basic.stats(simp_genind, diploid = T)
+
+lwed_basicStats$overall
+simp_basicStats$overall
+```
+
+lwed_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4599
+0.4573 0.4573 0.0000 NaN NaN 0.0000 NaN -0.0059 NaN
+
+simp_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4339
+0.4390 0.4390 0.0000 NaN NaN 0.0000 NaN 0.0116 NaN
+
+Fis
+
+```{r}
+# Fis per locus
+lwed_basicStats$Fis
+simp_basicStats$Fis
+
+# mean Fis
+apply(lwed_basicStats$Fis, MARGIN = 2, FUN = mean, na.rm = T) # -0.0013
+apply(simp_basicStats$Fis, MARGIN = 2, FUN = mean, na.rm = T) # 0.020525
+```
+
+Pairwise Fst
+
+```{r}
+lwed_fst <- genet.dist(lwed_genind, method = "WC84")
+```
+
+# 8 Sex-biased dispersal
+
+## Overview
+
+I'm assessing sex-biased dispersal using the sexbias.test from hierfstat, which is based on the test statistics outlined by Goudet et al. 2002
+
+```{r}
+library(hierfstat)
+```
+
+## Prep data
+
+To do so, first I need to create data subsets for each year of the study, saying who was in what group each year. Since these analyses are for sex-biased dispersal, I'm limiting the data to non-juvs only. 
+
+**LWED**
+
+```{r}
+# first find the indivs we need
+lwed_popData_perYear_adultsOnly <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "LWED",
+  whichYears = 2009:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = T)
+
+# now get the geno data for each subset
+## format genos for hierfstat
+lwed_genos_forHf <- get_genos_perYear(genoData_df = lwed_genos,
+                                      genos_startCol = 7,
+                                      popData = lwed_popData_perYear_adultsOnly,
+                                      sampleRef = sampleRef,
+                                      outputFormat = "hierfstat")
+```
+
+**SIMP**
+
+```{r}
+# first find the indivs we need
+simp_popData_perYear_adultsOnly <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "SIMP",
+  whichYears = 2011:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = T)
+
+simp_popData_perYear_adultsOnly[["2014"]]
+
+# now get the geno data for each subset
+## format genos for hierfstat
+simp_genos_forHf <- get_genos_perYear(genoData_df = simp_genos,
+                                      genos_startCol = 7,
+                                      popData = simp_popData_perYear_adultsOnly,
+                                      sampleRef = sampleRef,
+                                      outputFormat = "hierfstat")
+```
+
+## Create multi_sexbias.test function
+
+Want a function to calculate all test statistics for sexbias.test for each year in study--
+
+mAIc - dispersing sex value should be lower; (-) = F dispersal
+vAIc - dispering sex value should be higher; (-) = M dispersal
+FST - dispersing sex value should be lower; (-) = F dispersal
+FIS - dispersing sex value should be higher; (-) = M dispersal
+
+```{r}
+# NOTE that FIS and FST require nperm to be specified
+multi_sexbias.test <- function(genoData_list, nperm = NULL, alternative = c("two.sided", "less", "greater")) {
+  
+  # initialize df
+  results <- data.frame(
+    year = rep(2009:2019, each = 4),
+    test = rep(c("mAIc", "vAIc", "FIS", "FST"), 11),
+    statistic = NA,
+    p.value = NA
+  )
+  
+  # Initializes the progress bar
+  n_iter <- length(genoData_list)
+  pb <- txtProgressBar(min = 0,      # Min value of the progress bar
+                       max = n_iter, # Max value of the progress bar
+                       style = 3,    # pb style (style = 3 gives a moving progress bar)
+                       width = 50,   # Width of the progress bar
+                       char = "=")   # Character used to create the bar
+  
+  # Initialize an index for progress tracking
+  index <- 0
+  
+  # run all tests for each year
+  for (y in names(genoData_list)) {
+    
+    # increment index for progress bar
+    index <- index + 1
+    
+    # run each test; use "try" to account for any errors thrown
+    maic <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
+                           genoData_list[[as.character(y)]]$sexData,
+                           nperm = nperm,
+                           test = "mAIc",
+                           alternative = "two.sided"),
+                  silent = TRUE)
+    
+    vaic <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
+                           genoData_list[[as.character(y)]]$sexData,
+                           nperm = nperm,
+                           test = "vAIc",
+                           alternative = "two.sided"),
+                  silent = TRUE)
+    
+    fis <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
+                           genoData_list[[as.character(y)]]$sexData,
+                           nperm = nperm,
+                           test = "FIS",
+                           alternative = "two.sided"),
+                  silent = TRUE)
+    
+    fst <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
+                           genoData_list[[as.character(y)]]$sexData,
+                           nperm = nperm,
+                           test = "FST",
+                           alternative = "two.sided"),
+                  silent = TRUE)
+    
+    # compile results
+    if (class(maic) == "try-error") {
+      df1 <- data.frame(test = "mAIc",
+                        statistic = NA,
+                        p.value = NA)
+    } else {
+      df1 <- data.frame(test = "mAIc",
+                        statistic = maic$statistic,
+                        p.value = maic$p.value)
+    }
+    if (class(vaic) == "try-error") {
+      df2 <- data.frame(test = "vAIc",
+                        statistic = NA,
+                        p.value = NA)
+    } else {
+      df2 <- data.frame(test = "vAIc",
+                        statistic = vaic$statistic,
+                        p.value = vaic$p.value)
+    }
+    if (class(fis) == "try-error") {
+      df3 <- data.frame(test = "FIS",
+                        statistic = NA,
+                        p.value = NA)
+    } else {
+      df3 <- data.frame(test = "FIS",
+                        statistic = fis$statistic,
+                        p.value = fis$p.value)
+    }
+    if (class(fst) == "try-error") {
+      df4 <- data.frame(test = "FST",
+                        statistic = NA,
+                        p.value = NA)
+    } else {
+      df4 <- data.frame(test = "FST",
+                        statistic = fst$statistic,
+                        p.value = fst$p.value)
+    }
+    
+    compiled <- rbind(df1, df2, df3, df4)
+    
+    # append data for each "y" to results
+    results[results$year == as.numeric(y) & results$test %in% compiled$test, c("statistic", "p.value")] <- 
+      compiled[, c("statistic", "p.value")]
+    
+    # set progress bar to current state
+    setTxtProgressBar(pb, index)
+  }
+  
+  close(pb)  # Close the progress bar when done
+  
+  # indicate whether results suggest F or M dispersal + significance
+  results <- results %>%
+    mutate(p.value = round(p.value, digits = 6)) %>%
+    mutate(
+      sexBias = case_when(
+        test == "mAIc" & statistic < 0 ~ "F",
+        test == "mAIc" & statistic > 0 ~ "M",
+        
+        test == "vAIc" & statistic > 0 ~ "F",
+        test == "vAIc" & statistic < 0 ~ "M",
+        
+        test == "FIS" & statistic < 0 ~ "F",
+        test == "FIS" & statistic > 0 ~ "M",
+        
+        test == "FST" & statistic > 0 ~ "F",
+        test == "FST" & statistic < 0 ~ "M",
+        
+        .default = NA
+      ),
+      signif = case_when(
+        !is.na(sexBias) & p.value < 0.05 ~ "*",
+        .default = NA
+        )
+    )
+  
+  return(results)
+}
+```
+
+## Run test 
+
+Now we can try the hierfstat sexbias.test
+
+```{r}
+# lwed
+lwed_sexbias.testResults <- multi_sexbias.test(lwed_genos_forHf, nperm = 1000, alternative = "two.sided")
+
+# simp
+simp_sexbias.testResults <- multi_sexbias.test(simp_genos_forHf, nperm = 1000, alternative = "two.sided")
+
+lwed_sexbias.testResults
+simp_sexbias.testResults
+```
+
+## metafor (skip for now)
+
+```{r}
+# Example mAIc statistics and p-values for each year
+mAIc_values <- c(sexbiasTest.2010$statistic, 
+                 sexbiasTest.2012$statistic, 
+                 sexbiasTest.2013$statistic,
+                 sexbiasTest.2014$statistic,
+                 sexbiasTest.2015$statistic,
+                 sexbiasTest.2016$statistic,
+                 sexbiasTest.2017$statistic,
+                 sexbiasTest.2018$statistic,
+                 sexbiasTest.2019$statistic)
+
+pvals <- c(sexbiasTest.2010$p.value,
+           sexbiasTest.2012$p.value,
+           sexbiasTest.2013$p.value,
+           sexbiasTest.2014$p.value,
+           sexbiasTest.2015$p.value,
+           sexbiasTest.2016$p.value,
+           sexbiasTest.2017$p.value,
+           sexbiasTest.2018$p.value,
+           sexbiasTest.2019$p.value)
+
+# Calculate the z-values based on the p-values
+z_values <- qnorm(1 - pvals / 2)
+
+# Derive the standard errors
+SE_values <- mAIc_values / z_values
+
+# Display the standard errors
+SE_values
+
+library(metafor)
+
+# Random-effects model with mAIc statistics and derived SEs
+res <- rma(yi = mAIc_values, sei = SE_values, method = "REML")
+
+# View the overall estimate
+summary(res)
+```
+
+## Tables
+
+**need to make table w/both lwed and simp results**
+
+```{r}
+table_genoDispersal <- merge(lwed_sexbias.testResults, simp_sexbias.testResults, by = c("year", "test")) %>%
+  mutate_at(vars(starts_with(c("stat", "p."))), ~round(., 2)) %>%
+  mutate(sexBias.x = str_c(sexBias.x, signif.x),
+         sexBias.y = str_c(sexBias.y, signif.y)) %>%
+  select(!starts_with("signif")) %>%
+  gt() %>%
+  tab_spanner(
+    label = "Saddleback tamarins",
+    columns = c(statistic.x, p.value.x, sexBias.x)
+  ) %>%
+  tab_spanner(
+    label = "Emperor tamarins",
+    columns = c(statistic.y, p.value.y, sexBias.y)
+  ) %>%
+  sub_missing(columns = everything(),
+              rows = everything(),
+              missing_text = "---") %>%
+  # lwed
+  tab_style(
+    style = list(cell_fill(color = "#ECD89DFF"),
+                 cell_text(weight = "bold")),
+    locations = list(cells_body(columns = sexBias.x,
+                                rows = str_detect(sexBias.x, "F\\*")))
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = "#ADB7C0FF"),
+                 cell_text(weight = "bold")),
+    locations = list(cells_body(columns = sexBias.x,
+                                rows = str_detect(sexBias.x, "M\\*")))
+  ) %>%
+  # simp
+  tab_style(
+    style = list(cell_fill(color = "#ECD89DFF"),
+                 cell_text(weight = "bold")),
+    locations = list(cells_body(columns = sexBias.y,
+                                rows = str_detect(sexBias.y, "F\\*")))
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = "#ADB7C0FF"),
+                 cell_text(weight = "bold")),
+    locations = list(cells_body(columns = sexBias.y,
+                                rows = str_detect(sexBias.y, "M\\*")))
+  )
+  
+table_genoDispersal
+```
+
+EXPORT
+
+```{r}
+table_genoDispersal %>%
+  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_genoDispersal.png")
+```
+
 # 6 CKMRsim
 
 ## 6.1 Background
@@ -1156,14 +1689,10 @@ Allele.
 **LWED**
 
 ```{r}
-lwed_genos_forCKMR_temp <- lwed_genos_hf %>%
+lwed_genos_forCKMR_temp <- genind2hierfstat(lwed_genind) %>%
   filter(pop != "dumpop") %>%
   select(-pop) %>%
   mutate(across(everything(), ~ str_c(str_sub(., 1, 1), ",", str_sub(., 2, 2))))
-
-#lwed_genos_forCKMR_temp <- lwed_genos %>%
-#  select(-c(animalID, sex, birthYear_est, pop, captureYear)) %>%
-#  column_to_rownames("sampleID")
 
 lwed_genos_forCKMR <- names(lwed_genos_forCKMR_temp) %>%
   # split loci columns
@@ -1241,13 +1770,13 @@ lwed_afreqs_ready <- lwed_genos_forCKMR %>%
   group_by(Locus) %>%
   mutate(
     Freq = n / sum(n),
-    #Chrom = "Unk",
-    #Pos = as.integer(factor(Locus, levels = lwed_locusNames))
+    Chrom = "Unk",
+    Pos = as.integer(factor(Locus, levels = lwed_locusNames))
   ) %>%
   
-  merge(., lociRef[, c("locus", "chr_num", "snpPos_inChr")], by.x = "Locus", by.y = "locus") %>%
-  dplyr::rename("Chrom" = "chr_num",
-                "Pos" = "snpPos_inChr") %>%
+  #merge(., lociRef[, c("locus", "chr_num", "snpPos_inChr")], by.x = "Locus", by.y = "locus") %>%
+  #dplyr::rename("Chrom" = "chr_num",
+  #              "Pos" = "snpPos_inChr") %>%
   
   ungroup() %>%
   select(Chrom, Pos, Locus, Allele, Freq) %>%
@@ -1270,13 +1799,13 @@ simp_afreqs_ready <- simp_genos_forCKMR %>%
   group_by(Locus) %>%
   mutate(
     Freq = n / sum(n),
-    #Chrom = "Unk",
-    #Pos = as.integer(factor(Locus, levels = lwed_locusNames))
+    Chrom = "Unk",
+    Pos = as.integer(factor(Locus, levels = lwed_locusNames))
   ) %>%
   
-  merge(., lociRef[, c("locus", "chr_num", "snpPos_inChr")], by.x = "Locus", by.y = "locus") %>%
-  dplyr::rename("Chrom" = "chr_num",
-                "Pos" = "snpPos_inChr") %>%
+  #merge(., lociRef[, c("locus", "chr_num", "snpPos_inChr")], by.x = "Locus", by.y = "locus") %>%
+  #dplyr::rename("Chrom" = "chr_num",
+  #              "Pos" = "snpPos_inChr") %>%
   
   ungroup() %>%
   select(Chrom, Pos, Locus, Allele, Freq) %>%
@@ -1376,11 +1905,18 @@ PO = parent-offspring FS = full sib HS = half sib HAN = half aunt-niece
 **LWED**
 
 ```{r}
-# This simulates a large number of pairwise genotype probabilites
-# at each locus
+# get observed prop missing for each locus; mean missing = 0.06394130
+lwed_missing <- poppr::info_table(lwed_genind, type = "missing", df = T) %>%
+  filter(Population == "lwed") %>%
+  filter(Locus != "Mean")
+0.06394130*53 # 3.388889
+
+# This simulates a large number of pairwise genotype probabilites at each locus
 lwed_Qs <- simulate_Qij(lwed_ckmr,
+                        sim_relats = c("PO", "FS", "HS", "U"),
                         calc_relats = c("PO", "FS", "HS", "U"),
-                        sim_relats = c("PO", "FS", "HS", "U")
+                        rando_miss_wts = lwed_missing$Missing,
+                        rando_miss_n = 3
                         )
 lwed_Qs
 ```
@@ -1388,9 +1924,18 @@ lwed_Qs
 **SIMP**
 
 ```{r}
+# get observed prop missing for each locus; mean missing = 0.06780303
+simp_missing <- poppr::info_table(simp_genind, type = "missing", df = T) %>%
+  filter(Population == "simp") %>%
+  filter(Locus != "Mean")
+0.06780303*48 # 3.254545
+
+# This simulates a large number of pairwise genotype probabilites at each locus
 simp_Qs <- simulate_Qij(simp_ckmr,
+                        sim_relats = c("PO", "FS", "HS", "U"),
                         calc_relats = c("PO", "FS", "HS", "U"),
-                        sim_relats = c("PO", "FS", "HS", "U")
+                        rando_miss_wts = simp_missing$Missing,
+                        rando_miss_n = 3
                         )
 simp_Qs
 ```
@@ -1406,44 +1951,20 @@ In the following, we extract those genotype probabilities in different
 ways to calculate a variety of different log-likelihood ratios for
 different relationships.
 
-**LWED**
+**log likelihood ratios for the hypothesis of each relationship combo**
 
 ```{r}
-# log likelihood ratios for the hypothesis of PO vs Unrelated
-lwed_PO_U_logls <- extract_logls(lwed_Qs,
-                                 numer = c(PO = 1),
-                                 denom = c(U = 1)
-                                 ) %>%
-  mutate(true_relat_pub = case_when(true_relat == "FS" ~ "Full Sibling",
-                                    true_relat == "HS" ~ "Half Sibling",
-                                    true_relat == "PO" ~ "Parent-Offspring",
-                                    true_relat == "U" ~ "Unrelated")) %>% 
-  mutate(true_relat_pub = factor(x = true_relat_pub, levels = c("Parent-Offspring", "Full Sibling", "Half Sibling", "Unrelated")))
+lwed_logls <- bind_rows(
+  extract_logls(lwed_Qs, numer = c(PO = 1), denom = c(U = 1)),
+  extract_logls(lwed_Qs, numer = c(FS = 1), denom = c(U = 1)),
+  extract_logls(lwed_Qs, numer = c(PO = 1), denom = c(FS = 1))
+)
 
-# FS vs. U
-lwed_FS_U_logls <- extract_logls(lwed_Qs,
-                            numer = c(FS = 1),
-                            denom = c(U = 1))
-```
-
-**SIMP**
-
-```{r}
-# log likelihood ratios for the hypothesis of PO vs Unrelated
-simp_PO_U_logls <- extract_logls(simp_Qs,
-                                 numer = c(PO = 1),
-                                 denom = c(U = 1)
-                                 ) %>%
-  mutate(true_relat_pub = case_when(true_relat == "FS" ~ "Full Sibling",
-                                    true_relat == "HS" ~ "Half Sibling",
-                                    true_relat == "PO" ~ "Parent-Offspring",
-                                    true_relat == "U" ~ "Unrelated")) %>% 
-  mutate(true_relat_pub = factor(x = true_relat_pub, levels = c("Parent-Offspring", "Full Sibling", "Half Sibling", "Unrelated")))
-
-# FS vs. U
-simp_FS_U_logls <- extract_logls(simp_Qs,
-                            numer = c(FS = 1),
-                            denom = c(U = 1))
+simp_logls <- bind_rows(
+  extract_logls(simp_Qs, numer = c(PO = 1), denom = c(U = 1)),
+  extract_logls(simp_Qs, numer = c(FS = 1), denom = c(U = 1)),
+  extract_logls(simp_Qs, numer = c(PO = 1), denom = c(FS = 1))
+)
 ```
 
 ### Plots
@@ -1451,15 +1972,57 @@ simp_FS_U_logls <- extract_logls(simp_Qs,
 Plot the distribution of those logl ratios for each of the different
 true relationships --
 
+**for chapter**
+
+```{r}
+lwed_logls %>% mutate(species = "Saddleback tamarins") %>%
+  rbind(., simp_logls %>% mutate(species = "Emperor tamarins")) %>%
+  filter(denom_wts == "U=1", numer_wts == "PO=1") %>%
+  mutate(species = factor(species, levels = c("Saddleback tamarins", "Emperor tamarins"))) %>%
+  # for easier visualization, filter true relat = PO
+  #filter(true_relat %in% c("PO", "U")) %>%
+  ggplot(., aes(x = logl_ratio, fill = true_relat)) +
+  geom_density(alpha = 0.35) +
+  facet_grid(rows = vars(species)) +
+  theme_classic() +
+  labs(x = "Log likelihood ratio", y = "Density", fill = "True relationship") +
+  theme(legend.position = c(0.2, 0.8),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(1, "line"),
+        panel.grid = element_blank()) #+
+  #scale_fill_manual(values = c("#278B9AFF", "#E75B64FF"))
+
+my_colors_med
+```
+
+
+
 **LWED**
 
 ```{r}
-# all comparisons
-ckmrSim_data_forFig <- lwed_PO_U_logls %>%
-  mutate(species = "LWED") %>%
-  rbind(., simp_PO_U_logls %>% mutate(species = "SIMP"))
+# look at FS vs. U + PO vs. U
+lwed_logls %>%
+  filter(denom_wts == "U=1") %>%
+  ggplot(., aes(x = logl_ratio, fill = true_relat)) +
+  geom_density(alpha = 0.35) +
+  facet_wrap(~ numer_wts, ncol = 1)
 
-ckmrSim_fig <- ggplot(ckmrSim_data_forFig,
+# what if we use the PO/FS statistic
+lwed_logls %>%
+  filter(denom_wts == "FS=1", numer_wts == "PO=1") %>%
+ggplot(., aes(x = logl_ratio, fill = true_relat)) +
+  geom_density(alpha = 0.35) +
+  facet_wrap(~ numer_wts, ncol = 1) 
+
+
+# OLD below--
+# all comparisons
+lwed_ckmrSim_data_forFig <- lwed_PO_U_logls %>%
+  mutate(species = "LWED") %>%
+  rbind(., lwed_PO_U_logls %>% mutate(species = "LWED"))
+
+lwed_ckmrSim_fig <- ggplot(lwed_ckmrSim_data_forFig,
                       aes(x = logl_ratio,
                           fill = true_relat_pub)) +
   geom_density(alpha = 0.25) +
@@ -1474,8 +2037,7 @@ ckmrSim_fig <- ggplot(ckmrSim_data_forFig,
   labs(x = "Log likelihood ratio", y = "Density", fill = "True Relationship") +
   facet_grid(rows = vars(species))
 
-ckmrSim_fig
-
+lwed_ckmrSim_fig
 
 # just to PO vs. U pairs
 ggplot(lwed_PO_U_logls %>% filter(true_relat %in% c("PO", "U")),
@@ -1490,6 +2052,9 @@ ggplot(lwed_PO_U_logls %>% filter(true_relat %in% c("PO", "U")),
         legend.key.size = unit(1, "line"),
         panel.grid = element_blank()) + 
   labs(title = "LWED", x = "Log likelihood ratio", y = "Density", fill = "True Relationship")
+
+# what if we use the PO/FS statistic?
+
 ```
 
 **SIMP**
@@ -1523,7 +2088,7 @@ ggplot(simp_PO_U_logls %>% filter(true_relat %in% c("PO", "U")),
   labs(title = "SIMP", x = "Log likelihood ratio", y = "Density", fill = "True Relationship")
 ```
 
-### Look at linked?
+### Look at linked? [SKIP]
 
 doesn't look all that terribly different I guess? gonna skip it though
 
@@ -1548,16 +2113,18 @@ lwed_Qs_link %>%
 
 ## False neg/pos rates
 
-### Run mc_sample_simple()
+### Optimize FPR
 
-mc_sample_simple() lets you estimate false positive rates and false
+mc_sample_simple() from CKMRsim lets you estimate false positive rates and false
 negative rates from the simulated values in an object of class Qij. The
 function is configured so that it will automatically compute both
 regular or "vanilla" Monte Carlo estimates of these probabilities, and
 also importance sampling (IS) Monte Carlo estimates, which are
 particularly good for estimating very small probabilities.
 
-**estimate false-pos rates when true relationship is unrelated but we're looking for PO pairs (uses importance sampling by default)**
+#### PO vs. U
+
+**1)** Estimate false-pos rates when true relationship is unrelated but we're looking for PO pairs (uses importance sampling by default)
 
 ```{r}
 # LWED - using importance sampling by default (vs. "vanilla" Monte Carlo)
@@ -1646,7 +2213,117 @@ however, come with rather high FNR values (0.529 and 0.591,
 respectively). So these logl cutoffs would give us decent confidence in
 our assignments while having a higher chance of ditching true PO pairs.
 
-------------------------------------------------------------------------
+#### Sibs
+
+**1)** Estimate false-pos rates when true relationship is unrelated but we're looking for PO pairs (uses importance sampling by default)
+
+```{r}
+# FS vs. U
+lwed_fs.u_mcSimple <- mc_sample_simple(lwed_Qs, nu = "FS", de = "U")
+simp_fs.u_mcSimple <- mc_sample_simple(simp_Qs, nu = "FS", de = "U")
+
+lwed_fs.u_mcSimple # fpr = 0.0649 when fnr = 0.01
+simp_fs.u_mcSimple # fpr = 0.0877 when fnr = 0.01
+
+# FS vs. HS
+lwed_fs.hs_mcSimple <- mc_sample_simple(lwed_Qs, nu = "FS", de = "HS")
+simp_fs.hs_mcSimple <- mc_sample_simple(simp_Qs, nu = "FS", de = "HS")
+
+lwed_fs.hs_mcSimple # fpr = 0.970 when fnr = 0.01
+simp_fs.hs_mcSimple # fpr = 0.108 when fnr = 0.01
+```
+
+**find optimal FPR**
+
+Anderson's recommendation for being confident about not erroneously
+identifying unrelated individuals as related pairs is to require that
+the FPR be about 10 to 100 times smaller than the reciprocal of the
+number of comparisons--
+
+For FRANz_run1, I'm not including any pedigree info so FRANz will be
+comparing every individual to every other individual. The number of
+pairs being compared can thus be calculated as follows:
+
+```{r}
+countComparisons <- function(n) {
+  totalComparisons = (n*(n-1))/2
+  return(totalComparisons)
+}
+
+#nLWED <- nrow(lwed_genos) # retained 29 lwed juv genetic samples
+#nSIMP <- nrow(simp_genos) # retained 28 emp juv genetic samples
+
+lwed_compCount <- countComparisons(29) # 2556 LWED
+simp_compCount <- countComparisons(28) # 1485 SIMP
+
+# now calculate max FPR to shoot for--
+lwed_fprGoal <- 0.1*lwed_compCount^(-1) # 0.00003912363
+simp_fprGoal <- 0.1*simp_compCount^(-1) # 0.0002645503
+```
+
+Let's look back at our FNR/FPR estimates--
+
+**fs vs. u**
+
+```{r}
+lwed_fs.u_mcSimple_test <- mc_sample_simple(lwed_Qs, nu = "FS", de = "U",
+                               lambda_stars = seq(-2, 16, by = 0.1))
+simp_fs.u_mcSimple_test <- mc_sample_simple(simp_Qs, nu = "FS", de = "U",
+                               lambda_stars = seq(-2, 16, by = 0.1))
+
+lwed_fs.u_mcSimple_test
+simp_fs.u_mcSimple_test
+
+# logl ratio that gives largest FPR smaller than fprGoal = 8.1
+lwed_fs.u_mcSimple_test_optLOD1 <- lwed_fs.u_mcSimple_test %>%
+  filter(FPR > lwed_fprGoal) %>%
+  arrange(FPR) %>%
+  dplyr::slice(1)
+
+simp_fs.u_mcSimple_test1_optLOD1 <- simp_fs.u_mcSimple_test %>%
+  filter(FPR > simp_fprGoal) %>%
+  arrange(FPR) %>%
+  dplyr::slice(1)
+
+# results - lambda_star = 6 for both
+lwed_fs.u_mcSimple_test_optLOD1
+#lwed_optLOD_test1 <- lwed_PO_is_test1_optLOD$Lambda_star
+
+simp_fs.u_mcSimple_test1_optLOD1
+#simp_optLOD_test1 <- simp_PO_is_test1_optLOD$Lambda_star
+```
+
+**fs vs. hs**
+
+```{r}
+lwed_fs.hs_mcSimple_test <- mc_sample_simple(lwed_Qs, nu = "FS", de = "HS",
+                               lambda_stars = seq(-2, 16, by = 0.1))
+simp_fs.hs_mcSimple_test <- mc_sample_simple(simp_Qs, nu = "FS", de = "HS",
+                               lambda_stars = seq(-2, 16, by = 0.1))
+
+lwed_fs.hs_mcSimple_test
+simp_fs.hs_mcSimple_test
+
+# logl ratio that gives largest FPR smaller than fprGoal = 8.1
+lwed_fs.hs_mcSimple_test_optLOD1 <- lwed_fs.hs_mcSimple_test %>%
+  filter(FPR > lwed_fprGoal) %>%
+  arrange(FPR) %>%
+  dplyr::slice(1)
+
+simp_fs.hs_mcSimple_test1_optLOD1 <- simp_fs.hs_mcSimple_test %>%
+  filter(FPR > simp_fprGoal) %>%
+  arrange(FPR) %>%
+  dplyr::slice(1)
+
+# results - lambda_star = 2.2 lwed, 2.3 simp
+lwed_fs.hs_mcSimple_test_optLOD1
+#lwed_optLOD_test1 <- lwed_PO_is_test1_optLOD$Lambda_star
+
+simp_fs.hs_mcSimple_test1_optLOD1
+#simp_optLOD_test1 <- simp_PO_is_test1_optLOD$Lambda_star
+```
+
+### Optimize FPR*FNR
 
 Alternatively, we could choose a logl cutoff that optimizes the
 trade-off between false negative and false positive errors by
@@ -1702,70 +2379,310 @@ simp_optLOD_test2 <- simp_PO_is_test2_optLOD$Lambda_star
 
 ## Pairwise comparisons
 
-Just curious what this will come up with vs. franz
+### Redo CKMR object
+
+Package has a known issue with chromosome numbers and such - need to set them as follows to get things to work (see CKMRsim github open issues)
+
+**allele freqs**
 
 ```{r}
-lwed_matchers <- find_close_matching_genotypes(lwed_genos_forCKMR,
-                                               lwed_ckmr,
-                                               max_mismatch = 6)
+# lwed
+lwed_locusNames <- unique(lwed_genos_forCKMR$Locus)
 
-test <- create_integer_genotype_matrix(lwed_genos_forCKMR, lwed_afreqs_ready)
+lwed_afreqs_ready <- lwed_genos_forCKMR %>%
+  count(Locus, Allele) %>%  
+  group_by(Locus) %>%
+  mutate(
+    Freq = n / sum(n),
+    Chrom = "Unk",
+    Pos = as.integer(factor(Locus, levels = lwed_locusNames))
+  ) %>%
+  ungroup() %>%
+  select(Chrom, Pos, Locus, Allele, Freq) %>%
+  arrange(Pos, desc(Freq)) %>%
+  mutate(AlleIdx = NA,
+         LocIdx = NA) %>%
+  # NOTE - is very impt to remove NAs from allele frequencies
+  filter(!is.na(Allele)) %>%
+  # pass to reindex_markers to give allele-freq df for CKRMsim
+  reindex_markers()
 
-unique(lwed_afreqs_ready$Locus) %in% unique(lwed_genos_forCKMR$Locus)
+# simp
+simp_locusNames <- unique(simp_genos_forCKMR$Locus)
 
-
-lwed_candidate_parents <- lwed_genos_forCKMR %>%
-  merge(., sampleRef[, c("sampleID", "birthYear_est")], by.x = "Indiv", by.y = "sampleID", all.x = T) %>%
-  filter(birthYear_est != 2019) %>%
-  select(-birthYear_est)
-
-lwed_candidate_offspring <- lwed_genos_forCKMR %>%
-  merge(., sampleRef[, c("sampleID", "birthYear_est")], by.x = "Indiv", by.y = "sampleID", all.x = T) %>%
-  filter(birthYear_est == 2019) %>%
-  select(-birthYear_est)
-
-# use juvs from 2019; all others = candidate parents
-lwed_po_pairwise_logls <- pairwise_kin_logl_ratios(
-  D1 = lwed_candidate_parents,
-  D2 = lwed_candidate_offspring,
-  CK = lwed_ckmr,
-  numer = "PO",
-  denom = "U")
+simp_afreqs_ready <- simp_genos_forCKMR %>%
+  count(Locus, Allele) %>%  
+  group_by(Locus) %>%
+  mutate(
+    Freq = n / sum(n),
+    Chrom = "Unk",
+    Pos = as.integer(factor(Locus, levels = lwed_locusNames))
+  ) %>%
+  ungroup() %>%
+  select(Chrom, Pos, Locus, Allele, Freq) %>%
+  arrange(Pos, desc(Freq)) %>%
+  mutate(AlleIdx = NA,
+         LocIdx = NA) %>%
+  # NOTE - is very impt to remove NAs from allele frequencies
+  filter(!is.na(Allele)) %>%
+  # pass to reindex_markers to give allele-freq df for CKRMsim
+  reindex_markers()
 ```
 
-
-# 5 Summary stats
-
-Print basic info
+**ckmr object**
 
 ```{r}
-lwed_gen
+lwed_ckmr <- create_ckmr(
+  D = lwed_afreqs_ready,
+  kappa_matrix = kappas[c("PO", "FS", "HS", "U"), ],
+  ge_mod_assumed = ge_model_TGIE,
+  ge_mod_true = ge_model_TGIE,
+  ge_mod_assumed_pars_list = list(epsilon = 0.01),
+  ge_mod_true_pars_list = list(epsilon = 0.01)
+)
+
+simp_ckmr <- create_ckmr(
+  D = simp_afreqs_ready,
+  kappa_matrix = kappas[c("PO", "FS", "HS", "U"), ],
+  ge_mod_assumed = ge_model_TGIE,
+  ge_mod_true = ge_model_TGIE,
+  ge_mod_assumed_pars_list = list(epsilon = 0.01),
+  ge_mod_true_pars_list = list(epsilon = 0.01)
+)
 ```
 
-Print number of alleles per locus
+### Mult-function for pairwise logls
+
+Set up function to do pairwise kinship per year
 
 ```{r}
-table(lwed_gen$loc.fac)
+get_ckmr_kinLogls <- function(ckmr_genoFile, ckmr_object, popData_dfList, years, sampleRef, relType = c("parentOffspring", "fullSibs", "halfSibs")) {
+  
+  # Initialize an empty list to store results
+  result_list <- list()
+  
+  # Match relType to one of the options
+  relType <- match.arg(relType)
+  
+  # define empty dfs for when there's no candidate genos
+  empty_result_po <- data.frame(offspring = NA, parent = NA, logl_ratio = NA, num_loc = NA) %>%
+    as_tibble()
+  empty_result_sibs <- data.frame(sib2 = NA, sib1 = NA, logl_ratio = NA, num_loc = NA) %>%
+    as_tibble()
+  
+  # Switch Indiv from sampleID to animalID in ckmr_genos
+  ckmr_genos <- ckmr_genoFile %>%
+    merge(., sampleRef[, c("sampleID", "animalID")], by.x = "Indiv", by.y = "sampleID") %>%
+    mutate(Indiv = animalID) %>%
+    select(-animalID)
+  
+  # Calculate pairwise logls for each capture year
+  for (y in years) {
+    
+    # Create candidate parent/offspring lists
+    ## candidate parents = non-juvs present in year y AND y-1
+    parent_ids <- rbind(popData_dfList[[as.character(y)]],
+                        popData_dfList[[as.character(y-1)]]) %>%
+      filter(ageClass != "juvenile") %>%
+      pull(animalID)
+    
+    offspring_ids <- popData_dfList[[as.character(y)]] %>%
+      filter(ageClass == "juvenile") %>%
+      pull(animalID)
+    
+    # Get candidate parent/offspring genos
+    candidate_parents <- ckmr_genos %>%
+      filter(Indiv %in% parent_ids)
+    candidate_offspring <- ckmr_genos %>%
+      filter(Indiv %in% offspring_ids)
+    
+    # Check if there are no candidates for either group; return empty df if so
+    if (relType == "parentOffspring") {
+      if (nrow(candidate_parents) == 0 || nrow(candidate_offspring) == 0) {
+        result_list[[paste0(relType, "_", y)]] <- empty_result_po
+        next  # then skip to the next year
+        }
+    } else {
+      if (nrow(candidate_offspring) == 0) {
+        result_list[[paste0(relType, "_", y)]] <- empty_result_sibs
+        next  # then skip to the next year
+        }
+    }
+    
+    
+    # Calculate pairwise logls based on relationship type
+    pairwise_logls <- switch(
+      relType,
+      "parentOffspring" = pairwise_kin_logl_ratios(D1 = candidate_parents,
+                                                   D2 = candidate_offspring,
+                                                   CK = ckmr_object,
+                                                   numer = "PO",
+                                                   denom = "U") %>%
+        dplyr::rename("parent" = "D1_indiv",
+                      "offspring" = "D2_indiv"),
+      "fullSibs" = pairwise_kin_logl_ratios(D1 = candidate_offspring,
+                                             D2 = candidate_offspring,
+                                             CK = ckmr_object,
+                                             numer = "FS",
+                                             denom = "U") %>%
+        dplyr::rename("sib1" = "D1_indiv",
+                      "sib2" = "D2_indiv"),
+       "halfSibs" = pairwise_kin_logl_ratios(D1 = candidate_offspring,
+                                             D2 = candidate_offspring,
+                                             CK = ckmr_object,
+                                             numer = "HS",
+                                             denom = "U") %>%
+        dplyr::rename("sib1" = "D1_indiv",
+                      "sib2" = "D2_indiv"))
+    
+    # Add each dataframe to the result list with year and relationship type as name
+    result_list[[paste0(relType, "_", y)]] <- pairwise_logls
+  }
+  
+  return(result_list)
+}
 ```
 
-Print sample size for each site (NA)
+### Run function
+
+**parent-offspring**
 
 ```{r}
-summary(lwed_gen$pop)
+# parent-offspring
+lwed_logls_po <- get_ckmr_kinLogls(ckmr_genoFile = lwed_genos_forCKMR,
+                                   ckmr_object = lwed_ckmr,
+                                   popData_dfList = lwed_popData_perYear_allIndivs,
+                                   years = 2009:2019,
+                                   sampleRef,
+                                   relType = "parentOffspring") %>%
+  bind_rows(., .id = "year")
+
+simp_logls_po <- get_ckmr_kinLogls(ckmr_genoFile = simp_genos_forCKMR,
+                                   ckmr_object = simp_ckmr,
+                                   popData_dfList = simp_popData_perYear_allIndivs,
+                                   years = 2009:2019,
+                                   sampleRef,
+                                   relType = "parentOffspring") %>%
+  bind_rows(., .id = "year")
+
+
+View(lwed_logls_po %>% filter(logl_ratio > 8.1))
+View(simp_logls_po %>% filter(logl_ratio > 7.5))
 ```
 
-Print mean allelic richness per site across all loci (NA)
+**fullSibs**
 
 ```{r}
-allelic.richness(genind2hierfstat(lwed_gen))$Ar %>%
-  apply(MARGIN = 2, FUN = mean) %>%
-  round(digits = 3)
+# lwed
+lwed_logls_fs <- get_ckmr_kinLogls(ckmr_genoFile = lwed_genos_forCKMR,
+                                   ckmr_object = lwed_ckmr,
+                                   popData_dfList = lwed_popData_perYear_allIndivs,
+                                   years = 2009:2019,
+                                   sampleRef,
+                                   relType = "fullSibs") %>%
+  bind_rows(., .id = "year")
+
+simp_logls_fs <- get_ckmr_kinLogls(ckmr_genoFile = simp_genos_forCKMR,
+                                   ckmr_object = simp_ckmr,
+                                   popData_dfList = simp_popData_perYear_allIndivs,
+                                   years = 2009:2019,
+                                   sampleRef,
+                                   relType = "fullSibs") %>%
+  bind_rows(., .id = "year")
+
+
+View(lwed_logls_fs %>% filter(logl_ratio > 6)) # aaand none
+View(simp_logls_fs %>% filter(logl_ratio > 6)) # one pair
 ```
 
-INBREEDING COEFFICIENT (Fis)
+Export:
 
 ```{r}
+write.csv(lwed_logls_fs, "./DISSERTATION/ch2_demography/02_results/lwed/ckmr_logls_fs.u.csv", row.names = F)
 
+write.csv(simp_logls_fs, "./DISSERTATION/ch2_demography/02_results/simp/ckmr_logls_fs.u.csv", row.names = F)
+```
+
+**halfSibs**
+
+```{r}
+# lwed
+lwed_logls_hs <- get_ckmr_kinLogls(ckmr_genoFile = lwed_genos_forCKMR,
+                                   ckmr_object = lwed_ckmr,
+                                   popData_dfList = lwed_popData_perYear_allIndivs,
+                                   years = 2009:2019,
+                                   sampleRef,
+                                   relType = "halfSibs") %>%
+  bind_rows(., .id = "year")
+
+simp_logls_hs <- get_ckmr_kinLogls(ckmr_genoFile = simp_genos_forCKMR,
+                                   ckmr_object = simp_ckmr,
+                                   popData_dfList = simp_popData_perYear_allIndivs,
+                                   years = 2009:2019,
+                                   sampleRef,
+                                   relType = "halfSibs") %>%
+  bind_rows(., .id = "year")
+
+
+View(lwed_logls_hs %>% filter(logl_ratio > 2.2)) # aaand none
+View(simp_logls_hs %>% filter(logl_ratio > 2.3)) # one pair
+```
+
+Export:
+
+```{r}
+write.csv(lwed_logls_hs, "./DISSERTATION/ch2_demography/02_results/lwed/ckmr_logls_hs.u.csv", row.names = F)
+
+write.csv(simp_logls_hs, "./DISSERTATION/ch2_demography/02_results/simp/ckmr_logls_hs.u.csv", row.names = F)
+```
+
+**Sibs all together (vs. by year)**
+
+```{r}
+juvGenos_lwed <- lwed_genos_forCKMR %>%
+  filter(Indiv %in% sampleRef[!is.na(sampleRef$birthYear_est), "sampleID"])
+juvGenos_simp <- simp_genos_forCKMR %>%
+  filter(Indiv %in% sampleRef[!is.na(sampleRef$birthYear_est), "sampleID"])
+
+# fs
+lwed_logls_fs_allJuvs <- pairwise_kin_logl_ratios(D1 = juvGenos_lwed,
+                                             D2 = juvGenos_lwed,
+                                             CK = lwed_ckmr,
+                                             numer = "FS",
+                                             denom = "U") %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by.x = "D1_indiv", by.y = "sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by.x = "D2_indiv", by.y = "sampleID", suffixes = c("_1", "_2"))
+simp_logls_fs_allJuvs <- pairwise_kin_logl_ratios(D1 = juvGenos_simp,
+                                             D2 = juvGenos_simp,
+                                             CK = simp_ckmr,
+                                             numer = "FS",
+                                             denom = "U")
+
+DD_lwed <- lwed_logls %>% filter(true_relat == "U", numer_wts == "FS=1") %>%
+  select(logl_ratio) %>%
+  mutate(what = "simulated")
+
+to_plot <- lwed_logls_fs_allJuvs %>%
+  select(logl_ratio) %>%
+  mutate(what = "observed") %>%
+  bind_rows(., DD_lwed)
+
+ggplot(to_plot, aes(x = logl_ratio, fill = what)) +
+  geom_density(alpha = 0.3)
+
+
+
+# hs
+lwed_logls_hs_allJuvs <- pairwise_kin_logl_ratios(D1 = juvGenos_lwed,
+                                             D2 = juvGenos_lwed,
+                                             CK = lwed_ckmr,
+                                             numer = "HS",
+                                             denom = "U")
+simp_logls_hs_allJuvs <- pairwise_kin_logl_ratios(D1 = juvGenos_simp,
+                                             D2 = juvGenos_simp,
+                                             CK = simp_ckmr,
+                                             numer = "HS",
+                                             denom = "U")
 ```
 
 # X Nf, Nm
@@ -2319,12 +3236,12 @@ simp_Nm = 60
 # lwed
 cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/lwed/franz_run1
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 73 --Nm 82 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 96 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
 
 # simp
 cd ./../../simp/franz_run1
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 52 --Nm 60 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/simp_genos_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 57 --Nm 64 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/simp_genos_franz.dat
 ```
 
 FRANz parameters are defined as follows: --femrepro and --malerepro
@@ -2633,12 +3550,12 @@ simp_sibs_run1 <- read_franzSibs("./DISSERTATION/ch2_demography/02_results/simp/
 # lwed
 cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/lwed/franz_run2
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 73 --Nm 82 --pedigreein ./../../../00_data/lwed_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 96 --pedigreein ./../../../00_data/lwed_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
 
 # simp
 cd ./../../simp/franz_run2
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 52 --Nm 60 --pedigreein ./../../../00_data/simp_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/simp_genos_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 57 --Nm 64 --pedigreein ./../../../00_data/simp_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/simp_genos_franz.dat
 ```
 
 ### Assess results
@@ -2666,9 +3583,6 @@ simp_po_run2_file <- read_csv("./DISSERTATION/ch2_demography/02_results/simp/fra
 lwed_po_run2 <- lwed_po_run2_file %>%
   # remove NA assignments
   filter(!is.na(parent1)) %>%
-  # filter by optimum CKMRsim LOD score for LWED - use test 2 results (optimal for FNRxFPR)
-  filter(LOD > lwed_optLOD_test2) %>%
-  #filter(posterior > 0.9) %>%
   select(offspring, parent1, parent2, LOD, posterior) %>%
   
   pivot_longer(-c(offspring, LOD, posterior),
@@ -2712,20 +3626,13 @@ lwed_po_run2 <- lwed_po_run2_file %>%
   ) %>%
   
   relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
-  arrange(offspring, parent) %>%
-  # subset to dam/sire with highest posterior for each offspring
-  group_by(offspring, sex_par) %>%
-  slice_max(posterior) %>%
-  ungroup()
+  arrange(offspring, parent)
 
 
 # SIMP
 simp_po_run2 <- simp_po_run2_file %>%
   # remove NA assignments
   filter(!is.na(parent1)) %>%
-  # filter by optimum CKMRsim LOD score for LWED - use test 2 results (optimal for FNRxFPR)
-  filter(LOD > simp_optLOD_test2) %>%
-  #filter(posterior > 0.9) %>%
   select(offspring, parent1, parent2, LOD, posterior) %>%
   
   pivot_longer(-c(offspring, LOD, posterior),
@@ -2769,55 +3676,98 @@ simp_po_run2 <- simp_po_run2_file %>%
   ) %>%
   
   relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
-  arrange(offspring, parent) %>%
+  arrange(offspring, parent)
+```
+
+##### Apply LOD filters
+
+```{r}
+# lwed
+lwed_po_run2_lod1 <- lwed_po_run2 %>%
+  # filter by LOD1 to minimize FPR
+  filter(LOD > lwed_optLOD_test1) %>%
   # subset to dam/sire with highest posterior for each offspring
   group_by(offspring, sex_par) %>%
   slice_max(posterior) %>%
   ungroup()
+lwed_po_run2_lod1_juvsOnly <- lwed_po_run2_lod1 %>%
+  filter(!is.na(birthYear_off))
+
+lwed_po_run2_lod2 <- lwed_po_run2 %>%
+  # filter by LOD2 to minimize FPRxFNR
+  filter(LOD > lwed_optLOD_test2) %>%
+  # subset to dam/sire with highest posterior for each offspring
+  group_by(offspring, sex_par) %>%
+  slice_max(posterior) %>%
+  ungroup()
+lwed_po_run2_lod2_juvsOnly <- lwed_po_run2_lod2 %>%
+  filter(!is.na(birthYear_off))
+
+# simp
+simp_po_run2_lod1 <- simp_po_run2 %>%
+  # filter by LOD1 to minimize FPR
+  filter(LOD > simp_optLOD_test1) %>%
+  # subset to dam/sire with highest posterior for each offspring
+  group_by(offspring, sex_par) %>%
+  slice_max(posterior) %>%
+  ungroup()
+simp_po_run2_lod1_juvsOnly <- simp_po_run2_lod1 %>%
+  filter(!is.na(birthYear_off))
+
+simp_po_run2_lod2 <- simp_po_run2 %>%
+  # filter by LOD2 to minimize FPRxFNR
+  filter(LOD > simp_optLOD_test2) %>%
+  # subset to dam/sire with highest posterior for each offspring
+  group_by(offspring, sex_par) %>%
+  slice_max(posterior) %>%
+  ungroup()
+simp_po_run2_lod2_juvsOnly <- simp_po_run2_lod2 %>%
+  filter(!is.na(birthYear_off))
 ```
 
+**Counts**
+
 ```{r}
-# number of parents assigned to each offspring
-temp <- lwed_po_run2 %>%
-  filter(!is.na(birthYear_off)) %>%
+# number of parents assigned to juvs
+lwed_po_lod1_counts <- lwed_po_run2_lod1_juvsOnly %>%
+  #filter(!is.na(birthYear_off)) %>%
   group_by(offspring) %>%
   summarise(count = n()) %>%
   as.data.frame() %>%
   mutate(count = str_c("p", count))
-table(temp$count)
 
-temp2 <- simp_po_run2 %>%
-  filter(!is.na(birthYear_off)) %>%
+lwed_po_lod2_counts <- lwed_po_run2_lod2_juvsOnly %>%
+  #filter(!is.na(birthYear_off)) %>%
   group_by(offspring) %>%
   summarise(count = n()) %>%
   as.data.frame() %>%
   mutate(count = str_c("p", count))
-table(temp2$count)
 
-# rep skew stuff
-lwed_po_run2 %>%
-  filter(sex_par == "F") %>%
-  group_by(parent) %>%
-  summarise(count = n())
+table(lwed_po_lod1_counts$count)
+table(lwed_po_lod2_counts$count)
 
-lwed_po_run2 %>%
-  filter(sex_par == "M") %>%
-  group_by(parent) %>%
-  summarise(count = n())
+# simp
+simp_po_lod1_counts <- simp_po_run2_lod1_juvsOnly %>%
+  #filter(!is.na(birthYear_off)) %>%
+  group_by(offspring) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  mutate(count = str_c("p", count))
 
+simp_po_lod2_counts <- simp_po_run2_lod2_juvsOnly %>%
+  #filter(!is.na(birthYear_off)) %>%
+  group_by(offspring) %>%
+  summarise(count = n()) %>%
+  as.data.frame() %>%
+  mutate(count = str_c("p", count))
 
-simp_po_run2 %>%
-  filter(sex_par == "F") %>%
-  group_by(parent) %>%
-  summarise(count = n())
-
-simp_po_run2 %>%
-  filter(sex_par == "M") %>%
-  group_by(parent) %>%
-  summarise(count = n())
+table(simp_po_lod1_counts$count)
+table(simp_po_lod2_counts$count)
 ```
 
 #### SIB assignments
+
+none assigned
 
 ```{r}
 lwed_sibs_run2 <- read_franzSibs("./DISSERTATION/ch2_demography/02_results/lwed/franz_run2/siblings.txt") %>%
@@ -2837,6 +3787,215 @@ simp_sibs_run2 <- read_franzSibs("./DISSERTATION/ch2_demography/02_results/simp/
   ) %>%
   relocate(sample1)
 ```
+
+## PO vs. twin pairs
+
+**START HERE**
+
+```{r}
+twinList <- capData_2009to2019 %>%
+  filter(ageClass == "juvenile") %>%
+  select(c("species", "captureDate", "groupName", "animalID")) %>%
+  group_by(species, captureDate, groupName) %>%
+  summarise(twinPairs = toString(sort(unique(animalID)))) %>%
+  filter(str_detect(twinPairs, ",")) %>%
+  separate_wider_delim(twinPairs, delim = ",", names = c("twin1", "twin2", "twin3"), too_few = "align_start") %>%
+  as.data.frame() %>%
+  select(-captureDate) %>%
+  distinct() %>%
+  arrange(as.numeric(twin1))
+
+# 19 lwed and 18 simp potential sibling sets
+table(twinList$species)
+
+# ...only one sibling set per species that had parentage assignments for all indivs
+# at least it was the maybe triplet lwed group? 161, 162, 163
+# plus animalID 288 & 289 for simp
+lwedSIMP_po.twinList <- twinList %>%
+  mutate(twin1 = as.character(as.numeric(twin1)),
+         twin2 = as.character(as.numeric(twin2)),
+         twin3 = as.character(as.numeric(twin3))) %>%
+  mutate(
+    twin1 = case_when(
+      twin1 %in% c(lwed_po_run2_lod2_juvsOnly$animalID_off, simp_po_run2_lod2_juvsOnly$animalID_off) ~ twin1,
+      .default = "-"
+      ),
+    twin2 = case_when(
+      twin2 %in% c(lwed_po_run2_lod2_juvsOnly$animalID_off, simp_po_run2_lod2_juvsOnly$animalID_off) ~ twin2,
+      .default = "-"
+      ),
+    twin3 = case_when(
+      is.na(twin3) ~ NA,
+      twin3 %in% c(lwed_po_run2_lod2_juvsOnly$animalID_off, simp_po_run2_lod2_juvsOnly$animalID_off) ~ twin3,
+      .default = "-"
+      )
+  )
+
+lwed_po.twinList_16123 <- lwed_po_run2 %>% filter(animalID_off %in% c(161, 162, 163)) %>% arrange(animalID_off, sex_par)
+View(capData_2009to2019 %>% filter(animalID %in% c(51, 53)))
+
+simp_po.twinList_288.289 <- simp_po_run2 %>%
+  filter(animalID_off %in% c(288, 289))
+```
+
+## Draw pedigree
+
+If there are two entries with the same indivs, just in different categories, keep the combo with the highest posterior
+
+```{r}
+library(pedtools)
+
+filterTo_highestPosterior <- function(po_df) {
+  
+  results <- po_df %>%
+    mutate(
+      rowID = row_number(),
+      
+      animalID_par = as.numeric(animalID_par),
+      animalID_off = as.numeric(animalID_off),
+      
+      idCombo = case_when(
+        animalID_par < animalID_off ~ str_c(animalID_par, "_", animalID_off),
+        animalID_par > animalID_off ~ str_c(animalID_off, "_", animalID_par)
+      )
+    ) %>%
+    group_by(idCombo) %>%
+    slice_max(posterior) %>%
+    ungroup()
+  
+  return(results)
+  
+}
+
+
+```
+
+As input, need to give ped() four vectors of equal length, including id, fid (father), mid (mothers), and sex 
+
+```{r}
+lwed_ped <- filterTo_highestPosterior(lwed_po_run2_lod2) %>%
+  select(animalID_par, animalID_off, sex_par, sex_off) %>%
+  pivot_wider(id_cols = c(animalID_off, sex_off),
+              names_from = sex_par,
+              values_from = animalID_par) %>%
+  dplyr::rename("id" = "animalID_off",
+                "sex" = "sex_off",
+                "mid" = "F",
+                "fid" = "M") %>%
+  # sex needs to be 1 = male, 2 = female
+  # NA needs to be 0
+  mutate(
+    sex = case_match(
+      sex,
+      "F" ~ 2,
+      "M" ~ 1
+    )
+  ) %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+  # need to give female/male parents their own id rows
+  rbind(., data.frame(id = lwed_ped$mid,
+                      mid = 0,
+                      fid = 0,
+                      sex = "2")) %>%
+  rbind(., data.frame(id = lwed_ped$fid,
+                      mid = 0,
+                      fid = 0,
+                      sex = "1")) %>%
+  distinct() %>%
+  filter(id != 0) %>%
+  # ditch dupes
+  mutate(temp = mid + fid) %>%
+  group_by(id) %>%
+  slice_max(temp) %>%
+  ungroup() %>%
+  select(-temp) %>%
+  select(c(id, fid, mid, sex))
+
+lwed_singletons <- lwed_ped %>%
+  mutate(single = case_when(
+    fid == 0 & mid != 0 ~ T,
+    fid !=0 & mid == 0 ~ T,
+    .default = F
+  )) %>%
+  filter(single == T)
+
+lwed_trios <- lwed_ped %>%
+  mutate(single = case_when(
+    fid == 0 & mid != 0 ~ T,
+    fid !=0 & mid == 0 ~ T,
+    .default = F
+  )) %>%
+  filter(single == F) %>%
+  select(-single) %>%
+  # need to give female/male parents their own id rows
+  rbind(., data.frame(id = lwed_trios$mid,
+                      mid = 0,
+                      fid = 0,
+                      sex = "2")) %>%
+  rbind(., data.frame(id = lwed_trios$fid,
+                      mid = 0,
+                      fid = 0,
+                      sex = "1")) %>%
+  distinct() %>%
+  filter(id != 0) %>%
+  # ditch dupes
+  mutate(temp = mid + fid) %>%
+  group_by(id) %>%
+  slice_max(temp) %>%
+  ungroup() %>%
+  select(-temp) %>%
+  select(c(id, fid, mid, sex))
+
+lwed_trios_ped <- ped(id = lwed_trios$id,
+    fid = lwed_trios$fid,
+    mid = lwed_trios$mid,
+    sex = lwed_trios$sex)
+plot(lwed_trios_ped, cex = 0.05, symbolsize = 0.5) # too big
+
+
+writePed(lwed_trios_ped$`_comp4`, prefix = "./DISSERTATION/ch2_demography/02_results/lwed/pedTrios_comp4", what = "ped", famid = F)
+
+write.table(lwed_trios, "./DISSERTATION/ch2_demography/02_results/lwed/pedTrios.txt", quote = F)
+
+lwed_ped_highlightJuvs <- lwed_trios %>%
+  filter(id %in% birthAssignments$animalID) %>%
+  select(id) %>% pull()
+node_colors <- ifelse(lwed_trios_ped$`_comp1`$ID %in% lwed_ped_highlightJuvs, "#E75B64FF", "black")
+pdf("large_pedigree_plot.pdf", width = 20, height = 12)
+plot(lwed_trios_ped, hatched = lwed_ped_highlightJuvs)
+dev.off()
+
+print(my_colors_med)
+
+# fullsibs, but not twins
+View(capData_2009to2019 %>% filter(animalID %in% c(157, 185)))
+
+# let's do one at a time
+plot(lwed_trios_ped$`_comp4`, hatched = lwed_ped_highlightJuvs)
+```
+
+
+
+
+
+
+
+rgraphviz is not as user-friendly as I want it to be...
+```{r}
+#install.packages("BiocManager")
+#BiocManager::install("Rgraphviz")
+library(Rgraphviz)
+library(sna)
+```
+
+```{r}
+lwed_pedFile <- "./DISSERTATION/ch2_demography/02_results/lwed/franz_run2/pedigree.dot"
+
+lwed_pedGraph <- agopen(file = lwed_pedFile, name = "pedigree")
+
+Rgraphviz::plot()
+```
+
 
 # Reproductive success
 
@@ -2908,14 +4067,12 @@ lwed_clevFig
 
 ```
 
-# Sex-biased dispersal
 
-## Overview
 
-I'm assessing sex-biased dispersal using the sexbias.test from hierfstat, which is based on the test statistics outlined by Goudet et al. 2002
+# R values
 
 ```{r}
-library(hierfstat)
+library(related)
 ```
 
 ## Prep data
@@ -2925,316 +4082,408 @@ To do so, first I need to create data subsets for each year of the study, saying
 **LWED**
 
 ```{r}
+source("./project_scripts/ravo_ch2Scripts.R")
 # first find the indivs we need
-lwed_popData_perYear_adultsOnly <- get_popData_byYear(
+lwed_popData_perYear_allIndivs <- get_popData_byYear(
   capData = capData_2009to2019,
   whichSpecies = "LWED",
   whichYears = 2009:2019,
   whichAnimalIDs = "with_hairSamples",
   md_genoData = md,
   birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
-  adultsOnly = T)
+  adultsOnly = NULL)
 
-lwed_popData_perYear_adultsOnly[["2015"]]
+View(lwed_popData_perYear_allIndivs[["2019"]])
 
 # now get the geno data for each subset
-## format genos for hierfstat
-lwed_genos_hf <- genind2hierfstat(lwed_genind)
+## format genos for related
+lwed_genos_rel <- lwed_genos_hf %>%
+  select(-pop) %>%
+  rownames_to_column("sampleID") %>%
+  mutate(across(-sampleID, ~ str_split(.x, ""))) %>%
+  unnest_wider(-sampleID, names_sep = ".") %>%
+  column_to_rownames("sampleID")
 
-## get geno data for adults present in each year
-lwed_genos_forHf <- get_genos_perYear_forHierfstat(
-  lwed_genos_hf,
-  lwed_popData_perYear_adultsOnly,
-  sampleRef = sampleRef)
+## get geno data for all indivs present in each year
+lwed_genos_forRelated <- get_genos_perYear(
+  lwed_genos_rel,
+  lwed_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  forWhat = "related")
+View(lwed_genos_forRelated$`2015`$genoData)
+
+str(simp_genos_forRelated)
 ```
 
-**LWED**
+**SIMP**
 
 ```{r}
 # first find the indivs we need
-simp_popData_perYear_adultsOnly <- get_popData_byYear(
+simp_popData_perYear_allIndivs <- get_popData_byYear(
   capData = capData_2009to2019,
   whichSpecies = "SIMP",
-  whichYears = 2011:2019,
+  whichYears = 2009:2019,
   whichAnimalIDs = "with_hairSamples",
   md_genoData = md,
   birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
-  adultsOnly = T)
+  adultsOnly = NULL)
 
-simp_popData_perYear_adultsOnly[["2014"]]
+View(simp_popData_perYear_allIndivs[["2019"]])
 
 # now get the geno data for each subset
-## format genos for hierfstat
-simp_genos_hf <- genind2hierfstat(simp_genind)
+## format genos for related
+simp_genos_rel <- simp_genos_hf %>%
+  select(-pop) %>%
+  rownames_to_column("sampleID") %>%
+  mutate(across(-sampleID, ~ str_split(.x, ""))) %>%
+  unnest_wider(-sampleID, names_sep = ".") %>%
+  column_to_rownames("sampleID")
 
-## get geno data for adults present in each year
-simp_genos_forHf <- get_genos_perYear_forHierfstat(
-  simp_genos_hf,
-  simp_popData_perYear_adultsOnly,
-  sampleRef = sampleRef)
+## get geno data for all indivs present in each year
+simp_genos_forRelated <- get_genos_perYear(
+  simp_genos_rel,
+  simp_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  forWhat = "related")
+View(simp_genos_forRelated$`2015`$genoData)
+
+str(simp_genos_forRelated) # 2018 w/25 indivs
+str(lwed_genos_forRelated) # 2015 w/29 indivs
 ```
 
-## Create multi_sexbias.test function
-
-Want a function to calculate all test statistics for sexbias.test for each year in study--
-
-mAIc - dispersing sex value should be lower; (-) = F dispersal
-vAIc - dispering sex value should be higher; (-) = M dispersal
-FST - dispersing sex value should be lower; (-) = F dispersal
-FIS - dispersing sex value should be higher; (-) = M dispersal
+## Compare estimators
 
 ```{r}
-# NOTE that FIS and FST require nperm to be specified
-multi_sexbias.test <- function(genoData_list, nperm = NULL, alternative = c("two.sided", "less", "greater")) {
-  
-  # initialize df
-  results <- data.frame(
-    year = rep(2009:2019, each = 4),
-    test = rep(c("mAIc", "vAIc", "FIS", "FST"), 11),
-    statistic = NA,
-    p.value = NA
-  )
-  
-  # Initializes the progress bar
-  n_iter <- length(genoData_list)
-  pb <- txtProgressBar(min = 0,      # Min value of the progress bar
-                       max = n_iter, # Max value of the progress bar
-                       style = 3,    # pb style (style = 3 gives a moving progress bar)
-                       width = 50,   # Width of the progress bar
-                       char = "=")   # Character used to create the bar
-  
-  # Initialize an index for progress tracking
-  index <- 0
-  
-  # run all tests for each year
-  for (y in names(genoData_list)) {
-    
-    # increment index for progress bar
-    index <- index + 1
-    
-    # run each test; use "try" to account for any errors thrown
-    maic <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "mAIc",
-                           alternative = "two.sided"),
-                  silent = TRUE)
-    
-    vaic <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "vAIc",
-                           alternative = "two.sided"),
-                  silent = TRUE)
-    
-    fis <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "FIS",
-                           alternative = "two.sided"),
-                  silent = TRUE)
-    
-    fst <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "FST",
-                           alternative = "two.sided"),
-                  silent = TRUE)
-    
-    # compile results
-    if (class(maic) == "try-error") {
-      df1 <- data.frame(test = "mAIc",
-                        statistic = NA,
-                        p.value = NA)
-    } else {
-      df1 <- data.frame(test = "mAIc",
-                        statistic = maic$statistic,
-                        p.value = maic$p.value)
-    }
-    if (class(vaic) == "try-error") {
-      df2 <- data.frame(test = "vAIc",
-                        statistic = NA,
-                        p.value = NA)
-    } else {
-      df2 <- data.frame(test = "vAIc",
-                        statistic = vaic$statistic,
-                        p.value = vaic$p.value)
-    }
-    if (class(fis) == "try-error") {
-      df3 <- data.frame(test = "FIS",
-                        statistic = NA,
-                        p.value = NA)
-    } else {
-      df3 <- data.frame(test = "FIS",
-                        statistic = fis$statistic,
-                        p.value = fis$p.value)
-    }
-    if (class(fst) == "try-error") {
-      df4 <- data.frame(test = "FST",
-                        statistic = NA,
-                        p.value = NA)
-    } else {
-      df4 <- data.frame(test = "FST",
-                        statistic = fst$statistic,
-                        p.value = fst$p.value)
-    }
-    
-    compiled <- rbind(df1, df2, df3, df4)
-    
-    # append data for each "y" to results
-    results[results$year == as.numeric(y) & results$test %in% compiled$test, c("statistic", "p.value")] <- 
-      compiled[, c("statistic", "p.value")]
-    
-    # set progress bar to current state
-    setTxtProgressBar(pb, index)
-  }
-  
-  close(pb)  # Close the progress bar when done
-  
-  # indicate whether results suggest F or M dispersal + significance
-  results <- results %>%
-    mutate(p.value = round(p.value, digits = 6)) %>%
-    mutate(
-      sexBias = case_when(
-        test == "mAIc" & statistic < 0 ~ "F",
-        test == "mAIc" & statistic > 0 ~ "M",
-        
-        test == "vAIc" & statistic > 0 ~ "F",
-        test == "vAIc" & statistic < 0 ~ "M",
-        
-        test == "FIS" & statistic < 0 ~ "F",
-        test == "FIS" & statistic > 0 ~ "M",
-        
-        test == "FST" & statistic > 0 ~ "F",
-        test == "FST" & statistic < 0 ~ "M",
-        
-        .default = NA
+# set up inputs
+rel_input_lwed <- lwed_genos_forRelated$`2015`$genoData %>%
+  `names<-`(NULL) %>%
+  readgenotypedata(.)
+
+rel_input_simp <- simp_genos_forRelated$`2018`$genoData %>%
+  `names<-`(NULL) %>%
+  readgenotypedata(.)
+
+rel_simdata_lwed <- familysim(rel_input_lwed$freqs, 100)
+rel_simdata_simp <- familysim(rel_input_simp$freqs, 100)
+
+# run coancestry
+rel_output_lwed <- coancestry(rel_simdata_lwed,
+                              dyadml=1,
+                              trioml=1, 
+                              quellergt=1,
+                              wang=1)
+
+rel_output_simp <- coancestry(rel_simdata_simp,
+                              dyadml=1,
+                              trioml=1, 
+                              quellergt=1,
+                              wang=1)
+```
+
+## Assess results
+
+```{r}
+# set up relatedness values for comparison
+relvals <- c(rep(0, 100), # unrelated values
+             rep(0.25, 100), # half-sibs
+             rep(0.5, 100), # full-sibs
+             rep(0.5, 100)) # parent-offspring
+
+# lwed 2015
+quellergtcor_lwed <- cor.test(relvals, simrel_lwed$quellergt) # -0.7015007
+wangcor_lwed <- cor.test(relvals, simrel_lwed$wang) # -0.6919451
+dyadmlcor_lwed <- cor.test(relvals, simrel_lwed$dyadml) # -0.7442717
+triomlcor_lwed <- cor.test(relvals, simrel_lwed$trioml) # -0.7439108
+
+# simp 2018
+quellergtcor_simp <- cor.test(relvals, simrel_simp$quellergt) # -0.6916978
+wangcor_simp <- cor.test(relvals, simrel_simp$wang) # -0.6997006
+dyadmlcor_simp <- cor.test(relvals, simrel_simp$dyadml) # -0.7489274
+triomlcor_simp <- cor.test(relvals, simrel_simp$trioml) # -0.7483224 
+
+data.frame(
+  estimator = c("QG", "Wang", "dyadml", "trioml"),
+  cor_lwed = c(quellergtcor_lwed$estimate,
+               wangcor_lwed$estimate,
+               dyadmlcor_lwed$estimate,
+               triomlcor_lwed$estimate),
+  cor_simp = c(quellergtcor_simp$estimate,
+               wangcor_simp$estimate,
+               dyadmlcor_simp$estimate,
+               triomlcor_simp$estimate)
+) %>%
+  arrange(desc(cor_lwed))
+```
+
+## Plots
+
+```{r}
+## clean up r values
+simrel_lwed <- cleanuprvals(rel_output_lwed$relatedness, 100)
+simrel_simp <- cleanuprvals(rel_output_simp$relatedness, 100)
+
+simrel_lwed_l <- simrel_lwed %>%
+  select(-c(pair.no, ind1.id, ind2.id, lynchli, lynchrd)) %>%
+  pivot_longer(-group,
+               names_to = "Estimator",
+               values_to = "Relatedness_Value") %>%
+  mutate(
+    Estimator = case_match(
+      Estimator,
+      "trioml" ~ "tri",
+      "wang" ~ "W",
+      "ritland" ~ "rit",
+      "quellergt" ~ "QG",
+      "dyadml" ~ "di"
       ),
-      signif = case_when(
-        !is.na(sexBias) & p.value < 0.05 ~ "*",
-        .default = NA
-        )
-    )
+    group = case_match(
+      group,
+      "POPO" ~ "Parent-offspring",
+      "SBSB" ~ "Full-sibs",
+      "HSHS" ~ "Half-sibs",
+      "URUR" ~ "Unrelated"
+      )
+    ) %>%
+  dplyr::rename("relationship" = "group")
+
+ggplot(simrel_lwed_l, aes(x = Estimator, y = Relatedness_Value), ylim = c(-0.5, 1)) +
+  geom_boxplot() +
+  facet_wrap(~relationship)
+```
+
+
+## 5.2 Compare relatedness estimators
+
+Prior to deciding which relatedness estimator for our analysis, it's a good idea to test the performance of different estimators on simulated data sets with the same locus characteristics as our own. We can do this with 'related' in two ways:
+
+First, we can compare moment-estimators using the 'related' function compareestimators() (section 5.2.1). Then, we can compare with maximum-likelihood estimators using a sort of clunky, but functional set of manual steps (section 5.2.2).
+
+### 5.2.1 Compare moment-estimators
+
+Below I'm using the comparestimators() function to compare lynchli, lynchrd, quellergt, and wang estimators. This function will generate simulated genotypes of known relatedness, calculate relatedness values using those four estimators, and plot the data to visualize it. Here I'm using separate data frames for 2013 and 2014 that include all individuals (including adults and non-adults) and 100 simulated pairs of individuals for each type of relationship.
+
+The output includes 1) a graph of the data, organized by relationship type and estimator, 2) the correlation coefficient (Pearson's) between observed and expected relatedness values for each estimator. We can use this to see which estimator correlates best with the expected values.
+
+1)  Run comparestimators() function
+
+```{r}
+compEst_2013 <- compareestimators(related_all2013, 100) 
+compEst_2014 <- compareestimators(related_all2014, 100)
+```
+
+2)  Visualize comparison results for each relationship type
+
+```{r}
+compEst_2013
+compEst_2014
+```
+
+3)  Compare correlation coefficients
+
+(note - I'm not sure how to extract these from the comparestimators() results, below is a table of the results from my run of the function)
+
+```{r}
+# Correlation coefficients from comparestimators()
+compEst_2013a_data <- c(0.879077, 0.871872, 0.853382, 0.871952)
+compEst_2013b_data <- c(0.874931, 0.858175, 0.838660, 0.855826)
+compEst_2014a_data <- c(0.844956, 0.840872, 0.802049, 0.835537)
+compEst_2014b_data <- c( 0.851458, 0.848176, 0.832502, 0.848914)
+
+# Create df of corr coefficients
+compEst_point_df <- data.frame(compEst_2013a_data, compEst_2013b_data, compEst_2014a_data, compEst_2014b_data, row.names = c("wang", "lynchli", "lynchrd", "quellergt"))
+```
+
+# Attempt with blood samples
+
+## md
+
+```{r}
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  relocate(captureYear, .after = captureDate)
+
+md_lwed <- md %>%
+  filter(species == "LWED")
+md_simp <- md %>%
+  filter(species == "SIMP")
+```
+
+## GTscore - polyploid
+
+Run blood samples through GTscore as if they had a ploidy of 4; essentially blood samples are acting as auto-polyploids here
+
+```{r}
+source("./project_scripts/GTscore/GTscore_modified.R")
+
+# create locus table with 4 ploidy
+pp_bloodTest <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", header = T) %>%
+  mutate(Ploidy = 4)
+write.table(pp_bloodTest, "./05_tamRun5/06_run5BloodTest/primerProbeFile_panelv3_fullSet_bloodTest.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+
+# subset sample file to blood only
+temp <- md %>% filter(sampleType == "blood") %>% select(sampleFile) %>% pull()
+sf_fullSet_bloodTest <- read.table("./05_tamRun5/03_run5GTscore/sampleFiles_fullSet.txt") %>%
+  filter(V1 %in% temp) %>%
+  arrange(V1)
+write.table(sf_fullSet_bloodTest, "./05_tamRun5/06_run5BloodTest/sampleFiles_fullSet_bloodTest.txt", sep = "\t", row.names = F, col.names = F, quote = F)
+
+# count allele reads
+system2("perl",
+        args="./project_scripts/GTscore/AmpliconReadCounter_modified.pl -p ./05_tamRun5/06_run5BloodTest/primerProbeFile_panelv3_fullSet_bloodTest.txt --files ./05_tamRun5/06_run5BloodTest/sampleFiles_fullSet_bloodTest.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/06_run5BloodTest/ --prefix bloodTest_")
+
+# genotype
+locusTable_bloodTest <- read.delim("./05_tamRun5/06_run5BloodTest/bloodTest_LocusTable_singleSNPs.txt")
+
+readCounts_bloodTest <- read.delim("./05_tamRun5/06_run5BloodTest/bloodTest_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+polygenResults_bloodTest <- polyGen(locusTable_bloodTest, readCounts_bloodTest)
+
+View(polygenResults_bloodTest)
+
+# write results
+write.table(polygenResults_bloodTest, "./05_tamRun5/06_run5BloodTest/polygenResults_bloodTest_0x.txt", quote = FALSE, sep = "\t")
+```
+
+## Clean genos
+
+Remove dups
+
+```{r}
+bloodTest_genos_temp <- read.table("./05_tamRun5/06_run5BloodTest/polygenResults_bloodTest_0x.txt", sep = "\t", na.strings = "0")
+
+bloodTest_genoSuccess <- get_genoSuccess(bloodTest_genos_temp, locusTable_bloodTest, md, "bySample", sampleID_colName = "sampleID", exclude_nonTargetSp = "no")
+
+# blood
+bloodDups <- md %>%
+  filter(sampleType == "blood") %>%
+  get_dupes(animalID) %>%
+  merge(., bloodTest_genoSuccess, by = "sampleID") %>%
+  relocate(genoSuccess) %>%
+  arrange(animalID, genoSuccess)
+
+toRemove_bloodDups <- bloodDups %>%
+  group_by(animalID) %>%
+  slice_min(genoSuccess) %>%
+  ungroup() %>%
+  select(sampleID) %>% pull()
+
+# clean!
+bloodTest_genos <- bloodTest_genos_temp %>%
+  select(-toRemove_bloodDups)
+
+bloodTest_readCounts <- readCounts_bloodTest %>%
+  select(-toRemove_bloodDups)
+```
+
+## AGHmatrix
+
+Tutorial: https://cran.r-project.org/web/packages/AGHmatrix/vignettes/Tutorial_AGHmatrix.html
+
+```{r}
+#install.packages("AGHmatrix")
+library(AGHmatrix)
+
+#data("snp.pine")
+#str(snp.pine)
+```
+
+## Format genos
+
+Formatting genos as autotetraploid; must be coded according to dosage level: 0, 1, 2, 3, or 4. 
+
+```{r}
+bloodTest_genos_forGenind <- bloodTest_genos %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sampleID")
+bloodTest_genos_genind <- adegenet::df2genind(
+  X = bloodTest_genos_forGenind[,c(2:155)],
+  pop = bloodTest_genos_forGenind$pop,
+  sep = ",",
+  ind.names = bloodTest_genos_forGenind$sampleID,
+  NA.char = "NA",
+  ploidy = 4,
+  type = "codom")
+bloodTest_genos_agh <- bloodTest_genos_genind$tab %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("locus") %>%
+  mutate(locus = gsub("\\..*", "", locus)) %>%
+  mutate(temp = rep(c(1,2), nrow(.)/2)) %>%
+  relocate(temp) %>%
+  filter(temp == 1) %>%
+  select(-temp) %>%
+  column_to_rownames("locus") %>%
+  t() %>%
+  as.data.frame()
+
+# species subsets + indid only
+bloodTest_genos_agh_lwed <- bloodTest_genos_agh %>%
+  filter(rownames(.) %in% md_lwed$sampleID) %>%
+  select(!contains(c("SPECIES", "SEX"))) %>%
+  as.matrix()
+str(bloodTest_genos_agh_lwed)
+
+bloodTest_genos_agh_simp <- bloodTest_genos_agh %>%
+  filter(rownames(.) %in% md_simp$sampleID) %>%
+  select(!contains(c("SPECIES", "SEX"))) %>%
+  as.matrix()
+```
+
+**Also try w/allele ratios** jk nope I need to think about that more...
+
+```{r}
+bloodTest_alleleRatios <- bloodTest_readCounts %>%
+  rownames_to_column("locus") %>%
+  pivot_longer(-locus,
+               names_to = "sampleID",
+               values_to = "readCounts") %>%
+  mutate(readRatio = get_readRatios(readCounts))
+```
+
+## Create Gmatrix
+
+Here I'm using the VanRaden (2008) method for estimating pairwise relatedness using biallelic SNPs, which was extended by Ashraf et al. (2016) for autopolyploids. The VR method considers multiple dosage (i.e., quantifies the presence of an allele based on the TOTAL number of copies across all chromosome sets) vs. pseudo-diploid dosage (simplifies allele copies to either homozygous or heterozygous state).
+
+With the VR method, r_VR (relatedness coefficient) is equal to the off-diagonal elements of the genomic relationship matrix (Gmatrix).
+
+From Ashraden et al. (2016):
+"Consider a matrix comprised of allele frequency  estimates  from  GBS  data with  SNPs  in  rows  and   samples in columns, X_ij being the allele frequency at SNP i in family j, and M is the matrix centered by SNP mean frequencies,  M = {M_ij} = {X_ij −  ̄X_i. Missing SNP data is substituted by the mean SNP frequency. This amounts to a mean-imputation for missing genotypes. Then the G-matrix is:
+
+G = M'M / K
+
+```{r}
+gMat_vanRaden_lwed <- Gmatrix(SNPmatrix = bloodTest_genos_agh_lwed,
+                              method = "VanRaden",
+                              ploidy = 4,
+                              maf = 0.03,
+                              thresh.missing = 0.5)
+gMat_vanRaden_simp <- Gmatrix(SNPmatrix = bloodTest_genos_agh_simp,
+                              method = "VanRaden",
+                              ploidy = 4,
+                              maf = 0.03,
+                              thresh.missing = 0.5)
+
+# i'm not doing the below correctly...
+stats_vanRaden_lwed <- gMat_vanRaden_lwed %>%
+  as.data.frame() %>%
+  rownames_to_column("indiv1") %>%
+  pivot_longer(-indiv1,
+               names_to = "indiv2",
+               values_to = "est.r") %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by.x = "indiv1", by.y = "sampleID", all.x = T) %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by.x = "indiv2", by.y = "sampleID", all.x = T, suffixes = c("1", "2")) #%>%
+  # want standard error... somehow
+  mutate(RMSE.PO = sqrt(mean(est.r - 0.5)^2))
   
-  return(results)
-}
+test <- stats_vanRaden_lwed %>%
+  filter(animalID1 %in% c(161, 162, 163, 51, 53, 58, 60)) %>%
+  filter(animalID2 %in% c(161, 162, 163, 51, 53, 58, 60)) %>%
+  mutate(temp = animalID1 == animalID2) %>%
+  filter(temp != T)
 ```
 
-## Run test 
 
-Now we can try the hierfstat sexbias.test
-
-```{r}
-# lwed
-lwed_sexbias.testResults <- multi_sexbias.test(lwed_genos_forHf, nperm = 1000, alternative = "two.sided")
-
-# simp
-simp_sexbias.testResults <- multi_sexbias.test(simp_genos_forHf, nperm = 1000, alternative = "two.sided")
-
-lwed_sexbias.testResults
-simp_sexbias.testResults
-```
-
-## metafor (skip for now)
-
-```{r}
-# Example mAIc statistics and p-values for each year
-mAIc_values <- c(sexbiasTest.2010$statistic, 
-                 sexbiasTest.2012$statistic, 
-                 sexbiasTest.2013$statistic,
-                 sexbiasTest.2014$statistic,
-                 sexbiasTest.2015$statistic,
-                 sexbiasTest.2016$statistic,
-                 sexbiasTest.2017$statistic,
-                 sexbiasTest.2018$statistic,
-                 sexbiasTest.2019$statistic)
-
-pvals <- c(sexbiasTest.2010$p.value,
-           sexbiasTest.2012$p.value,
-           sexbiasTest.2013$p.value,
-           sexbiasTest.2014$p.value,
-           sexbiasTest.2015$p.value,
-           sexbiasTest.2016$p.value,
-           sexbiasTest.2017$p.value,
-           sexbiasTest.2018$p.value,
-           sexbiasTest.2019$p.value)
-
-# Calculate the z-values based on the p-values
-z_values <- qnorm(1 - pvals / 2)
-
-# Derive the standard errors
-SE_values <- mAIc_values / z_values
-
-# Display the standard errors
-SE_values
-
-library(metafor)
-
-# Random-effects model with mAIc statistics and derived SEs
-res <- rma(yi = mAIc_values, sei = SE_values, method = "REML")
-
-# View the overall estimate
-summary(res)
-```
-
-## Tables
-
-**need to make table w/both lwed and simp results**
-
-```{r}
-table_genoDispersal <- merge(lwed_sexbias.testResults, simp_sexbias.testResults, by = c("year", "test")) %>%
-  mutate_at(vars(starts_with(c("stat", "p."))), ~round(., 2)) %>%
-  mutate(sexBias.x = str_c(sexBias.x, signif.x),
-         sexBias.y = str_c(sexBias.y, signif.y)) %>%
-  select(!starts_with("signif")) %>%
-  gt() %>%
-  tab_spanner(
-    label = "Saddleback tamarins",
-    columns = c(statistic.x, p.value.x, sexBias.x)
-  ) %>%
-  tab_spanner(
-    label = "Emperor tamarins",
-    columns = c(statistic.y, p.value.y, sexBias.y)
-  ) %>%
-  sub_missing(columns = everything(),
-              rows = everything(),
-              missing_text = "---") %>%
-  # lwed
-  tab_style(
-    style = list(cell_fill(color = "#ECD89DFF"),
-                 cell_text(weight = "bold")),
-    locations = list(cells_body(columns = sexBias.x,
-                                rows = str_detect(sexBias.x, "F\\*")))
-  ) %>%
-  tab_style(
-    style = list(cell_fill(color = "#ADB7C0FF"),
-                 cell_text(weight = "bold")),
-    locations = list(cells_body(columns = sexBias.x,
-                                rows = str_detect(sexBias.x, "M\\*")))
-  ) %>%
-  # simp
-  tab_style(
-    style = list(cell_fill(color = "#ECD89DFF"),
-                 cell_text(weight = "bold")),
-    locations = list(cells_body(columns = sexBias.y,
-                                rows = str_detect(sexBias.y, "F\\*")))
-  ) %>%
-  tab_style(
-    style = list(cell_fill(color = "#ADB7C0FF"),
-                 cell_text(weight = "bold")),
-    locations = list(cells_body(columns = sexBias.y,
-                                rows = str_detect(sexBias.y, "M\\*")))
-  )
-  
-table_genoDispersal
-```
-
-EXPORT
-
-```{r}
-table_genoDispersal %>%
-  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_genoDispersal.png")
-```
 
 # Mark-recapture
 
@@ -3879,16 +5128,77 @@ m1_lwed.cjs.ddl <- add.design.data(m1_lwed.cjs.proc,
 ## 2c) add effort covariate
 m1_lwed_newTimes <- as.character(unique(c(m1_lwed.cjs.ddl$Phi$time, m1_lwed.cjs.ddl$p$time)))
 
-m1_lwed_covGrps <- data.frame(
+m1_lwed_covEffort <- data.frame(
   time = m1_lwed_newTimes,
-  nGrps = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2010:2019, "nGroups"]
+  effort = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2010:2019, "capDuration_days"]
 )
 
+#m1_lwed_covGrps <- data.frame(
+#  time = m1_lwed_newTimes,
+#  nGrps = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2010:2019, "nGroups"]
+#)
+
 m1_lwed.cjs.ddl$p <- merge_design.covariates(m1_lwed.cjs.ddl$p,
-                                             m1_lwed_covGrps)
+                                             m1_lwed_covEffort)
 
 m1_lwed.cjs.ddl$Phi
 m1_lwed.cjs.ddl$p
+```
+
+**Optimal model for Phi**
+
+```{r}
+# 1) build fxn to create models
+m1.phi_fit.cjs.models <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula
+  Phi.dot <- list(formula=~1) # constant detection
+  Phi.ageClass <- list(formula=~ageClass) # differs across ages
+  Phi.effort <- list(formula=~effort)
+  Phi.sex <- list(formula=~ageClass) # differs between males and females
+  Phi.time <- list(formula=~time) # differs between discrete times
+  
+  Phi.ageClass_effort <- list(formula=~ageClass+effort)
+  Phi.ageClass_sex <- list(formula=~ageClass+sex)
+  Phi.ageClass_time <- list(formula=~ageClass+time)
+  Phi.effort_sex <- list(formula=~effort+sex)
+  Phi.effort_time <- list(formula=~effort+time)
+  Phi.sex_time <- list(formula=~sex+time)
+  
+  Phi.ageClass.effort <- list(formula=~ageClass*effort)
+  Phi.ageClass.sex <- list(formula=~ageClass*sex)
+  Phi.ageClass.time <- list(formula=~ageClass*time)
+  Phi.effort.sex <- list(formula=~effort*sex)
+  Phi.effort.time <- list(formula=~effort*time)
+  Phi.sex.time <- list(formula=~sex*time)
+  
+  # Detection probability (p) formula as constant
+  p.dot <- list(formula=~1)
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+
+# run the models
+m1.phi_lwed.cjs.models <- m1.phi_fit.cjs.models(m1_lwed.cjs.proc,
+                                                m1_lwed.cjs.ddl)
+
+View(m1.phi_lwed.cjs.models$model.table)
+
+# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
+search.output.files(m1.phi_lwed.cjs.models, "convergence") # NULL; apparently all converged?
+search.output.files(m1.phi_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
 ```
 
 **Optimal model for p**
@@ -3897,28 +5207,28 @@ m1_lwed.cjs.ddl$p
 # 1) build fxn to create models
 m1.p_fit.cjs.models <- function(dataProc, dataDesign) {
   
-  # Apparent survival (Phi) formula
-  Phi.dot <- list(formula=~1) # best model from above
+  # Apparent survival (Phi) formula (optimal from above)
+  Phi.sex_time <- list(formula=~sex+time) # best model from above
   
   # Detection probability (p) formula
   p.dot <- list(formula=~1) # constant detection
   p.ageClass <- list(formula=~ageClass) # differs across ages
-  p.nGrps <- list(formula=~nGrps)
+  p.effort <- list(formula=~effort)
   p.sex <- list(formula=~ageClass) # differs between males and females
   p.time <- list(formula=~time) # differs between discrete times
   
-  p.ageClass_nGrps <- list(formula=~ageClass+nGrps)
+  p.ageClass_effort <- list(formula=~ageClass+effort)
   p.ageClass_sex <- list(formula=~ageClass+sex)
   p.ageClass_time <- list(formula=~ageClass+time)
-  p.nGrps_sex <- list(formula=~nGrps+sex)
-  p.nGrps_time <- list(formula=~nGrps+time)
+  p.effort_sex <- list(formula=~effort+sex)
+  p.effort_time <- list(formula=~effort+time)
   p.sex_time <- list(formula=~sex+time)
   
-  p.ageClass.nGrps <- list(formula=~ageClass*nGrps)
+  p.ageClass.effort <- list(formula=~ageClass*effort)
   p.ageClass.sex <- list(formula=~ageClass*sex)
   p.ageClass.time <- list(formula=~ageClass*time)
-  p.nGrps.sex <- list(formula=~nGrps*sex)
-  p.nGrps.time <- list(formula=~nGrps*time)
+  p.effort.sex <- list(formula=~effort*sex)
+  p.effort.time <- list(formula=~effort*time)
   p.sex.time <- list(formula=~sex*time)
   
   # Construct all combinations and put into one model table
@@ -3943,65 +5253,28 @@ m1.p_lwed.cjs.models <- m1.p_fit.cjs.models(m1_lwed.cjs.proc,
 View(m1.p_lwed.cjs.models$model.table)
 
 # can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
-search.output.files(rmark_m1_lwed.cjs.models, "convergence") # NULL; apparently all converged?
-search.output.files(rmark_m1_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
+search.output.files(m1.p_lwed.cjs.models, "convergence") # NULL; apparently all converged?
+search.output.files(m1.p_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
 ```
 
-**Optimal model for Phi**
+Final model: Phi(~sex + time)p(~ageClass + time)
+
+##### Top model
+
+https://www.montana.edu/rotella/documents/502/lab05Rmark.html
 
 ```{r}
-# 1) build fxn to create models
-m1.phi_fit.cjs.models <- function(dataProc, dataDesign) {
-  
-  # Apparent survival (Phi) formula
-  Phi.dot <- list(formula=~1) # constant detection
-  Phi.ageClass <- list(formula=~ageClass) # differs across ages
-  Phi.nGrps <- list(formula=~nGrps)
-  Phi.sex <- list(formula=~ageClass) # differs between males and females
-  Phi.time <- list(formula=~time) # differs between discrete times
-  
-  Phi.ageClass_nGrps <- list(formula=~ageClass+nGrps)
-  Phi.ageClass_sex <- list(formula=~ageClass+sex)
-  Phi.ageClass_time <- list(formula=~ageClass+time)
-  Phi.nGrps_sex <- list(formula=~nGrps+sex)
-  Phi.nGrps_time <- list(formula=~nGrps+time)
-  Phi.sex_time <- list(formula=~sex+time)
-  
-  Phi.ageClass.nGrps <- list(formula=~ageClass*nGrps)
-  Phi.ageClass.sex <- list(formula=~ageClass*sex)
-  Phi.ageClass.time <- list(formula=~ageClass*time)
-  Phi.nGrps.sex <- list(formula=~nGrps*sex)
-  Phi.nGrps.time <- list(formula=~nGrps*time)
-  Phi.sex.time <- list(formula=~sex*time)
-  
-  # Detection probability (p) formula (based on optimal from above)
-  p.nGrps_sex <- list(formula=~nGrps+sex)
-  
-  # Construct all combinations and put into one model table
-  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
-  
-  # run & return list of models
-  results <- mark.wrapper(cml,
-                          data = dataProc,
-                          ddl = dataDesign,
-                          external = FALSE,
-                          accumulate = TRUE,
-                          hessian = TRUE)
-  
-  return(results)
-  
-}
+summary(m1.p_lwed.cjs.models[[1]])
+names(m1.p_lwed.cjs.models)
+m1_lwed_top <- m1.p_lwed.cjs.models[[1]]
 
-# run the models
-m1.phi_lwed.cjs.models <- m1.phi_fit.cjs.models(m1_lwed.cjs.proc,
-                                                m1_lwed.cjs.ddl)
+# examine output for models of interest
+m1_lwed_top$results$beta
 
-View(m1.phi_lwed.cjs.models$model.table)
-
-# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
-search.output.files(rmark_m1_lwed.cjs.models, "convergence") # NULL; apparently all converged?
-search.output.files(rmark_m1_lwed.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
+# make predictions for phi from top model
+lwed_min
 ```
+
 
 #### SIMP
 
@@ -4054,38 +5327,27 @@ m1_simp.cjs.ddl <- add.design.data(m1_simp.cjs.proc,
 ## 2c) add effort covariate
 m1_simp_newTimes <- as.character(unique(c(m1_simp.cjs.ddl$Phi$time, m1_simp.cjs.ddl$p$time)))
 
-m1_simp_covGrps <- data.frame(
+m1_simp_covEffort <- data.frame(
   time = m1_simp_newTimes,
-  nGrps = simp_capSummary_byGroup[simp_capSummary_byGroup$captureYear %in% 2011:2019, "nGroups"]
+  effort = simp_capSummary_byGroup[simp_capSummary_byGroup$captureYear %in% 2011:2019, "capDuration_days"]
 )
 
+#m1_simp_covGrps <- data.frame(
+#  time = m1_simp_newTimes,
+#  nGrps = simp_capSummary_byGroup[simp_capSummary_byGroup$captureYear %in% 2011:2019, "nGroups"]
+#)
+
 m1_simp.cjs.ddl$p <- merge_design.covariates(m1_simp.cjs.ddl$p,
-                                             m1_simp_covGrps)
+                                             m1_simp_covEffort)
 
 m1_simp.cjs.ddl$Phi
 m1_simp.cjs.ddl$p
 ```
 
-**Optimal model for p**
-
-```{r}
-# function is the same as above for LWED
-
-# run the models
-m1.p_simp.cjs.models <- m1.p_fit.cjs.models(m1_simp.cjs.proc,
-                                            m1_simp.cjs.ddl)
-
-View(m1.p_simp.cjs.models$model.table)
-
-# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
-search.output.files(m1.p_simp.cjs.models, "convergence") # NULL; apparently all converged?
-search.output.files(m1.p_simp.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
-```
-
 **Optimal model for Phi**
 
 ```{r}
-# optimal p for simp same as lwed (p(nGrps + sex)), so can use fxn from above
+# function is the same as above for LWED
 
 # run the models
 m1.phi_simp.cjs.models <- m1.phi_fit.cjs.models(m1_simp.cjs.proc,
@@ -4096,6 +5358,64 @@ View(m1.phi_simp.cjs.models$model.table)
 # can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
 search.output.files(m1.phi_simp.cjs.models, "convergence") # NULL; apparently all converged?
 search.output.files(m1.phi_simp.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
+```
+
+**Optimal model for p**
+
+Best phi for SIMP was Phi(~1)p(~1)
+
+```{r}
+# 1) build fxn to create models
+m1.p_fit.cjs.models_simp <- function(dataProc, dataDesign) {
+  
+  # Apparent survival (Phi) formula (optimal from above)
+  Phi.dot <- list(formula=~1) # best model from above
+  
+  # Detection probability (p) formula
+  p.dot <- list(formula=~1) # constant detection
+  p.ageClass <- list(formula=~ageClass) # differs across ages
+  p.effort <- list(formula=~effort)
+  p.sex <- list(formula=~ageClass) # differs between males and females
+  p.time <- list(formula=~time) # differs between discrete times
+  
+  p.ageClass_effort <- list(formula=~ageClass+effort)
+  p.ageClass_sex <- list(formula=~ageClass+sex)
+  p.ageClass_time <- list(formula=~ageClass+time)
+  p.effort_sex <- list(formula=~effort+sex)
+  p.effort_time <- list(formula=~effort+time)
+  p.sex_time <- list(formula=~sex+time)
+  
+  p.ageClass.effort <- list(formula=~ageClass*effort)
+  p.ageClass.sex <- list(formula=~ageClass*sex)
+  p.ageClass.time <- list(formula=~ageClass*time)
+  p.effort.sex <- list(formula=~effort*sex)
+  p.effort.time <- list(formula=~effort*time)
+  p.sex.time <- list(formula=~sex*time)
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("CJS")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+
+# run the models
+m1.p_simp.cjs.models <- m1.p_fit.cjs.models_simp(m1_simp.cjs.proc,
+                                            m1_simp.cjs.ddl)
+
+View(m1.p_simp.cjs.models$model.table)
+
+# can search output files for things like "numerical convergence suspect"; unsure how to check convergence otherwise, this is all I could find in the package documentation
+search.output.files(m1.p_simp.cjs.models, "convergence") # NULL; apparently all converged?
+search.output.files(m1.p_simp.cjs.models, "WARNING") # get a number of warnings about "At least a pair of the encounter histories are duplicates" and "Numerical underflow occurred during optimization of this model"
 ```
 
 deviance = diff b/t null deviance and model deviance
@@ -4112,7 +5432,7 @@ I don't understand why I'm getting the duplicate error if I set accumulate to TR
 **LWED**
 
 ```{r}
-table_m1_lwed.cjs.models <- m1.phi_lwed.cjs.models$model.table %>%
+table_m1_lwed.cjs.models <- m1.p_lwed.cjs.models$model.table %>%
   select(-Phi, -p, -AICc) %>%
   mutate(rank = row_number(),
          DeltaAICc = round(DeltaAICc, 2),
@@ -4141,7 +5461,7 @@ table_m1_lwed.cjs.models %>%
 **SIMP**
 
 ```{r}
-table_m1_simp.cjs.models <- m1.phi_simp.cjs.models$model.table %>%
+table_m1_simp.cjs.models <- m1.p_simp.cjs.models$model.table %>%
   select(-Phi, -p, -AICc) %>%
   mutate(rank = row_number(),
          DeltaAICc = round(DeltaAICc, 2),
@@ -4166,7 +5486,6 @@ table_m1_simp.cjs.models
 table_m1_simp.cjs.models %>%
   gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_m1_simp.cjs.models.png", vwidth = 1500, vheight = 1000)
 ```
-
 
 ### c-hat again
 
@@ -4864,8 +6183,291 @@ birthData %>%
 
 ## Model 3: Abundance
 
+### Prep data
 
+**LWED**
 
+```{r}
+# 1) create capture histories
+m3_lwed_capHist <- capHist_2009to2019 %>%
+  filter(species == "LWED") %>%
+  select(-species, -animalID)
+
+table(m3_lwed_capHist$sex)
+# F  M 
+#68 77 
+
+# 2) get time intervals b/t sampling periods
+m3_lwed_capIntervals <- get_capData_summary(capData_2009to2019, "LWED") %>%
+  # only 2010-2019 to account for birthYear start
+  filter(captureYear %in% 2009:2019) %>%
+  # ditch interval for first year
+  mutate(
+    capInterval_days = case_when(
+      captureYear == min(captureYear) ~ NA,
+      .default = capInterval_days
+    )
+  ) %>%
+  select(capInterval_days) %>%
+  # normalized interval
+  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
+  select(intNorm) %>%
+  na.omit() %>%
+  pull()
+m3_lwed_capIntervals
+
+# 3) process data
+m3_lwed.js.proc <- process.data(
+  m3_lwed_capHist,
+  begin.time = 2009,
+  model = "POPAN",
+  groups = "sex",
+  time.intervals = m3_lwed_capIntervals
+  )
+
+# 4) design data
+## 4a) initial design data
+m3_lwed.js.ddl <- make.design.data(m3_lwed.js.proc)
+
+## 4b) add ageClass (use data from model 1)
+library(combinat)
+### start subadult at ages (1 year in study):
+min(m3_lwed_capIntervals) # 0.59
+max(m3_lwed_capIntervals) # 1.2
+### end subadult at ages (3 years in study):
+subad <- combinat::combn(m3_lwed_capIntervals, m = 3, fun = sum) %>%
+  as.data.frame() %>%
+  dplyr::rename("combo" = ".") %>%
+  arrange(combo)
+min(subad$combo) # 2.34
+max(subad$combo) # 3.31
+### adjust phi in ddl
+m3_lwed.js.ddl <- add.design.data(m3_lwed.js.proc,
+                                   m3_lwed.js.ddl,
+                                   parameter = "Phi",
+                                   type = "age",
+                                   bins = c(0,0.5,2.3,15),
+                                   name = "ageClass")
+### adjust p in ddl
+m3_lwed.js.ddl <- add.design.data(m3_lwed.js.proc,
+                                   m3_lwed.js.ddl,
+                                   parameter = "p",
+                                   type = "age",
+                                   bins = c(0,0.5,2.3,15),
+                                   name = "ageClass")
+
+## 4c) add effort covariate
+m3_lwed_newTimes <- as.character(unique(c(m3_lwed.js.ddl$Phi$time, m3_lwed.js.ddl$p$time)))
+
+m3_lwed_covGrps <- data.frame(
+  time = m3_lwed_newTimes,
+  nGrps = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2009:2019, "nGroups"]
+)
+
+m3_lwed.js.ddl$p <- merge_design.covariates(m3_lwed.js.ddl$p,
+                                             m3_lwed_covGrps)
+
+# view:
+m3_lwed.js.ddl$Phi
+m3_lwed.js.ddl$p
+```
+
+**SIMP**
+
+```{r}
+# 1) create capture histories
+m3_simp_capHist <- capHist_2009to2019 %>%
+  filter(species == "SIMP") %>%
+  select(-species, -animalID) %>%
+  # simp starts in 2011
+  mutate(ch = str_sub(ch, 3, -1))
+
+table(m3_simp_capHist$sex)
+# F  M 
+#48 54
+
+# 2) get time intervals b/t sampling periods
+m3_simp_capIntervals <- get_capData_summary(capData_2009to2019, "SIMP") %>%
+  # only 2011-2019 (when simps were captured)
+  filter(captureYear %in% 2011:2019) %>%
+  # ditch interval for first year
+  mutate(
+    capInterval_days = case_when(
+      captureYear == min(captureYear) ~ NA,
+      .default = capInterval_days
+    )
+  ) %>%
+  select(capInterval_days) %>%
+  # normalized interval
+  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
+  select(intNorm) %>%
+  na.omit() %>%
+  pull()
+m3_simp_capIntervals
+# 1.16 1.09 1.00 1.02 1.02 0.96 1.02 1.03
+
+# 3) process data
+m3_simp.js.proc <- process.data(
+  m3_simp_capHist,
+  begin.time = 2011,
+  model = "POPAN",
+  groups = "sex",
+  time.intervals = m3_simp_capIntervals
+  )
+
+# 2) design data
+## 2a) initial design data
+m3_simp.js.ddl <- make.design.data(m3_simp.js.proc)
+
+## 2b) add ageClass
+library(combinat)
+### start subadult at ages (1 year in study):
+min(m3_simp_capIntervals) # 0.96
+max(m3_simp_capIntervals) # 1.16
+### end subadult at ages (3 years in study):
+subad <- combinat::combn(m3_simp_capIntervals, m = 3, fun = sum) %>%
+  as.data.frame() %>%
+  dplyr::rename("combo" = ".") %>%
+  arrange(combo)
+min(subad$combo) # 2.98
+max(subad$combo) # 3.28
+### adjust phi in ddl (lwed bins should still work here)
+m3_simp.js.ddl <- add.design.data(m3_simp.js.proc,
+                                   m3_simp.js.ddl,
+                                   parameter = "Phi",
+                                   type = "age",
+                                   bins = c(0,0.5,2.7,15),
+                                   name = "ageClass")
+### adjust p in ddl (lwed bins should still work here)
+m3_simp.js.ddl <- add.design.data(m3_simp.js.proc,
+                                   m3_simp.js.ddl,
+                                   parameter = "p",
+                                   type = "age",
+                                   bins = c(0,0.5,2.7,15),
+                                   name = "ageClass")
+
+## 2c) add effort covariate
+m3_simp_newTimes <- as.character(unique(c(m3_simp.js.ddl$Phi$time, m3_simp.js.ddl$p$time)))
+
+m3_simp_covGrps <- data.frame(
+  time = m3_simp_newTimes,
+  nGrps = simp_capSummary_byGroup[simp_capSummary_byGroup$captureYear %in% 2011:2019, "nGroups"]
+)
+
+m3_simp.js.ddl$p <- merge_design.covariates(m3_simp.js.ddl$p,
+                                             m3_simp_covGrps)
+
+m3_simp.js.ddl$Phi
+m3_simp.js.ddl$p
+```
+
+### Prep models
+
+```{r}
+m3_fit.js.models <- function(dataProc, dataDesign) {
+  
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  
+  # p formulas
+  p.dot <- list(formula=~1)
+  
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constrained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.sex <- list(formula=~sex)
+  pent.dot <- list(formula=~1)
+  
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.sex <- list(formula=~sex)
+  N.dot <- list(formula=~1)
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("POPAN")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+```
+
+### Run function
+
+```{r}
+m3_lwed.js.models <- m3_fit.js.models(m3_lwed.js.proc, m3_lwed.js.ddl)
+m3_simp.js.models <- m3_fit.js.models(m3_simp.js.proc, m3_simp.js.ddl)
+
+m3_lwed.js.models
+m3_simp.js.models
+
+summary(m3_lwed.js.models[[1]])
+summary(m3_simp.js.models[[1]])
+```
+
+### Predict (real) values
+
+ffs. do the popan.derived thing. 
+
+```{r}
+m3_lwed.js.derived <- popan.derived(m3_lwed.js.proc,
+                                    m3_lwed.js.models[[1]])
+m3_simp.js.derived <- popan.derived(m3_simp.js.proc,
+                                    m3_simp.js.models[[1]])
+
+m3_lwed.js.derived$NGross # superpopulation for F and M
+m3_lwed.js.derived$N # N by sex each year
+m3_lwed.js.derived$Nbyocc # total N each year
+
+m3_simp.js.derived$NGross
+m3_simp.js.derived$N
+m3_simp.js.derived$Nbyocc
+```
+
+### Plots
+
+```{r}
+m3_lwed_forPlot <- m3_lwed.js.derived$N %>%
+  mutate(Occasion = Occasion + 2008,
+         species = "Saddleback tamarins")
+m3_simp_forPlot <- m3_simp.js.derived$N %>%
+  mutate(Occasion = Occasion + 2010,
+         species = "Emperor tamarins")
+
+rbind(m3_lwed_forPlot, m3_simp_forPlot) %>%
+  
+  ggplot(aes(x = Occasion, y = N, color = sex, fill = sex)) +
+  # Shaded area for confidence intervals with separate fills by sex
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.2) +
+  # Smoothed lines by sex with matching colors
+  geom_smooth(formula = y ~ x, method = "loess", se = FALSE) +
+  # Adding points for individual observations
+  geom_point(size = 2, shape = 16) +
+  # Axis labels
+  labs(x = "Occasion", y = "Population Estimate (N)", color = "Sex", fill = "Sex") +
+  # Classic theme with adjustments for clarity
+  theme_classic() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 10)
+  ) +
+  # Custom color scheme for male and female
+  scale_color_manual(values = c("F" = "#1C9D7CFF", "M" = "#3A507FFF")) +
+  scale_fill_manual(values = c("F" = "#1C9D7CFF", "M" = "#3A507FFF")) +
+  facet_grid(cols = vars(species)) +
+  scale_x_continuous(breaks = c(2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+my_colors_peru
+```
 
 
 
