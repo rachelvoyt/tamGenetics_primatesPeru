@@ -332,6 +332,12 @@ get_genoSuccess <- function(genoFile,
                             sampleID_colName,
                             exclude_nonTargetSp = c("yes", "no")) {
   
+  # ensure lociFile colnames are in the right format
+  lociFile <- lociFile %>%
+    rename_with(tolower) %>%
+    select(contains("locus")) %>%
+    `colnames<-`("locus")
+  
   # ensure sampleID colname is in correct format
   if(missing(sampleID_colName)) {
     "sampleID"
@@ -341,20 +347,20 @@ get_genoSuccess <- function(genoFile,
   
   # species-specific loci sets & sample lists
   lociList_dual <- lociFile %>%
-    filter(!str_detect(Locus, "LWED")) %>%
-    filter(!str_detect(Locus, "SIMP"))
+    filter(!str_detect(locus, "LWED")) %>%
+    filter(!str_detect(locus, "SIMP"))
   
   lociList_lwed <- lociFile %>%
-    filter(!str_detect(Locus, "SIMP"))
+    filter(!str_detect(locus, "SIMP"))
   
   lociList_simp <- lociFile %>%
-    filter(!str_detect(Locus, "LWED"))
+    filter(!str_detect(locus, "LWED"))
   
   lociList_lwedSpec <- lociFile %>%
-    filter(str_detect(Locus, "LWED"))
+    filter(str_detect(locus, "LWED"))
   
   lociList_simpSpec <- lociFile %>%
-    filter(str_detect(Locus, "SIMP"))
+    filter(str_detect(locus, "SIMP"))
   
   
   sampleList_lwed <- mdFile %>%
@@ -375,15 +381,15 @@ get_genoSuccess <- function(genoFile,
       rownames_to_column("locus") %>%
       mutate(
         totalGenos = case_when(
-          exclude_nonTargetSp == "yes" & locus %in% lociList_lwedSpec$Locus ~ rowSums(!is.na(select(., sampleList_lwed$sampleID))),
-          exclude_nonTargetSp == "yes" & locus %in% lociList_simpSpec$Locus ~ rowSums(!is.na(select(., sampleList_simp$sampleID))),
-          exclude_nonTargetSp == "yes" & locus %in% lociList_dual$Locus ~ rowSums(!is.na(select(., sampleList_pos$sampleID))),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_lwedSpec$locus ~ rowSums(!is.na(select(., sampleList_lwed$sampleID))),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_simpSpec$locus ~ rowSums(!is.na(select(., sampleList_simp$sampleID))),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_dual$locus ~ rowSums(!is.na(select(., sampleList_pos$sampleID))),
           .default = rowSums(!is.na(select(., -locus)))
         ),
         possibleGenos = case_when(
-          exclude_nonTargetSp == "yes" & locus %in% lociList_lwedSpec$Locus ~ nrow(sampleList_lwed),
-          exclude_nonTargetSp == "yes" & locus %in% lociList_simpSpec$Locus ~ nrow(sampleList_simp),
-          exclude_nonTargetSp == "yes" & locus %in% lociList_dual$Locus ~ nrow(sampleList_pos),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_lwedSpec$locus ~ nrow(sampleList_lwed),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_simpSpec$locus ~ nrow(sampleList_simp),
+          exclude_nonTargetSp == "yes" & locus %in% lociList_dual$locus ~ nrow(sampleList_pos),
           .default = nrow(mdFile)
         ),
         genoSuccess = totalGenos / possibleGenos
@@ -402,8 +408,8 @@ get_genoSuccess <- function(genoFile,
       rownames_to_column("sampleID") %>%
       mutate(
         totalGenos = case_when(
-          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_lwed$sampleID ~ rowSums(!is.na(select(., lociList_lwed$Locus))),
-          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_simp$sampleID ~ rowSums(!is.na(select(., lociList_simp$Locus))),
+          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_lwed$sampleID ~ rowSums(!is.na(select(., lociList_lwed$locus))),
+          exclude_nonTargetSp == "yes" & sampleID %in% sampleList_simp$sampleID ~ rowSums(!is.na(select(., lociList_simp$locus))),
           .default = rowSums(!is.na(select(., -sampleID)))
         ),
         possibleGenos = case_when(
@@ -680,6 +686,8 @@ get_genoCompare <- function(genoFile1, genoFile2, sampleRef, lociInfo) {
 get_readSum <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) + as.numeric(y), paste(x))
 # Input: column name
 # Example usage: %>% mutate(readSums = get_readSum(readCounts))
+
+get_readRatios <- function(x) gsubfn("(\\d+),(\\d+)", ~ as.numeric(x) / as.numeric(y), paste(x))
 
 
 get_callType <- function(locusCol, genoCol, lociInfo) {

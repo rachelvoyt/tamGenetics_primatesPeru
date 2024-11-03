@@ -33,122 +33,363 @@ Vynck, Matthijs, Friedel Nollet, Lode Sibbens, and Helena Devos. 2023. “Bias R
 
 ```{r}
 library(gsubfn)
+library(janitor)
 library(kableExtra)
 library(rlist)
 library(tidyverse)
+
+source("./project_scripts/ravo_ch2Scripts.R")
+source("./project_scripts/ravo_gtScripts.R")
 ```
 
 # 3 Data
 
-## md_tamRun5
-
-Right now 
+## 3.1 Metadata
 
 ```{r}
-# Full set of metadata (latest version from metadataReconciliation)
-md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  relocate(captureYear, .after = captureDate)
 
-# Metadata subsets by sample type
-md_hairSamples <- md_tamRun5_v5 %>%
+sampleRef <- read.csv("./project_data/master_sampleInfo_v2.csv")
+```
+
+## 3.2 capData
+
+Capture data includes all records of individual captures from 2009-2019.
+
+Use the latest version of capData_byIndiv (from
+tamGenetics_paper3_dataOrganization), then 1) filter to first capture
+for each animalID 2) filter again to animalIDs in tamRun5
+
+**note** exclude those in capData w/"UNK" animalID; did a lot of digging
+in ch2_dataOrganization.Rmd and most likely these entries need to be
+ditched
+
+```{r}
+capData_2009to2023 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
+  # ditch UNK animalIDs
+  filter(animalID != "UNK") %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4),
+    captureYear = as.numeric(captureYear)
+  ) %>%
+  relocate(captureYear, .after = captureDate)
+
+capData_2009to2019 <- capData_2009to2023 %>%
+  filter(rowID <= 613)
+
+capData_2009to2023_firstEntry <- capData_2009to2023[match(unique(capData_2009to2023$animalID), capData_2009to2023$animalID),] %>%
+  select(rowID, captureDate, captureYear, animalID, ageClass, ageClass_classifier, animalName1, animalName2, groupName, species, sex, notes_MD, notes_RV)
+
+capData_2009to2019_firstEntry <- capData_2009to2023_firstEntry %>%
+  filter(rowID <= 613)
+```
+
+## 3.3 Loci
+
+List of all loci in version 3 of the primer pool
+
+```{r}
+lociRef <- read.csv("./project_data/master_lociInfo.csv")
+```
+
+## 3.4 Genos
+
+```{r}
+genos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T, na.strings = "0") %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.)))
+```
+
+## 3.5 Allele reads
+
+```{r}
+readCounts <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs_10x.txt") %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  # replace 0,0 with NA
+  mutate(across(everything(), ~ as.character(.))) %>%
+  mutate(across(everything(), ~ 
+                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
+                            .default = .)
+                ))
+```
+
+# 4 Filter genos
+
+## 4.1 Remove dups
+
+Identify duplicate animalIDs (previously identified in metadataReconciliation) and keep the one with the highest genoSuccess
+
+```{r}
+# get genoSuccess
+locusTable <- read.table("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = T) %>%
+  mutate(Locus_ID = (sub('[_][^_]+$', '', Locus_ID)))
+
+genoSuccess <- get_genoSuccess(genos, locusTable, md, "bySample", sampleID_colName = "sampleID", exclude_nonTargetSp = "no")
+
+# hair
+hairDups <- md %>%
   filter(sampleType == "hair") %>%
-  # remove tamRunt.264 (animalID 200 dup)
-  filter(sampleID != "tamRun5.264")
+  get_dupes(animalID) %>%
+  merge(., genoSuccess, by = "sampleID") %>%
+  relocate(genoSuccess) %>%
+  arrange(animalID, genoSuccess)
 
-md_bloodSamples <- md_tamRun5_v5 %>%
+toRemove_hairDups <- hairDups %>%
+  group_by(animalID) %>%
+  slice_min(genoSuccess) %>%
+  ungroup() %>%
+  select(sampleID) %>% pull()
+
+# blood
+bloodDups <- md %>%
   filter(sampleType == "blood") %>%
-  # ditch bloodDupes (based on geno success, just checked it manually but should probably do it via script...)
-  filter(sampleID != "tamRun5.073") %>%
-  filter(sampleID != "tamRun5.132") %>%
-  filter(sampleID != "tamRun5.161") %>%
-  filter(sampleID != "tamRun5.053") %>%
-  filter(sampleID != "tamRun5.054") %>%
-  filter(sampleID != "tamRun5.031") %>%
-  filter(sampleID != "tamRun5.168")
+  get_dupes(animalID) %>%
+  merge(., genoSuccess, by = "sampleID") %>%
+  relocate(genoSuccess) %>%
+  arrange(animalID, genoSuccess)
 
-# Sample lists by sample type
-hairSamples <- md_hairSamples %>%
-  select(sampleID) %>%
-  pull()
+toRemove_bloodDups <- bloodDups %>%
+  group_by(animalID) %>%
+  slice_min(genoSuccess) %>%
+  ungroup() %>%
+  select(sampleID) %>% pull()
 
-bloodSamples <- md_bloodSamples %>%
-  select(sampleID) %>%
-  pull()
+# clean!
+genos_temp <- genos %>%
+  select(-toRemove_hairDups, -toRemove_bloodDups)
+```
+
+## 4.2 Remove 0% genoSuccess
+
+Subset to INDID and SEXID loci, then remove any samples or loci with 0% genoSuccess
+
+```{r}
+# 250 samples, 194 loci
+genos_temp2 <- genos_temp %>%
+  # just want indid & sex loci
+  filter(!str_detect(rownames(.), "SPECIES")) %>%
+  # remove samples w/all NA
+  select(., where(function(x) !all(is.na(x)))) %>%
+  # remove loci w/all NA
+  filter(if_any(everything(), ~!is.na(.)))
+```
+
+## 4.3 Create clean versions
+
+```{r}
+# genos (250 samples, 194 loci)
+genos_clean <- genos_temp2
+
+# allele reads
+readCounts_clean <- readCounts %>%
+  select(colnames(genos_clean)) %>%
+  filter(rownames(.) %in% rownames(genos_clean))
+ 
+# md
+md_clean <- md %>%
+  filter(sampleID %in% colnames(genos_clean))
+
+md_hair_clean <- md_clean %>%
+  filter(sampleType == "hair")
+md_blood_clean <- md_clean %>%
+  filter(sampleType == "blood")
+
+hairSamples_clean <- md_hair_clean$sampleID
+bloodSamples_clean <- md_blood_clean$sampleID
+```
+
+# 5 Identify twin pairs
+
+## Get likely twins from capData
+
+First get a list of likely twin pairs; identified as indivs who were captured as juveniles in the same group in the same year
+
+**NOTE** there are two records in which we have THREE juvs in a group in one year, both LWED:
+-   Royals 2015 - 161, 162, 163
+-   Ghosts 2018 - 222, 223, 224
+
+Capture records don't say anything to indicate whether these are triplets or twin pair + 1 or what; trapping reports indicate they seem to be around the same age
+
+```{r}
+twinList <- capData_2009to2019 %>%
+  filter(ageClass == "juvenile") %>%
+  select(c("species", "captureDate", "groupName", "animalID")) %>%
+  group_by(species, captureDate, groupName) %>%
+  summarise(twinPairs = toString(sort(unique(animalID)))) %>%
+  filter(str_detect(twinPairs, ",")) %>%
+  separate_wider_delim(twinPairs, delim = ",", names = c("twin1", "twin2", "twin3"), too_few = "align_start") %>%
+  as.data.frame() %>%
+  select(-captureDate) %>%
+  distinct() %>%
+  arrange(groupName) #%>%
+  #mutate(twinID = row_number()) %>%
+  #relocate(twinID)
+
+View(capData_2009to2023 %>% filter(animalID %in% c(161, 162, 163)))
+View(capData_2009to2023 %>% filter(animalID %in% c(222, 223, 224)))
+```
+
+## Check ckmrSim r coefficients
+
+```{r}
+lwed_logls_fs <- read.csv("./DISSERTATION/ch2_demography/02_results/lwed/ckmr_logls_fs.u.csv")
+simp_logls_fs <- read.csv("./DISSERTATION/ch2_demography/02_results/simp/ckmr_logls_fs.u.csv")
+logls_fs <- rbind(lwed_logls_fs, simp_logls_fs) %>%
+  select(sib2, sib1, logl_ratio, num_loc) %>%
+  dplyr::rename("logl_fs" = "logl_ratio",
+                "numLoci_fs" = "num_loc") %>%
+  na.omit()
+
+lwed_logls_hs <- read.csv("./DISSERTATION/ch2_demography/02_results/lwed/ckmr_logls_hs.u.csv")
+simp_logls_hs <- read.csv("./DISSERTATION/ch2_demography/02_results/simp/ckmr_logls_hs.u.csv")
+logls_hs <- rbind(lwed_logls_hs, simp_logls_hs) %>%
+  select(sib2, sib1, logl_ratio, num_loc) %>%
+  dplyr::rename("logl_hs" = "logl_ratio",
+                "numLoci_hs" = "num_loc") %>%
+  na.omit()
+
+temp <- data.frame(
+  species = c("LWED", "LWED", "LWED", "LWED"),
+  groupName = c("Royals", "Royals", "Ghosts", "Ghosts"),
+  twin1 = c(161, 162, 222, 223),
+  twin2 = c(163, 163, 224, 224)
+)
+
+test <- get_dupSamples(genos_clean) %>%
+  filter(proportionCommon > 0.3) %>%
+  merge(., sampleRef[, c("sampleID", "animalID", "sampleType")], by.x = "Sample1", by.y = "sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "animalID", "sampleType")], by.x = "Sample2", by.y = "sampleID", suffixes = c("1", "2"))
+
+twinList_ckmrCheck <- twinList %>%
+  mutate(twin1 = as.numeric(twin1),
+         twin2 = as.numeric(twin2)) %>%
+  select(-twin3) %>%
+  rbind(., temp) %>%
+  merge(., logls_fs, by.x = c("twin1", "twin2"), by.y = c("sib2", "sib1"), all.x = T) %>%
+  merge(., logls_hs, by.x = c("twin1", "twin2"), by.y = c("sib2", "sib1"), all.x = T) %>%
+  merge(., test[, c("animalID1", "animalID2", "proportionMatch", "commonGenotypes", "sampleType1", "sampleType2")], by.x = c("twin1", "twin2"), by.y = c("animalID1", "animalID2"), all.x = T)
+```
+
+## Address triplet situation
+
+For reference, we have two cases of groups w/3 juvs:
+-   Royals 2015 - 161, 162, 163
+-   Ghosts 2018 - 222, 223, 224
+
+Trap report info:
+-   Royals: "The group is now made up of 2 adult females, 2 adult males, and 3 juvenile males. Due to how unusual it is to find so many juveniles in a group as well as looking at the morphometrics of both adult females, we suspect that both of these females in the group are reproducing."
+-   Ghosts: no details given, just mention that there were three untagged juvs in the group when captured
+
+Hair samples for 222 and 224 are 0% genoSuccess, so we don't need to worry about them
+
+```{r}
+triplet_genoSuccess <- genoSuccess %>%
+  merge(., sampleRef[, c("sampleID", "animalID", "sampleType")], by = "sampleID") %>%
+  filter(animalID %in% c(161, 162, 163, 222, 223, 224)) %>%
+  arrange(animalID)
+```
+
+**Duptest**
+
+dupTest results suggest that **161/162** and **223/224** should be considered twin pairs, while 163 and 222 seem quite closely related (so maybe half-sibs?)
+
+```{r}
+triplet_dupTest <- genos_clean %>%
+  select(any_of(triplet_genoSuccess[triplet_genoSuccess$sampleType == "blood", "sampleID"])) %>%
+  get_dupSamples(.) %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by.x = "Sample1", by.y = "sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by.x = "Sample2", by.y = "sampleID", suffixes = c("1", "2"))
+
+# 161/162 propMatch = 0.92; next highest is 0.72
+triplet_dupTest %>%
+  filter(animalID1 %in% c(161, 162, 163)) %>%
+  filter(animalID2 %in% c(161, 162, 163)) %>%
+  arrange(desc(proportionMatch)) %>%
+  relocate(c(animalID1, animalID2)) %>%
+  select(-c(Sample1, Sample2))
+
+# 223/224 propMatch = 0.95; next highest is 0.86
+triplet_dupTest %>%
+  filter(animalID1 %in% c(222, 223, 224)) %>%
+  filter(animalID2 %in% c(222, 223, 224)) %>%
+  arrange(desc(proportionMatch)) %>%
+  relocate(c(animalID1, animalID2)) %>%
+  select(-c(Sample1, Sample2))
 ```
 
 ## Twin pair list
 
-I created the list of twin pairs in tamGenetics_paper3_dataOrganization.Rmd by locating juveniles that were captured in the same group within the same year. In two cases, three juveniles were present; for now, I'm keeping these entries, but removing one of the individuals - **will need to revisit this though.**
-
-It's also possible that there are additional twin pairs that were not captured as juveniles, but I'll be saving these for future analyses as well. 
-
 ```{r}
-twinList_tamRun5_file <- read.csv("./paper3_demographics/dataOrganization/twinList_tamRun5_6June2024.csv")
-
-twinPairs_tamRun5 <- twinList_tamRun5_file %>%
-  # add twinID
+twinPairs_run5 <- twinList %>%
+  # recode triplets based on duptest above
+  mutate(
+    twin1 = case_when(
+      !is.na(twin3) & groupName == "Royals" ~ "161",
+      !is.na(twin3) & groupName == "Ghosts" ~ "223",
+      .default = twin1
+    ),
+    twin2 = case_when(
+      !is.na(twin3) & groupName == "Royals" ~ "162",
+      !is.na(twin3) & groupName == "Ghosts" ~ "224",
+      .default = twin2
+    )
+  ) %>%
+  select(-twin3) %>%
+  arrange(groupName) %>%
   mutate(twinID = row_number()) %>%
   relocate(twinID) %>%
-  select(twinID, species, twin1, twin2) %>%
-  # add hair sample ID & species
-  merge(., md_hairSamples[, c("animalID", "sampleID")], by.x = "twin1", by.y = "animalID") %>%
+  # add hair sample ID & species (need samples for both)
+  mutate(twin1 = as.character(twin1),
+         twin2 = as.character(twin2)) %>%
+  mutate_if(is.character, str_trim) %>%
+  merge(., md_hair_clean[, c("animalID", "sampleID")], by.x = "twin1", by.y = "animalID") %>%
   rename("sampleID_hair_twin1" = "sampleID",
          "animalID_twin1" = "twin1") %>%
-  merge(., md_hairSamples[, c("animalID", "sampleID")], by.x = "twin2", by.y = "animalID") %>%
+  merge(., md_hair_clean[, c("animalID", "sampleID")], by.x = "twin2", by.y = "animalID") %>%
   rename("sampleID_hair_twin2" = "sampleID",
          "animalID_twin2" = "twin2") %>%
   # add blood sample ID
-  merge(., md_bloodSamples[, c("animalID", "sampleID")], by.x = "animalID_twin1", by.y = "animalID", all.x = T) %>%
+  merge(., md_blood_clean[, c("animalID", "sampleID")], by.x = "animalID_twin1", by.y = "animalID", all.x = T) %>%
   rename("sampleID_blood_twin1" = "sampleID") %>%
-  merge(., md_bloodSamples[, c("animalID", "sampleID")], by.x = "animalID_twin2", by.y = "animalID", all.x = T) %>%
+  merge(., md_blood_clean[, c("animalID", "sampleID")], by.x = "animalID_twin2", by.y = "animalID", all.x = T) %>%
   rename("sampleID_blood_twin2" = "sampleID") %>%
   # remove twin pair only if both blood samples are missing
   filter_at(vars(sampleID_blood_twin1, sampleID_blood_twin2), any_vars(!is.na(.))) %>%
   select(c("twinID", "species", "animalID_twin1", "animalID_twin2", "sampleID_hair_twin1", "sampleID_hair_twin2", "sampleID_blood_twin1", "sampleID_blood_twin2")) %>%
   arrange(twinID)
 
-twinPairs_tamRun5_lwed <- twinPairs_tamRun5 %>%
+twinPairs_run5_lwed <- twinPairs_run5 %>%
   filter(species == "LWED")
 
-twinPairs_tamRun5_simp <- twinPairs_tamRun5 %>%
+twinPairs_run5_simp <- twinPairs_run5 %>%
   filter(species == "SIMP")
 
 # Create long-format dataframe; gives each individual + their hair/blood sample IDs
-twinPairs_twin1 <- twinPairs_tamRun5 %>%
+twinPairs_twin1 <- twinPairs_run5 %>%
   select(c("twinID", "species", contains("twin1"))) %>%
   dplyr::rename("animalID" = "animalID_twin1",
          "sampleID_hair" = "sampleID_hair_twin1",
          "sampleID_blood" = "sampleID_blood_twin1")
 
-twinPairs_twin2 <- twinPairs_tamRun5 %>%
+twinPairs_twin2 <- twinPairs_run5 %>%
   select(c("twinID", "species", contains("twin2"))) %>%
   dplyr::rename("animalID" = "animalID_twin2",
          "sampleID_hair" = "sampleID_hair_twin2",
          "sampleID_blood" = "sampleID_blood_twin2")
 
-twinPairs_tamRun5_l <- rbind(twinPairs_twin1, twinPairs_twin2)
+twinPairs_run5_l <- rbind(twinPairs_twin1, twinPairs_twin2)
 
 # Twin sample ID lists by sample type
 twinPairs_hair_sampleList <- data.frame(
-  sampleID_hair = c(twinPairs_tamRun5$sampleID_hair_twin1, twinPairs_tamRun5$sampleID_hair_twin2)
+  sampleID_hair = c(twinPairs_run5$sampleID_hair_twin1, twinPairs_run5$sampleID_hair_twin2)
 ) %>%
   pull()
 
 twinPairs_blood_sampleList <- data.frame(
-  sampleID_blood = c(twinPairs_tamRun5$sampleID_blood_twin1, twinPairs_tamRun5$sampleID_blood_twin2)
+  sampleID_blood = c(twinPairs_run5$sampleID_blood_twin1, twinPairs_run5$sampleID_blood_twin2)
 ) %>%
   pull()
-```
-
-## Loci
-
-List of all loci in version 3 of the primer pool
-
-```{r}
-loci_v3 <- read.table("./05_tamRun5/03_run5GTscore/primerProbeFileV3_fullSet.txt", sep = "\t", header = T)
-
-# locus table
-locusTable <- read.table("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = T) %>%
-  mutate(Locus_ID = sub('[_][^_]+$', '', Locus_ID))
 ```
 
 # 4 GTscore 10x chimerism estimates
@@ -160,34 +401,15 @@ locusTable <- read.table("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleS
 Import genotypes for hair samples (using GTscore 10x cutoff) + allele reads for hair samples (unfiltered)
 
 ```{r}
-hairGenos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
-  # replace 0 with NA
-  mutate(across(everything(), ~ as.character(.))) %>%
-  mutate(across(everything(), ~ 
-                  case_when(. == "0" ~ gsub("0", NA, .),
-                            .default = .)
-                )) %>%
-  # adjust locus name formatting
-  rownames_to_column("locus") %>%
-  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
-  column_to_rownames("locus") %>%
+hairGenos <- genos_clean %>%
   # filter to hair samples
-  select(any_of(hairSamples)) %>%
+  select(any_of(hairSamples_clean)) %>%
   t() %>%
   as.data.frame()
 
-hairReads <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
-  # replace 0,0 with NA
-  mutate(across(everything(), ~ as.character(.))) %>%
-  mutate(across(everything(), ~ 
-                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
-                            .default = .)
-                )) %>%
-  # adjust locus name formatting
-  rownames_to_column("locus") %>%
-  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
-  column_to_rownames("locus") %>%
-  select(any_of(hairSamples)) %>%
+hairReads <- readCounts %>%
+  select(any_of(hairSamples_clean)) %>%
+  t() %>%
   as.data.frame()
 ```
 
@@ -196,18 +418,8 @@ hairReads <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleS
 Import allele reads for blood samples (unfiltered)
 
 ```{r}
-bloodReads <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt", header = T) %>%
-  # replace 0,0 with NA
-  mutate(across(everything(), ~ as.character(.))) %>%
-  mutate(across(everything(), ~ 
-                  case_when(. == "0,0" ~ gsub("0,0", NA, .),
-                            .default = .)
-                )) %>%
-  # adjust locus name formatting
-  rownames_to_column("locus") %>%
-  mutate(locus = sub('[_][^_]+$', '', locus)) %>%
-  column_to_rownames("locus") %>%
-  select(any_of(bloodSamples)) %>%
+bloodReads <- readCounts %>%
+  select(any_of(bloodSamples_clean)) %>%
   t() %>%
   as.data.frame()
 ```
@@ -220,10 +432,15 @@ bloodReads <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_single
 # Filter hairGenos to twin pairs
 hairGenos_allTwins <- hairGenos %>%
   rownames_to_column("sampleID") %>%
-  filter(sampleID %in% twinPairs_tamRun5_l$sampleID_hair) %>%
-  merge(., twinPairs_tamRun5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
+  filter(sampleID %in% twinPairs_run5_l$sampleID_hair) %>%
+  merge(., twinPairs_run5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
   select(-sampleID) %>%
   relocate(twinID) %>%
+  relocate(animalID) %>%
+  mutate(
+    animalID = as.character(animalID), # only necessary if ID is numeric
+    animalID = ifelse(row_number() > 1, paste0(animalID, ".", letters[row_number()]), animalID),
+    .by = animalID) %>%
   # Move animalID to rowname
   column_to_rownames("animalID")
 
@@ -246,13 +463,17 @@ hairGenos_twinPairs <- split(hairGenos_allTwins, f = hairGenos_allTwins$twinID) 
 ### Blood reads
 
 ```{r}
-bloodReads_allTwins <- twinPairs_tamRun5_l %>%
+bloodReads_allTwins <- twinPairs_run5_l %>%
   select(-species, -sampleID_hair) %>%
   merge(., bloodReads, by.x = "sampleID_blood", by.y = "row.names", all.x = T) %>%
   select(-sampleID_blood) %>%
   relocate(c(animalID, twinID)) %>%
   # filter to twinIDs present in hairGenos_twinPairs
   filter(twinID %in% names(hairGenos_twinPairs)) %>%
+  mutate(
+    animalID = as.character(animalID), # only necessary if ID is numeric
+    animalID = ifelse(row_number() > 1, paste0(animalID, ".", letters[row_number()]), animalID),
+    .by = animalID) %>%
   column_to_rownames("animalID")
 
 bloodReads_twinPairs <- split(bloodReads_allTwins, f = bloodReads_allTwins$twinID) %>%
@@ -273,7 +494,7 @@ hairBlood_twinPairs <- map2(hairGenos_twinPairs, bloodReads_twinPairs, ~left_joi
   lapply(., relocate, twinID) %>%
   bind_rows(.) %>%
   # add twin animalIDs
-  merge(., twinPairs_tamRun5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
+  merge(., twinPairs_run5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
   relocate(c(twinID, animalID_twin1, animalID_twin2))
 ```
 
@@ -300,7 +521,7 @@ allele1 <- function(x) str_sub(x, 1, 1)
 allele2 <- function(x) str_sub(x, -1, -1)
 
 # Define chimType
-calc_chimType <- function(donorGeno, recipGeno) 
+calc_chimType <- function(donorGeno, recipGeno) {
   case_when(
     # Donor/Recipient AA/BB
     allele1(donorGeno) != allele1(recipGeno) &
@@ -335,17 +556,19 @@ calc_chimType <- function(donorGeno, recipGeno)
       allele1(donorGeno) == allele1(recipGeno) &
       allele2(donorGeno) == allele2(recipGeno) ~ "type31"
     )
+}
 
 # Find blood read counts
 bloodReads_allele1 <- function(x) as.numeric(sub(",.*", "", x))
 bloodReads_allele2 <- function(x) as.numeric(sub(".*,", "", x))
 
 # Calculate variant allele frequency
-vaf <- function(recipBloodReads)
+vaf <- function(recipBloodReads) {
   round(bloodReads_allele2(recipBloodReads)/(bloodReads_allele1(recipBloodReads) + bloodReads_allele2(recipBloodReads)), 2)
+}
 
 # Calculate chimProp (hc)
-calc_chimProp <- function(recipChimType, recipBloodReads) 
+calc_chimProp <- function(recipChimType, recipBloodReads) {
   case_when(
     recipChimType == "type00" ~ vaf(recipBloodReads),
     recipChimType == "type01" ~ 1 - vaf(recipBloodReads),
@@ -354,6 +577,7 @@ calc_chimProp <- function(recipChimType, recipBloodReads)
     recipChimType == "type20" ~ 1 - 2 * vaf(recipBloodReads),
     recipChimType == "type21" ~ 2 * vaf(recipBloodReads) - 1
   )
+}
 ```
 
 ### Calculations
@@ -398,7 +622,7 @@ twinChimerism_allTwins <- rbind(twinChimerism_twin1, twinChimerism_twin2) %>%
     "chimProp" = "chimProp_twin1"
   ) %>%
 #  na.omit() %>%
-  merge(., md_hairSamples[, c("animalID", "species")], by = "animalID") %>%
+  merge(., md_hair_clean[, c("animalID", "species")], by = "animalID") %>%
   relocate(c(twinID, animalID, species)) %>%
   arrange(as.numeric(twinID))
 
@@ -437,7 +661,7 @@ As such, I'm doing the following:
 ### Functions
 
 ```{r}
-calc_chimProp_c <- function(recipChimType, HC, b)
+calc_chimProp_c <- function(recipChimType, HC, b) {
   case_when(
         recipChimType == "type00" ~ round((HC-2*HC*b)/(-4*b*HC+2*b+1), 2),
         recipChimType == "type01" ~ round((2*b*HC+HC)/(4*b*HC-2*b+1), 2),
@@ -446,6 +670,7 @@ calc_chimProp_c <- function(recipChimType, HC, b)
         recipChimType == "type20" ~ round((2*b+HC)/(2*b*HC+1), 2),
         recipChimType == "type21" ~ round((2*b-HC)/(2*b*HC-1), 2)
   )
+}
 ```
 
 ### Calculations
@@ -459,7 +684,7 @@ vaf_hairReads <- replace(hairReads, TRUE, lapply(hairReads, vaf)) %>%
 # Calculate VAF for AB/AB type-III blood reads
 vaf_bloodReads <- twinChimerism_allTwins %>%
   select(c("animalID", "locus", "chimType", "vaf")) %>%
-  merge(., md_bloodSamples[, c("sampleID", "animalID")], by = "animalID") %>%
+  merge(., md_blood_clean[, c("sampleID", "animalID")], by = "animalID") %>%
   select(-animalID) %>%
   arrange(sampleID) %>%
   mutate(
@@ -496,7 +721,7 @@ vafDev <- (vaf_allReads - 0.5) %>%
   rownames_to_column("locus") %>%
   rowwise() %>%
   mutate(
-    b1 = median(c_across(hairSamples), na.rm = TRUE),
+    b1 = median(c_across(hairSamples_clean), na.rm = TRUE),
     b2 = median(c_across(vaf_bloodReads_sampleList), na.rm = TRUE),
     b3 = median(c_across(where(is.numeric)), na.rm = TRUE)
     ) %>%
@@ -611,8 +836,8 @@ Blood allele reads file is the same as above
 # Filter hairGenos to twin pairs
 hairGenos_allTwins_0x <- hairGenos_0x %>%
   rownames_to_column("sampleID") %>%
-  filter(sampleID %in% twinPairs_tamRun5_l$sampleID_hair) %>%
-  merge(., twinPairs_tamRun5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
+  filter(sampleID %in% twinPairs_run5_l$sampleID_hair) %>%
+  merge(., twinPairs_run5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
   select(-sampleID) %>%
   relocate(twinID) %>%
   # Move animalID to rowname
@@ -637,7 +862,7 @@ hairGenos_twinPairs_0x <- split(hairGenos_allTwins_0x, f = hairGenos_allTwins_0x
 ### Blood reads
 
 ```{r}
-bloodReads_allTwins_0x <- twinPairs_tamRun5_l %>%
+bloodReads_allTwins_0x <- twinPairs_run5_l %>%
   select(-species, -sampleID_hair) %>%
   merge(., bloodReads, by.x = "sampleID_blood", by.y = "row.names", all.x = T) %>%
   select(-sampleID_blood) %>%
@@ -664,7 +889,7 @@ hairBlood_twinPairs_0x <- map2(hairGenos_twinPairs_0x, bloodReads_twinPairs_0x, 
   lapply(., relocate, twinID) %>%
   bind_rows(.) %>%
   # add twin animalIDs
-  merge(., twinPairs_tamRun5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
+  merge(., twinPairs_run5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
   relocate(c(twinID, animalID_twin1, animalID_twin2))
 ```
 
@@ -1088,8 +1313,8 @@ bloodReads_gtseq <- readCounts_gtseq %>%
 # Filter hairGenos to twin pairs
 hairGenos_allTwins_gtseq <- hairGenos_gtseq %>%
   rownames_to_column("sampleID") %>%
-  filter(sampleID %in% twinPairs_tamRun5_l$sampleID_hair) %>%
-  merge(., twinPairs_tamRun5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
+  filter(sampleID %in% twinPairs_run5_l$sampleID_hair) %>%
+  merge(., twinPairs_run5_l[, c("sampleID_hair", "twinID", "animalID")], by.x = "sampleID", by.y = "sampleID_hair") %>%
   select(-sampleID) %>%
   relocate(twinID) %>%
   # Move animalID to rowname
@@ -1114,7 +1339,7 @@ hairGenos_twinPairs_gtseq <- split(hairGenos_allTwins_gtseq, f = hairGenos_allTw
 ### Blood reads
 
 ```{r}
-bloodReads_allTwins_gtseq <- twinPairs_tamRun5_l %>%
+bloodReads_allTwins_gtseq <- twinPairs_run5_l %>%
   select(-species, -sampleID_hair) %>%
   merge(., bloodReads_gtseq, by.x = "sampleID_blood", by.y = "row.names", all.x = T) %>%
   select(-sampleID_blood) %>%
@@ -1141,7 +1366,7 @@ hairBlood_twinPairs_gtseq <- map2(hairGenos_twinPairs_gtseq, bloodReads_twinPair
   lapply(., relocate, twinID) %>%
   bind_rows(.) %>%
   # add twin animalIDs
-  merge(., twinPairs_tamRun5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
+  merge(., twinPairs_run5[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID") %>%
   relocate(c(twinID, animalID_twin1, animalID_twin2))
 ```
 
@@ -1472,13 +1697,13 @@ gtscore.seq_lwed_summary_final <- gtscore.seq_lwed_summary_mm %>%
   filter(mmSp_gtscore10x == "no") %>%
   filter(mmSex_gtscore10x == "no") %>%
   filter(n_loci_gtscore >=3) %>%
-  merge(., twinPairs_tamRun5_l[, c("animalID", "twinID")], by = "animalID")
+  merge(., twinPairs_run5_l[, c("animalID", "twinID")], by = "animalID")
 
 gtscore.seq_simp_summary_final <- gtscore.seq_simp_summary_mm %>%
   filter(mmSp_gtscore10x == "no") %>%
   filter(mmSex_gtscore10x == "no") %>%
   filter(n_loci_gtscore >=3) %>%
-  merge(., twinPairs_tamRun5_l[, c("animalID", "twinID")], by = "animalID")
+  merge(., twinPairs_run5_l[, c("animalID", "twinID")], by = "animalID")
 ```
 
 ```{r}

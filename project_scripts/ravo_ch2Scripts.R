@@ -178,42 +178,97 @@ get_popData_byYear <- function(
   
 }
 
-####################################
-### GET HIERFSTAT GENOS PER YEAR ###
-####################################
+##########################
+### GET GENOS PER YEAR ###
+##########################
 
-get_genos_perYear_forHierfstat <- function(
-    genoData_hf, # geno data already in hf format
+get_genos_perYear <- function(
+    genoData_df, # geno dataframe
+    genos_startCol,
     popData,
-    sampleRef
+    sampleRef,
+    outputFormat = c("genind", "hierfstat", "related")
 ) {
   
-  # assign animalIDs to genoData
-  genos <- genoData_hf %>%
-    merge(sampleRef[, c("sampleID", "animalID")], by.x = 0, by.y = "sampleID") %>%
-    relocate(animalID) %>%
-    select(-Row.names, -pop)
+  # Initialize list to store yearly genoData
+  genoData_perYear <- list()
   
-  # append geno data to popData  
-  genoData_perYear_temp <- lapply(popData, "[", 1:2) %>%
-    map(., ~ .x %>%
-          # rename cols
-          set_names(c("animalID", "pop")) %>% 
-          # add sex (code as factor)
-          merge(sampleRef[, c("animalID", "sex")], by = "animalID", all.x = T) %>%
-          mutate(sex = as.factor(sex)) %>%
-          # add genos
-          merge(genos, by = "animalID") %>%
-          arrange(pop, animalID)
-    )
-  
-  # Organize the results by year
-  genoData_perYear <- map2(names(popData), genoData_perYear_temp, ~ {
-    list(
-      genoData = select(.y, -c(animalID, sex)), 
-      sexData = .y$sex  
-    )
-  })
+  for (year in names(popData)) {
+    # Subset genoData_df for individuals present in the year as per popData
+    year_data <- genoData_df %>%
+      merge(., popData[[year]][, c("animalID", "groupName")], by = "animalID") %>%
+      mutate(pop = groupName) %>%
+      select(-groupName)
+      #filter(animalID %in% popData[[year]]$animalID)
+    
+    # Check if year_data is empty and skip if no individuals are present
+    if (nrow(year_data) == 0) next
+    
+    # Remove columns where all values are NA (no scored alleles)
+    year_geno_data <- year_data[, c(genos_startCol:ncol(genoData_df))]
+    year_geno_data <- year_geno_data[, colSums(is.na(year_geno_data)) < nrow(year_geno_data)]
+    
+    # Convert the subsetted data to the chosen format
+    if (outputFormat == "genind") {
+      # Create genind object for the year
+      genind_obj <- adegenet::df2genind(
+        X = year_geno_data,
+        sep = ",",
+        ind.names = year_data$sampleID,
+        pop = year_data$pop,
+        NA.char = "NA",
+        ploidy = 2,
+        type = "codom"
+      )
+      genind_obj@other$sex <- year_data$sex
+      genind_obj@other$birthYear <- year_data$birthYear_est
+      genind_obj@other$captureYear <- year_data$captureYear
+      
+      genoData_perYear[[year]] <- genind_obj
+      
+    } else if (outputFormat == "hierfstat") {
+      # First create genind object for the year
+      genind_obj <- adegenet::df2genind(
+        X = year_geno_data,
+        sep = ",",
+        ind.names = year_data$sampleID,
+        pop = year_data$pop,
+        NA.char = "NA",
+        ploidy = 2,
+        type = "codom"
+      )
+      # Convert genind to hierfstat
+      hierfstat_data <- genind2hierfstat(genind_obj) %>%
+        rownames_to_column("sampleID") %>%
+        merge(., sampleRef[, c("sampleID", "sex")], by = "sampleID") %>%
+        arrange(pop, sampleID)
+        
+        #popData[[year]] %>%
+        #rename(animalID = sampleID, pop = population) %>%
+        #left_join(sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+        #left_join(genos, by = "animalID") %>%
+        #arrange(pop, animalID)
+      
+      genoData_perYear[[year]] <- list(
+        genoData = select(hierfstat_data, -sex),
+        sexData = hierfstat_data$sex
+      )
+    } else if (outputFormat == "related") {
+      # Process for related format
+      related_data <- popData[[year]] %>%
+        rename(animalID = sampleID, pop = population) %>%
+        left_join(sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+        left_join(genos, by = "animalID") %>%
+        arrange(pop, animalID) %>%
+        mutate(animalID = str_c(str_sub(pop, 1, 2), animalID, sep = "_")) %>%
+        select(-pop)
+      
+      genoData_perYear[[year]] <- list(
+        genoData = select(related_data, -sex),
+        sexData = related_data$sex
+      )
+    }
+  }
   
   # Name the list by years (assuming popData is named by years)
   names(genoData_perYear) <- names(popData)
@@ -361,7 +416,7 @@ get_readSum.Recode <- function(readCounts, coverageCutoff) {
 # Input file notes:
 ## **IMPORTANT:** The three input files must be formatted such that the rows 
 ## and columns are in the exact same order.
-## all dfs should have rownames = loci and colnames = samples
+## all dfs should have rownames = loci; colnames = samples
 
 getOptions_optSamplesLoci_bfh <- function(df_blood, df_fecal, df_hair, propSamples) {
   
@@ -403,6 +458,46 @@ getOptions_optSamplesLoci_bfh <- function(df_blood, df_fecal, df_hair, propSampl
   
   # Rename columns
   colnames(result_df) <- c("samples", "loci")
+  
+  return(result_df)
+}
+
+# Version for single dataframe:
+getOptions_optSamplesLoci <- function(df, propWhat, propSuccess) {
+  
+  # Initialize an empty list to store results
+  result_list <- list()
+  
+  for (n in 2:ncol(df)) {
+    # create matrix where NAs are 0 and non-NAs are 1
+    is_na_vector <- ifelse(is.na(df), 0, 1)
+    
+    crossprod_vector <- crossprod(is_na_vector)
+    col_sums <- colSums(crossprod_vector)
+    
+    x_df <- as.data.frame(df)  # to get meaningful colnames
+    
+    # use colSums vector to select n columns;
+    # will rank all columns and give the n first;
+    # gives n columns w/the max number of non-NA rows
+    res <- x_df[, rank(-col_sums, ties.method = "first") <= n]
+    
+    # Store the result in the list
+    result_list[[as.character(n)]] <- c(n, nrow(res[which(rowMeans(!is.na(res)) >= propSuccess), ]))
+  }
+  
+  # Convert the list to a dataframe
+  result_df <- do.call(rbind, result_list) %>%
+    as.data.frame()
+  
+  # Rename columns
+  if (propWhat == "samples") {
+    colnames(result_df) <- c("samples", "loci")
+  }
+  if (propWhat == "loci") {
+    colnames(result_df) <- c("loci", "samples")
+  }
+  
   
   return(result_df)
 }
