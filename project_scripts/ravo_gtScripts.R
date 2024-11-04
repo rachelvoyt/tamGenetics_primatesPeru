@@ -332,11 +332,13 @@ get_genoSuccess <- function(genoFile,
                             sampleID_colName,
                             exclude_nonTargetSp = c("yes", "no")) {
   
-  # ensure lociFile colnames are in the right format
+  # ensure lociFile colnames are in the right format & filter to those in genoFile
   lociFile <- lociFile %>%
     rename_with(tolower) %>%
     select(contains("locus")) %>%
-    `colnames<-`("locus")
+    `colnames<-`("locus") %>%
+    # filter to those in genoFile
+    filter(locus %in% rownames(genoFile))
   
   # ensure sampleID colname is in correct format
   if(missing(sampleID_colName)) {
