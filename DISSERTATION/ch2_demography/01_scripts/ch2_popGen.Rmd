@@ -3676,7 +3676,7 @@ simp_po_run2 <- simp_po_run2_file %>%
   ) %>%
   
   relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
-  arrange(offspring, parent)
+  arrange(as.numeric(animalID_off), LOD)
 ```
 
 ##### Apply LOD filters
