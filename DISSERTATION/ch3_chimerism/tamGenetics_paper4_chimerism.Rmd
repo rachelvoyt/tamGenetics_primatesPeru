@@ -40,6 +40,14 @@ library(tidyverse)
 
 source("./project_scripts/ravo_ch2Scripts.R")
 source("./project_scripts/ravo_gtScripts.R")
+
+library(paletteer) # https://r-graph-gallery.com/color-palette-finder.html
+my_colors_light <- paletteer::paletteer_d("ghibli::PonyoLight")
+my_colors_med <- paletteer::paletteer_d("ghibli::PonyoMedium")
+my_colors_peru <- paletteer::paletteer_d("MetBrewer::Peru1")
+my_colors_klein <- paletteer::paletteer_d("MoMAColors::Klein")
+my_colors_cont <- paletteer::paletteer_c("ggthemes::Sunset-Sunrise Diverging", n = 1)
+my_colors <- paletteer::paletteer_d("rcartocolor::Antique")
 ```
 
 # 3 Data
@@ -1093,6 +1101,11 @@ twinConfirmed_rVal.simp <- unique(simp_gmat_twinCheck$twinID)
 
 ## 5.5 Confirmed twin pairs
 
+Retained 7 twin pairs, all but one emp individual has corresponding blood sample
+
+-   7 twin pairs; lwed = 2, simp = 5
+-   13 indivs w/blood samples; lwed = 4, simp = 9
+
 ```{r}
 twinConfirmed_list <- unique(c(twinConfirmed_mat.lwed$twinID,
                        twinConfirmed_mat.simp$twinID,
@@ -1271,7 +1284,6 @@ formulas from Vynck et al. (2023):
 allele1 <- function(x) str_sub(x, 1, 1)
 allele2 <- function(x) str_sub(x, -1, -1)
 
-# Define chimType
 # Define chimType
 get_chimType <- function(locus, donorGeno, recipGeno, lociRef) {
   
@@ -1517,7 +1529,71 @@ twinChimerism_simp_corrected <- twinChimerism_allTwins_corrected %>%
   filter(species == "SIMP")
 ```
 
-## 6.6 Summaries
+## 6.6 Trueness
+
+```{r}
+# avg HC est b/t type2.uc_vs_type1.c
+figData_mean.type2.uc_vs_mean.type1.c <- twinChimerism_allTwins_corrected %>%
+  mutate(
+    chimProp = case_when(
+      !chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp
+    ),
+    chimProp_c3 = case_when(
+      chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp_c3
+      )
+    ) %>%
+  group_by(animalID) %>%
+  summarise(
+    mean.type2.uc = mean(chimProp, na.rm = T),
+    mean.type1.c = mean(chimProp_c3, na.rm = T)
+  ) %>%
+  mutate(
+    diff = mean.type2.uc - mean.type1.c
+  )
+
+figData_mean.type2.uc_vs_mean.type1.c %>%
+  ggplot(aes(x = mean.type1.c, y = diff)) +
+  geom_point() +
+  ylim(-0.5, 0.5)
+
+# avg HC est b/t type2.c_vs_type1.c
+figData_mean.type2.c_vs_mean.type1.c <- twinChimerism_allTwins_corrected %>%
+  mutate(
+    chimProp = case_when(
+      !chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp
+    ),
+    chimProp_c3 = case_when(
+      chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp_c3
+      )
+    ) %>%
+  group_by(animalID) %>%
+  summarise(
+    mean.type2.c = mean(chimProp, na.rm = T),
+    mean.type1.c = mean(chimProp_c3, na.rm = T)
+  ) %>%
+  mutate(
+    diff = mean.type2.uc - mean.type1.c
+  )
+
+figData_mean.type2.uc_vs_mean.type1.c %>%
+  ggplot(aes(x = mean.type1.c, y = diff)) +
+  geom_point() +
+  ylim(-0.5, 0.5)
+
+
+twinChimerism_allTwins_corrected %>%
+  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+  distinct() %>%
+  group_by(sex) %>%
+  summarise(mean = mean(chimProp))
+```
+
+
+## 6.7 Summaries
 
 ```{r}
 twinChimerism_lwed_summary <- twinChimerism_lwed_corrected %>%
@@ -1557,24 +1633,292 @@ twinChimerism_simp_summary %>%
   scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
 ```
 
-# 7 Figures & tables for chapter
+Average number of loci per indiv?
 
 ```{r}
-twinChimerism_allTwins_corrected %>%
-  group_by(animalID, chimType) %>%
+rbind(twinChimerism_lwed_summary,
+      twinChimerism_simp_summary) %>%
+  group_by(species) %>%
   summarise(
-    n_loci = n(),
-    mean_chimProp = round(mean(chimProp), 2),
-    sd_chimProp = round(sd(chimProp), 2)
-  ) %>%
-  as.data.frame() #%>%
-  #mutate(species = "LWED") %>%
-  #relocate(species)
+    max_n.loci = max(n_loci),
+    min_n.loci = min(n_loci),
+    mean_n.loci = mean(n_loci),
+    sd_n.loci = sd(n_loci))
+```
 
-table(twinChimerism_allTwins_corrected$chimType)
+
+
+
+
+
+
+# 7 Figures & tables for chapter
+
+**n_loci vs. chimProp**
+
+```{r}
+rbind(twinChimerism_lwed_summary,
+      twinChimerism_simp_summary) 
+```
+
+
+```{r}
+count_typeI.II_markers <- twinChimerism_allTwins_corrected %>%
+  # 00, 01, 10, 11 = type 1, 20, 21 = type2
+  mutate(broadType = case_when(
+    chimType %in% c('type00', 'type01', 'type10', 'type11') ~ "type1",
+    chimType %in% c('type20', 'type21') ~ "type2",
+    .default = NA
+  )) %>%
+  group_by(animalID, broadType) %>%
+  summarise(
+    n_loci = n()
+  ) %>%
+  as.data.frame() %>%
+  select(animalID, broadType, n_loci) %>%
+  pivot_wider(names_from = broadType,
+              values_from = n_loci) %>%
+  rowwise() %>%
+  mutate(total = sum(type1, type2, na.rm = T)) %>%
+  merge(., twinPairs_confirmed_l[, c("animalID", "twinID", "species")], by = "animalID", all = T) %>%
+  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+  mutate(animalID = str_c(animalID, sex, sep = "_")) %>%
+  select(-sex) %>%
+  distinct() %>%
+  relocate(species, twinID) %>%
+  arrange(species, as.numeric(twinID))
+count_typeI.II_markers
+
+table_count_typeI.II_markers <- count_typeI.II_markers %>%
+  mutate(species = case_when(
+    species == "LWED" ~ "Saddleback tamarins",
+    .default = "Emperor tamarins"
+  )) %>%
+  mutate(species = factor(species, levels = c("Saddleback tamarins", "Emperor tamarins"))) %>%  ## keep the original order
+  arrange(species, twinID) %>%   
+  mutate(twinID = ifelse(row_number() == 1, as.character(twinID), ""),
+         .by = c(species, twinID)) %>% 
+  mutate(species = ifelse(row_number() == 1, as.character(species), ""),
+         .by = species) %>% 
+  select(species, twinID, everything()) %>% 
+  gt() %>%
+  sub_missing(missing_text = '-') %>%
+  #tab_spanner(label = "Marker type",
+  #            columns = c("type1", "type2")) %>%
+  cols_label(
+    species = md("**Species**"),
+    twinID = md("**TwinID**"),
+    animalID = md("**IndivID**"),
+    type1 = md("**Type I markers**"),
+    type2 = md("**Type II markers**"),
+    total = md("**Total markers**")
+  ) %>%
+  cols_align(., align = "center", columns = 2:6)
+
+table_count_typeI.II_markers %>%
+  gtsave("./DISSERTATION/ch3_chimerism/02_results/00_tablesFigures/table_count_typeI.II_markers.png", vwidth = 550)
 ```
 
 ## Plots
+
+### n_loci vs. chimProp
+
+```{r}
+library(ggpubr)
+twinID_levels <- unique(twinChimerism_allTwins_corrected$twinID)
+
+fig_nLoci.chimProp <- twinChimerism_allTwins_corrected %>%
+  group_by(twinID, animalID) %>%
+  mutate(twinID = factor(twinID, levels = twinID_levels)) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = mean(chimProp_c3) * 100,
+    sd_chimProp = sd(chimProp_c3) * 100
+  ) %>%
+  ggplot(aes(x = jitter(n_loci, 5), y = mean_chimProp, color = twinID, shape = twinID)) +
+  geom_pointrange(aes(
+    ymax = mean_chimProp + sd_chimProp,
+    ymin = mean_chimProp - sd_chimProp
+  ),
+  position = position_jitter(width = 0.3),
+  size = 0.5) +
+  scale_shape_manual(values = c(1, 3, 5, 4, 0, 8, 2)) +
+  scale_color_manual(values = my_colors) +
+  scale_x_continuous(limits = c(0, 50)) +
+  scale_y_continuous(limits = c(-10, 110), breaks = c(0, 25, 50, 75, 100)) +
+  theme_bw() +
+  labs(x = "Number of informative markers",
+       y = "Mean % chimerism",
+       color = "TwinID",
+       shape = "TwinID")
+fig_nLoci.chimProp
+```
+
+### genoSuccess vs. diff from 50% chimerism
+
+```{r}
+figData_genoPerformance.diff50p <- twinChimerism_allTwins_corrected %>%
+  group_by(twinID, animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp_c3 = round(mean(chimProp_c3, na.rm = T), 2),
+    sd_chimProp_c3 = round(sd(chimProp_c3), 2)
+  ) %>%
+  as.data.frame() %>%
+  mutate(diff = abs(0.5 - mean_chimProp_c3)) %>%
+  merge(., twinPairs_confirmed[, c("animalID_twin1", "animalID_twin2")], by.x = "animalID", by.y = "animalID_twin1", all.x = T) %>%
+  mutate(diff = abs(0.5 - mean_chimProp_c3)) %>%
+  merge(., twinPairs_confirmed[, c("animalID_twin1", "animalID_twin2")], by.x = "animalID", by.y = "animalID_twin2", all.x = T) %>%
+  mutate(animalID_twin = coalesce(animalID_twin1, animalID_twin2),
+         .keep = "unused") %>%
+  merge(., genoSuccess_clean[, c("animalID", "totalGenos", "sampleType")], by = "animalID") %>%
+  filter(sampleType == "hair") %>%
+  merge(., genoSuccess_clean[, c("animalID", "totalGenos", "sampleType")], by.x = c("animalID_twin", "sampleType"), by.y = c("animalID", "sampleType"), suffixes = c(".1", ".2")) %>%
+  mutate(genoSuccess.1 = cut(totalGenos.1, breaks = c(0, 10, 20, 30, 40, 50, 100, 194)),
+         genoSuccess.2 = cut(totalGenos.2, breaks = c(0, 10, 20, 30, 40, 50, 100, 194))) %>%
+  mutate(gsCheck = case_when(
+    totalGenos.1 > totalGenos.2 ~ genoSuccess.2,
+    totalGenos.1 < totalGenos.2 ~ genoSuccess.1,
+    .default = genoSuccess.1
+  ))
+
+figData_genoPerformance.diff50p %>%
+  ggplot(aes(x = gsCheck, y = diff, color = twinID)) +
+  geom_point(size = 3, stroke = 1.5)
+
+
+
+  mutate(
+    genoSuccess.1 = round(genoSuccess.1, 2),
+    genoSuccess.2 = round(genoSuccess.2, 2),
+    gsCheck = case_when(
+      genoSuccess.1 < 0.1 ~ "gs<10%",
+      genoSuccess.2 < 0.1 ~ "gs<10%",
+      genoSuccess.1 >= 0.1 & genoSuccess.1 < 0.15 ~ "10<gs<15%",
+      genoSuccess.2 >= 0.1 & genoSuccess.2 < 0.15 ~ "10<gs<15%",
+      genoSuccess.1 >= 0.15 & genoSuccess.1 < 0.2 ~ "15<gs<20%",
+      genoSuccess.2 >= 0.15 & genoSuccess.2 < 0.2 ~ "15<gs<20%",
+      genoSuccess.1 >= 0.2 & genoSuccess.1 < 0.3 ~ "20<gs<30%",
+      genoSuccess.2 >= 0.2 & genoSuccess.2 < 0.3 ~ "20<gs<30%",
+      genoSuccess.1 >= 0.3 & genoSuccess.1 < 0.4 ~ "30<gs<40%",
+      genoSuccess.2 >= 0.3 & genoSuccess.2 < 0.4 ~ "30<gs<40%",
+      genoSuccess.1 >= 0.4 & genoSuccess.1 < 0.5 ~ "40<gs<50%",
+      genoSuccess.2 >= 0.4 & genoSuccess.2 < 0.5 ~ "40<gs<50%",
+      .default = "NA"
+      )
+    )
+  
+  
+  
+  
+  mutate(
+    genoSuccess.1 = round(genoSuccess.1, 2),
+    genoSuccess.2 = round(genoSuccess.2, 2),
+    gsCheck = case_when(
+      genoSuccess.1 < 0.1 ~ "gs<10%",
+      genoSuccess.2 < 0.1 ~ "gs<10%",
+      genoSuccess.1 >= 0.1 & genoSuccess.1 < 0.15 ~ "10<gs<15%",
+      genoSuccess.2 >= 0.1 & genoSuccess.2 < 0.15 ~ "10<gs<15%",
+      genoSuccess.1 >= 0.15 & genoSuccess.1 < 0.2 ~ "15<gs<20%",
+      genoSuccess.2 >= 0.15 & genoSuccess.2 < 0.2 ~ "15<gs<20%",
+      genoSuccess.1 >= 0.2 & genoSuccess.1 < 0.3 ~ "20<gs<30%",
+      genoSuccess.2 >= 0.2 & genoSuccess.2 < 0.3 ~ "20<gs<30%",
+      genoSuccess.1 >= 0.3 & genoSuccess.1 < 0.4 ~ "30<gs<40%",
+      genoSuccess.2 >= 0.3 & genoSuccess.2 < 0.4 ~ "30<gs<40%",
+      genoSuccess.1 >= 0.4 & genoSuccess.1 < 0.5 ~ "40<gs<50%",
+      genoSuccess.2 >= 0.4 & genoSuccess.2 < 0.5 ~ "40<gs<50%",
+      .default = "NA"
+      )
+    )
+
+figPlot_genoPerformance.diff50p <- figData_genoPerformance.diff50p %>%
+  mutate(twinID = factor(twinID, levels = twinID_levels),
+         gsCheck = factor(gsCheck, levels = c("gs<10%", "10<gs<15%", "15<gs<20%", "20<gs<30%", "30<gs<40%", "40<gs<50%", "NA"))) %>%
+  ggplot(aes(x = gsCheck, y = diff, color = twinID, shape = twinID)) +
+  geom_point(size = 3, stroke = 1.5) +
+  scale_shape_manual(values = c(1, 3, 5, 4, 0, 8, 2)) +
+  scale_color_manual(values = my_colors) +
+  theme_bw() +
+  labs(x = "Genotype success cutoff",
+       y = "0.50 - mean chimerism proportion",
+       color = "TwinID",
+       shape = "TwinID")
+figPlot_genoPerformance.diff50p
+```
+
+### Metrics minus poor genoSucess
+
+Descriptive stats after ditching twin pairs w/poor genoSuccess:
+
+```{r}
+temp <- figData_genoPerformance.diff50p %>%
+  filter(!gsCheck %in% c("gs<10%", "10<gs<20%"))
+
+twinChimerism_allTwins_corrected %>%
+  filter(twinID %in% temp$twinID) %>%
+  group_by(animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp_c3 = round(mean(chimProp_c3, na.rm = T), 2)
+  ) %>%
+  as.data.frame() %>%
+  summarise(mean = mean(mean_chimProp_c3),
+            sd = sd(mean_chimProp_c3))
+```
+
+
+
+
+**1) Bias correction is important to implement**
+
+```{r}
+library(cowplot)
+figData_mean.typeI.II.uc_vs_mean.typeI.c <- twinChimerism_allTwins_corrected %>%
+  mutate(chimProp_c3 = case_when(
+    chimType %in% c("type20", "type21") ~ NA,
+    .default = chimProp_c3
+  )) %>%
+  group_by(animalID) %>%
+  summarise(
+    mean.typeI.II.uc = mean(chimProp, na.rm = T),
+    mean.typeI.c = mean(chimProp_c3, na.rm = T)
+  ) %>%
+  mutate(
+    diff = mean.typeI.II.uc - mean.typeI.c
+  )
+
+figPlot_mean.typeI.II.uc_vs_mean.typeI.c <- figData_mean.typeI.II.uc_vs_mean.typeI.c %>%
+  ggplot(aes(x = mean.typeI.c, y = diff)) +
+  geom_point() +
+  ylim(-0.5, 0.5)
+figPlot_mean.typeI.II.uc_vs_mean.typeI.c
+
+# now uncorrected
+figData_mean.typeI.II.c_vs_mean.typeI.c <- twinChimerism_allTwins_corrected %>%
+  mutate(typeI_chimProp_c3 = case_when(
+    chimType %in% c("type20", "type21") ~ NA,
+    .default = chimProp_c3
+  )) %>%
+  group_by(animalID) %>%
+  summarise(
+    mean.typeI.II.c = mean(chimProp_c3, na.rm = T),
+    mean.typeI.c = mean(typeI_chimProp_c3, na.rm = T)
+  ) %>%
+  mutate(
+    diff = mean.typeI.II.c - mean.typeI.c
+  )
+
+figPlot_mean.typeI.II.c_vs_mean.typeI.c <- figData_mean.typeI.II.c_vs_mean.typeI.c %>%
+  ggplot(aes(x = mean.typeI.c, y = diff)) +
+  geom_point() +
+  ylim(-0.5, 0.5)
+
+figPlot_mean.typeI.II.uc_vs_mean.typeI.c
+figPlot_mean.typeI.II.c_vs_mean.typeI.c
+```
+
+**2) overall chimProp per sample**
+
 
 ```{r}
 twinChimerism_allTwins_corrected %>%
@@ -1584,7 +1928,7 @@ twinChimerism_allTwins_corrected %>%
     chimType %in% c('type20', 'type21') ~ "type2",
     .default = NA
   )) %>%
-ggplot(aes(x = markerType, y = chimProp)) +
+ggplot(aes(x = chimType, y = chimProp)) +
   geom_violin() + 
   geom_point(aes(col = chimType), position = "jitter") +
   stat_summary(fun=mean,  geom="point", color="black") +
@@ -1592,6 +1936,21 @@ ggplot(aes(x = markerType, y = chimProp)) +
 
 
 
+
+
+  group_by()
+ggplot(aes(x = chimType, y = chimProp)) +
+  geom_violin() + 
+  geom_point(aes(col = chimType), position = "jitter") +
+  stat_summary(fun=mean,  geom="point", color="black") +
+  theme_bw()
+
+
+```
+
+
+scrap plot stuff:
+```{r}
 install.packages("ggstatsplot", dependencies = T)
 library(ggstatsplot)
 
@@ -1614,14 +1973,14 @@ temp <- twinChimerism_allTwins_corrected %>%
   arrange(animalID)
 pheatmap(chimProp_matrix, cluster_rows = TRUE, cluster_cols = TRUE,
          color = colorRampPalette(c("white", "blue"))(50))
-
 ```
 
 
 
 
+# XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
-
+old stuff below
 
 # 5 GTscore 0x chimerism estimates
 
@@ -1650,6 +2009,9 @@ hairGenos_0x <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_s
   t() %>%
   as.data.frame()
 ```
+
+
+
 
 ### Blood allele reads
 

@@ -1323,6 +1323,295 @@ Pairwise Fst
 lwed_fst <- genet.dist(lwed_genind, method = "WC84")
 ```
 
+# Group relatedness
+
+Using package "related"
+
+```{r}
+library(related)
+```
+
+## Prep data
+
+To do so, first I need to create data subsets for each year of the study, saying who was in what group each year. Since these analyses are for sex-biased dispersal, I'm limiting the data to non-juvs only. 
+
+**LWED**
+
+```{r}
+source("./project_scripts/ravo_ch2Scripts.R")
+# first find the indivs we need
+lwed_popData_perYear_allIndivs <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "LWED",
+  whichYears = 2009:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = NULL)
+
+View(lwed_popData_perYear_allIndivs[["2019"]])
+
+# now get the geno data for each subset
+## format genos for related
+## get geno data for all indivs present in each year
+lwed_genos_forRelated <- get_genos_perYear(
+  genoData_df = lwed_genos,
+  genos_startCol = 7,
+  popData = lwed_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  outputFormat = "related")
+
+# adults only
+lwed_genos_forRelated_adultsOnly <- get_genos_perYear(
+  genoData_df = lwed_genos,
+  genos_startCol = 7,
+  popData = lwed_popData_perYear_adultsOnly,
+  sampleRef = sampleRef,
+  outputFormat = "related")
+
+View(lwed_genos_forRelated_adultsOnly$`2015`$genoData)
+```
+
+**SIMP**
+
+```{r}
+# first find the indivs we need
+simp_popData_perYear_allIndivs <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "SIMP",
+  whichYears = 2011:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = NULL)
+
+View(simp_popData_perYear_allIndivs[["2019"]])
+
+# now get the geno data for each subset
+## format genos for related
+## get geno data for all indivs present in each year
+simp_genos_forRelated <- get_genos_perYear(
+  genoData_df = simp_genos,
+  genos_startCol = 7,
+  popData = simp_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  outputFormat = "related")
+
+simp_genos_forRelated_adultsOnly <- get_genos_perYear(
+  genoData_df = simp_genos,
+  genos_startCol = 7,
+  popData = simp_popData_perYear_adultsOnly,
+  sampleRef = sampleRef,
+  outputFormat = "related")
+
+str(simp_genos_forRelated) # 2018 w/25 indivs
+str(lwed_genos_forRelated) # 2015 w/29 indivs
+```
+
+## Compare estimators
+
+```{r}
+# set up inputs
+rel_input_lwed <- lwed_genos_forRelated$`2015`$genoData %>%
+  `names<-`(NULL) %>%
+  readgenotypedata(.)
+
+rel_input_simp <- simp_genos_forRelated$`2018`$genoData %>%
+  `names<-`(NULL) %>%
+  readgenotypedata(.)
+
+rel_simdata_lwed <- familysim(rel_input_lwed$freqs, 100)
+rel_simdata_simp <- familysim(rel_input_simp$freqs, 100)
+
+# run coancestry
+rel_output_lwed <- coancestry(rel_simdata_lwed,
+                              dyadml=1,
+                              trioml=1, 
+                              quellergt=1,
+                              wang=1)
+
+rel_output_simp <- coancestry(rel_simdata_simp,
+                              dyadml=1,
+                              trioml=1, 
+                              quellergt=1,
+                              wang=1)
+```
+
+## Assess results
+
+```{r}
+# set up relatedness values for comparison
+relvals <- c(rep(0, 100), # unrelated values
+             rep(0.25, 100), # half-sibs
+             rep(0.5, 100), # full-sibs
+             rep(0.5, 100)) # parent-offspring
+
+# lwed 2015
+quellergtcor_lwed <- cor.test(relvals, simrel_lwed$quellergt) # -0.7015007
+wangcor_lwed <- cor.test(relvals, simrel_lwed$wang) # -0.6919451
+dyadmlcor_lwed <- cor.test(relvals, simrel_lwed$dyadml) # -0.7442717
+triomlcor_lwed <- cor.test(relvals, simrel_lwed$trioml) # -0.7439108
+
+# simp 2018
+quellergtcor_simp <- cor.test(relvals, simrel_simp$quellergt) # -0.6916978
+wangcor_simp <- cor.test(relvals, simrel_simp$wang) # -0.6997006
+dyadmlcor_simp <- cor.test(relvals, simrel_simp$dyadml) # -0.7489274
+triomlcor_simp <- cor.test(relvals, simrel_simp$trioml) # -0.7483224 
+
+data.frame(
+  estimator = c("QG", "Wang", "dyadml", "trioml"),
+  cor_lwed = c(quellergtcor_lwed$estimate,
+               wangcor_lwed$estimate,
+               dyadmlcor_lwed$estimate,
+               triomlcor_lwed$estimate),
+  cor_simp = c(quellergtcor_simp$estimate,
+               wangcor_simp$estimate,
+               dyadmlcor_simp$estimate,
+               triomlcor_simp$estimate)
+) %>%
+  arrange(desc(cor_lwed))
+```
+
+## Plots
+
+```{r}
+## clean up r values
+simrel_lwed <- cleanuprvals(rel_output_lwed$relatedness, 100)
+simrel_simp <- cleanuprvals(rel_output_simp$relatedness, 100)
+
+simrel_lwed_l <- simrel_lwed %>%
+  select(-c(pair.no, ind1.id, ind2.id, lynchli, lynchrd)) %>%
+  pivot_longer(-group,
+               names_to = "Estimator",
+               values_to = "Relatedness_Value") %>%
+  mutate(
+    Estimator = case_match(
+      Estimator,
+      "trioml" ~ "tri",
+      "wang" ~ "W",
+      "ritland" ~ "rit",
+      "quellergt" ~ "QG",
+      "dyadml" ~ "di"
+      ),
+    group = case_match(
+      group,
+      "POPO" ~ "Parent-offspring",
+      "SBSB" ~ "Full-sibs",
+      "HSHS" ~ "Half-sibs",
+      "URUR" ~ "Unrelated"
+      )
+    ) %>%
+  dplyr::rename("relationship" = "group")
+
+ggplot(simrel_lwed_l, aes(x = Estimator, y = Relatedness_Value), ylim = c(-0.5, 1)) +
+  geom_boxplot() +
+  facet_wrap(~relationship)
+```
+
+## groupRel
+
+```{r}
+library(related)
+#reldata_lwed <- coancestry(lwed_genos_forRelated_adultsOnly$`2015`$genoData, quellergt = 2)
+
+reldata_lwed <- lwed_genos_forRelated_adultsOnly[[`2015`]]$genoData %>%
+  filter(animalID != "Bl_63")
+
+initial_year_genos <- lwed_genos_forRelated_adultsOnly[["2009"]]$genoData
+as.character(2009)
+
+temp <- reldata_lwed %>%
+  select(animalID) %>%
+  separate(animalID, into = c("group", "animalID"), sep = "_") %>%
+  group_by(group) %>%
+  summarise(count = n())
+
+count_group_shuffles(sum(temp$count), temp$count)
+
+grouprel_lwed <- get_grouprel(reldata_lwed, estimatorname = "quellergt", usedgroups = "all", iterations = 100, outdir = "./DISSERTATION/ch2_demography/02_results/", prefix = "temp_")
+grouprel_lwed
+
+
+get_multi.groupRel <- function(genoList, iterations, outdir) {
+  
+  # Create an empty data frame for summary if it doesn't exist
+  summary_file <- file.path(outdir, "related_summary.csv")
+  summary_df <- data.frame(Year = character(), Group = character(), RelValue = numeric(), PTest = numeric(), OverallRel = numeric(), OverallPTest = numeric())
+  
+  for (year in names(genoList)) {
+    
+    initial_year_genos <- genoList[[as.character(year)]]$genoData
+    
+    initial_grpCounts <- initial_year_genos %>%
+      select(animalID) %>%
+      separate(animalID, into = c("group", "animalID"), sep = "_") %>%
+      group_by(group) %>%
+      summarise(count = n())
+    
+    toRemove <- initial_grpCounts %>%
+      filter(count < 2) %>%
+      select(group) %>% pull()
+    
+    grpCounts <- initial_grpCounts %>%
+      filter(!group %in% toRemove)
+    
+    # Check if year_data has less than 2 groups and skip if so
+    if (nrow(grpCounts) < 2) next
+    
+    year_genos <- initial_year_genos %>%
+      mutate(temp = str_sub(animalID, 1, 2)) %>%
+      filter(!temp %in% toRemove) %>%
+      select(-temp)
+    
+    # Call get_grouprel and store results
+    grouprel_results <- get_grouprel(year_genos, estimatorname = "quellergt", usedgroups = "all", iterations = iterations, outdir = outdir, prefix = str_c(as.character(year), "_"))
+    
+    # Process and store within-group results for summary
+    for (grp in names(grouprel_results$within_relvalues)) {
+      summary_df <- rbind(summary_df, data.frame(
+        Year = year,
+        Group = grp,
+        RelValue = grouprel_results$within_relvalues[[grp]]$relvalue,
+        PTest = grouprel_results$within_relvalues[[grp]]$ptest,
+        OverallRel = grouprel_results$overall_relvalue,
+        OverallPTest = grouprel_results$overall_ptest
+      ))
+    }
+    
+  }
+  
+  write.csv(summary_df, summary_file, row.names = FALSE)
+  
+}
+
+get_multi.groupRel(lwed_genos_forRelated_adultsOnly, outdir = "./DISSERTATION/ch2_demography/02_results/lwed/")
+
+get_multi.groupRel(simp_genos_forRelated_adultsOnly, iterations = 100, outdir = "./DISSERTATION/ch2_demography/02_results/simp/")
+```
+
+
+
+```{r}
+# Function to calculate the number of ways to shuffle individuals into groups
+count_group_shuffles <- function(N, group_sizes) {
+  # Ensure that the sum of group sizes equals N
+  if (sum(group_sizes) != N) {
+    stop("The sum of group sizes must equal the total number of individuals (N).")
+  }
+  
+  # Calculate the total number of ways
+  total_ways <- factorial(N) / prod(factorial(group_sizes))
+  return(total_ways)
+}
+
+# Example: Suppose you have 6 individuals and want to divide them into groups of size 2, 2, and 2
+N <- 6
+group_sizes <- c(3,3)
+count_group_shuffles(N, group_sizes)
+
+```
+
+
 # 8 Sex-biased dispersal
 
 ## Overview
@@ -4065,232 +4354,6 @@ lwed_clevFig
 
 ```{r}
 
-```
-
-
-
-# R values
-
-```{r}
-library(related)
-```
-
-## Prep data
-
-To do so, first I need to create data subsets for each year of the study, saying who was in what group each year. Since these analyses are for sex-biased dispersal, I'm limiting the data to non-juvs only. 
-
-**LWED**
-
-```{r}
-source("./project_scripts/ravo_ch2Scripts.R")
-# first find the indivs we need
-lwed_popData_perYear_allIndivs <- get_popData_byYear(
-  capData = capData_2009to2019,
-  whichSpecies = "LWED",
-  whichYears = 2009:2019,
-  whichAnimalIDs = "with_hairSamples",
-  md_genoData = md,
-  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
-  adultsOnly = NULL)
-
-View(lwed_popData_perYear_allIndivs[["2019"]])
-
-# now get the geno data for each subset
-## format genos for related
-lwed_genos_rel <- lwed_genos_hf %>%
-  select(-pop) %>%
-  rownames_to_column("sampleID") %>%
-  mutate(across(-sampleID, ~ str_split(.x, ""))) %>%
-  unnest_wider(-sampleID, names_sep = ".") %>%
-  column_to_rownames("sampleID")
-
-## get geno data for all indivs present in each year
-lwed_genos_forRelated <- get_genos_perYear(
-  lwed_genos_rel,
-  lwed_popData_perYear_allIndivs,
-  sampleRef = sampleRef,
-  forWhat = "related")
-View(lwed_genos_forRelated$`2015`$genoData)
-
-str(simp_genos_forRelated)
-```
-
-**SIMP**
-
-```{r}
-# first find the indivs we need
-simp_popData_perYear_allIndivs <- get_popData_byYear(
-  capData = capData_2009to2019,
-  whichSpecies = "SIMP",
-  whichYears = 2009:2019,
-  whichAnimalIDs = "with_hairSamples",
-  md_genoData = md,
-  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
-  adultsOnly = NULL)
-
-View(simp_popData_perYear_allIndivs[["2019"]])
-
-# now get the geno data for each subset
-## format genos for related
-simp_genos_rel <- simp_genos_hf %>%
-  select(-pop) %>%
-  rownames_to_column("sampleID") %>%
-  mutate(across(-sampleID, ~ str_split(.x, ""))) %>%
-  unnest_wider(-sampleID, names_sep = ".") %>%
-  column_to_rownames("sampleID")
-
-## get geno data for all indivs present in each year
-simp_genos_forRelated <- get_genos_perYear(
-  simp_genos_rel,
-  simp_popData_perYear_allIndivs,
-  sampleRef = sampleRef,
-  forWhat = "related")
-View(simp_genos_forRelated$`2015`$genoData)
-
-str(simp_genos_forRelated) # 2018 w/25 indivs
-str(lwed_genos_forRelated) # 2015 w/29 indivs
-```
-
-## Compare estimators
-
-```{r}
-# set up inputs
-rel_input_lwed <- lwed_genos_forRelated$`2015`$genoData %>%
-  `names<-`(NULL) %>%
-  readgenotypedata(.)
-
-rel_input_simp <- simp_genos_forRelated$`2018`$genoData %>%
-  `names<-`(NULL) %>%
-  readgenotypedata(.)
-
-rel_simdata_lwed <- familysim(rel_input_lwed$freqs, 100)
-rel_simdata_simp <- familysim(rel_input_simp$freqs, 100)
-
-# run coancestry
-rel_output_lwed <- coancestry(rel_simdata_lwed,
-                              dyadml=1,
-                              trioml=1, 
-                              quellergt=1,
-                              wang=1)
-
-rel_output_simp <- coancestry(rel_simdata_simp,
-                              dyadml=1,
-                              trioml=1, 
-                              quellergt=1,
-                              wang=1)
-```
-
-## Assess results
-
-```{r}
-# set up relatedness values for comparison
-relvals <- c(rep(0, 100), # unrelated values
-             rep(0.25, 100), # half-sibs
-             rep(0.5, 100), # full-sibs
-             rep(0.5, 100)) # parent-offspring
-
-# lwed 2015
-quellergtcor_lwed <- cor.test(relvals, simrel_lwed$quellergt) # -0.7015007
-wangcor_lwed <- cor.test(relvals, simrel_lwed$wang) # -0.6919451
-dyadmlcor_lwed <- cor.test(relvals, simrel_lwed$dyadml) # -0.7442717
-triomlcor_lwed <- cor.test(relvals, simrel_lwed$trioml) # -0.7439108
-
-# simp 2018
-quellergtcor_simp <- cor.test(relvals, simrel_simp$quellergt) # -0.6916978
-wangcor_simp <- cor.test(relvals, simrel_simp$wang) # -0.6997006
-dyadmlcor_simp <- cor.test(relvals, simrel_simp$dyadml) # -0.7489274
-triomlcor_simp <- cor.test(relvals, simrel_simp$trioml) # -0.7483224 
-
-data.frame(
-  estimator = c("QG", "Wang", "dyadml", "trioml"),
-  cor_lwed = c(quellergtcor_lwed$estimate,
-               wangcor_lwed$estimate,
-               dyadmlcor_lwed$estimate,
-               triomlcor_lwed$estimate),
-  cor_simp = c(quellergtcor_simp$estimate,
-               wangcor_simp$estimate,
-               dyadmlcor_simp$estimate,
-               triomlcor_simp$estimate)
-) %>%
-  arrange(desc(cor_lwed))
-```
-
-## Plots
-
-```{r}
-## clean up r values
-simrel_lwed <- cleanuprvals(rel_output_lwed$relatedness, 100)
-simrel_simp <- cleanuprvals(rel_output_simp$relatedness, 100)
-
-simrel_lwed_l <- simrel_lwed %>%
-  select(-c(pair.no, ind1.id, ind2.id, lynchli, lynchrd)) %>%
-  pivot_longer(-group,
-               names_to = "Estimator",
-               values_to = "Relatedness_Value") %>%
-  mutate(
-    Estimator = case_match(
-      Estimator,
-      "trioml" ~ "tri",
-      "wang" ~ "W",
-      "ritland" ~ "rit",
-      "quellergt" ~ "QG",
-      "dyadml" ~ "di"
-      ),
-    group = case_match(
-      group,
-      "POPO" ~ "Parent-offspring",
-      "SBSB" ~ "Full-sibs",
-      "HSHS" ~ "Half-sibs",
-      "URUR" ~ "Unrelated"
-      )
-    ) %>%
-  dplyr::rename("relationship" = "group")
-
-ggplot(simrel_lwed_l, aes(x = Estimator, y = Relatedness_Value), ylim = c(-0.5, 1)) +
-  geom_boxplot() +
-  facet_wrap(~relationship)
-```
-
-
-## 5.2 Compare relatedness estimators
-
-Prior to deciding which relatedness estimator for our analysis, it's a good idea to test the performance of different estimators on simulated data sets with the same locus characteristics as our own. We can do this with 'related' in two ways:
-
-First, we can compare moment-estimators using the 'related' function compareestimators() (section 5.2.1). Then, we can compare with maximum-likelihood estimators using a sort of clunky, but functional set of manual steps (section 5.2.2).
-
-### 5.2.1 Compare moment-estimators
-
-Below I'm using the comparestimators() function to compare lynchli, lynchrd, quellergt, and wang estimators. This function will generate simulated genotypes of known relatedness, calculate relatedness values using those four estimators, and plot the data to visualize it. Here I'm using separate data frames for 2013 and 2014 that include all individuals (including adults and non-adults) and 100 simulated pairs of individuals for each type of relationship.
-
-The output includes 1) a graph of the data, organized by relationship type and estimator, 2) the correlation coefficient (Pearson's) between observed and expected relatedness values for each estimator. We can use this to see which estimator correlates best with the expected values.
-
-1)  Run comparestimators() function
-
-```{r}
-compEst_2013 <- compareestimators(related_all2013, 100) 
-compEst_2014 <- compareestimators(related_all2014, 100)
-```
-
-2)  Visualize comparison results for each relationship type
-
-```{r}
-compEst_2013
-compEst_2014
-```
-
-3)  Compare correlation coefficients
-
-(note - I'm not sure how to extract these from the comparestimators() results, below is a table of the results from my run of the function)
-
-```{r}
-# Correlation coefficients from comparestimators()
-compEst_2013a_data <- c(0.879077, 0.871872, 0.853382, 0.871952)
-compEst_2013b_data <- c(0.874931, 0.858175, 0.838660, 0.855826)
-compEst_2014a_data <- c(0.844956, 0.840872, 0.802049, 0.835537)
-compEst_2014b_data <- c( 0.851458, 0.848176, 0.832502, 0.848914)
-
-# Create df of corr coefficients
-compEst_point_df <- data.frame(compEst_2013a_data, compEst_2013b_data, compEst_2014a_data, compEst_2014b_data, row.names = c("wang", "lynchli", "lynchrd", "quellergt"))
 ```
 
 # Attempt with blood samples
