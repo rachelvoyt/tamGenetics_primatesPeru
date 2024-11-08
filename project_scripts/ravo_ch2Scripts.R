@@ -255,13 +255,10 @@ get_genos_perYear <- function(
       )
     } else if (outputFormat == "related") {
       # Process for related format
-      related_data <- popData[[year]] %>%
-        rename(animalID = sampleID, pop = population) %>%
-        left_join(sampleRef[, c("animalID", "sex")], by = "animalID") %>%
-        left_join(genos, by = "animalID") %>%
-        arrange(pop, animalID) %>%
+      related_data <- year_data %>%
         mutate(animalID = str_c(str_sub(pop, 1, 2), animalID, sep = "_")) %>%
-        select(-pop)
+        select(-pop) %>%
+        select(c(animalID, contains(c("INDID", "SPECIES", "SEX", "LWED", "SIMP"))))
       
       genoData_perYear[[year]] <- list(
         genoData = select(related_data, -sex),
