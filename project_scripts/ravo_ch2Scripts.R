@@ -255,10 +255,29 @@ get_genos_perYear <- function(
       )
     } else if (outputFormat == "related") {
       # Process for related format
-      related_data <- year_data %>%
+      related_data_temp <- year_data %>%
         mutate(animalID = str_c(str_sub(pop, 1, 2), animalID, sep = "_")) %>%
         select(-pop) %>%
         select(c(animalID, contains(c("INDID", "SPECIES", "SEX", "LWED", "SIMP"))))
+      
+      related_data_temp2 <- related_data_temp %>%
+        select(-sex) %>%
+        column_to_rownames("animalID")
+      
+      related_data <- names(related_data_temp2) %>%
+        map_dfc(~ related_data_temp2 %>%
+                  select(all_of(.x)) %>%
+                  separate(.x,
+                           into = paste0(.x, c("a", "b")),
+                           sep = ",")
+        ) %>%
+        mutate_all(~ str_replace(., "A", "4")) %>%
+        mutate_all(~ str_replace(., "T", "7")) %>%
+        mutate_all( ~ str_replace(., "C", "3")) %>%
+        mutate_all(~ str_replace(., "G", "6")) %>%
+        rownames_to_column("animalID") %>%
+        merge(., related_data_temp[, c("animalID", "sex")], by = "animalID") %>%
+        relocate(sex, .after = animalID)
       
       genoData_perYear[[year]] <- list(
         genoData = select(related_data, -sex),
@@ -664,5 +683,202 @@ get_dsReadCounts.genoConsistency <- function(
   
   
   return(genoCompare_all.iter)
+  
+}
+
+##############################
+### GROUPREL - MY VERSIONS ###
+##############################
+
+get_grouprel <- function (genotypes, estimatorname, usedgroups, iterations, outdir, prefix) 
+{
+  if (estimatorname == "trioml") {
+    estimator = 5
+  }
+  if (estimatorname == "wang") {
+    estimator = 6
+  }
+  if (estimatorname == "lynchli") {
+    estimator = 7
+  }
+  if (estimatorname == "lynchrd") {
+    estimator = 8
+  }
+  if (estimatorname == "ritland") {
+    estimator = 9
+  }
+  if (estimatorname == "quellergt") {
+    estimator = 10
+  }
+  if (estimatorname == "dyadml") {
+    estimator = 11
+  }
+  if (estimatorname == "trioml") {
+    relatives <- coancestry(genotypes, trioml = 1)
+  }
+  if (estimatorname == "wang") {
+    relatives <- coancestry(genotypes, wang = 1)
+  }
+  if (estimatorname == "lynchli") {
+    relatives <- coancestry(genotypes, lynchli = 1)
+  }
+  if (estimatorname == "lynchrd") {
+    relatives <- coancestry(genotypes, lynchrd = 1)
+  }
+  if (estimatorname == "ritland") {
+    relatives <- coancestry(genotypes, ritland = 1)
+  }
+  if (estimatorname == "quellergt") {
+    relatives <- coancestry(genotypes, quellergt = 1)
+  }
+  if (estimatorname == "dyadml") {
+    relatives <- coancestry(genotypes, dyadml = 1)
+  }
+  rels <- relatives$relatedness
+  if (usedgroups[1] == "all") {
+    groupsall <- 1:length(rels[, 1])
+    for (i in 1:length(rels[, 1])) {
+      groupsall[i] <- substr(rels[i, 2], 1, 2)
+    }
+    groups <- unique(groupsall)
+  }
+  else {
+    groups <- usedgroups
+  }
+  within <- paste(groups, groups, sep = "")
+  relvalues <- 1:length(within)
+  sizes <- 1:length(within)
+  cat("\n Calculating within-group r-values...\n")
+  for (i in 1:length(within)) {
+    holder <- 0
+    counter1 <- 0
+    for (j in 1:length(rels[, 1])) {
+      if (rels[j, 4] == within[i]) {
+        holder <- holder + rels[j, estimator]
+        counter1 <- counter1 + 1
+      }
+    }
+    relvalues[i] <- holder/counter1
+    sizes[i] <- counter1
+    cat(sprintf("Group %s \t %f\n", within[i], relvalues[i]))
+  }
+  overallobs <- sum(relvalues)/length(relvalues)
+  cat(sprintf("Overall \t %f\n", overallobs))
+  
+  obsrel <- cbind(within, relvalues)
+  write.csv(obsrel, paste(outdir, prefix, "observed-r.csv", sep = ""))
+  
+  simresults <- data.frame(matrix(nrow = iterations, ncol = (length(within) + 
+                                                               1)))
+  for (j in 1:iterations) {
+    cat(sprintf("Iteration %d\n", j))
+    randlist <- 1:length(genotypes[, 1])
+    randlist <- sample(randlist, length(randlist), replace = FALSE)
+    randgenos <- data.frame(matrix(nrow = length(randlist), 
+                                   ncol = length(genotypes[1, ])))
+    for (i in 1:length(randlist)) {
+      randgenos[i, ] <- genotypes[randlist[i], ]
+    }
+    if (estimatorname == "trioml") {
+      simrels <- coancestry(randgenos, trioml = 1)
+    }
+    if (estimatorname == "wang") {
+      simrels <- coancestry(randgenos, wang = 1)
+    }
+    if (estimatorname == "lynchli") {
+      simrels <- coancestry(randgenos, lynchli = 1)
+    }
+    if (estimatorname == "lynchrd") {
+      simrels <- coancestry(randgenos, lynchrd = 1)
+    }
+    if (estimatorname == "ritland") {
+      simrels <- coancestry(randgenos, ritland = 1)
+    }
+    if (estimatorname == "quellergt") {
+      simrels <- coancestry(randgenos, quellergt = 1)
+    }
+    if (estimatorname == "dyadml") {
+      simrels <- coancestry(randgenos, dyadml = 1)
+    }
+    counter1 <- 1
+    counter2 <- 0
+    for (k in 1:length(within)) {
+      holder <- 0
+      counter3 <- 0
+      num <- sizes[k]
+      counter2 <- num
+      for (l in counter1:(counter2 + counter1 - 1)) {
+        holder <- holder + simrels$relatedness[l, estimator]
+        counter3 <- counter3 + 1
+      }
+      simresults[j, k] <- holder/counter3
+      counter1 <- counter2 + counter1
+    }
+    simresults[j, length(within) + 1] <- sum(simresults[j, 
+                                                        1:length(within)])/length(within)
+  }
+  
+  write.csv(simresults, paste(outdir, prefix, "expectedrel.csv", sep = ""))
+  minx <- 0
+  maxx <- 0
+  for (k in 1:length(within)) {
+    if (min(simresults[, k]) < relvalues[k]) {
+      minx <- min(simresults[, k]) - 0.2
+    }
+    else {
+      minx <- relvalues[k] - 0.2
+    }
+    if (max(simresults[, k]) > relvalues[k]) {
+      maxx <- max(simresults[, k]) + 0.2
+    }
+    else {
+      maxx <- relvalues[k] + 0.2
+    }
+    hist(simresults[, k], main = within[k], xlim = c(minx, 
+                                                     maxx), xlab = "Relatedness")
+    arrows(x0 = relvalues[k], y0 = iterations * 0.15, x1 = relvalues[k], 
+           y1 = 0, col = "red", lwd = 3)
+    ptest <- signif(((sum(simresults[, k] >= relvalues[k]) + 
+                        1)/iterations), 3)
+    mtext(bquote(p < .(ptest)), side = 3)
+  }
+  if (min(simresults[, length(within) + 1]) < overallobs) {
+    minx <- min(simresults[, length(within) + 1]) - 0.2
+  }
+  else {
+    minx <- overallobs - 0.2
+  }
+  if (max(simresults[, length(within) + 1]) > overallobs) {
+    maxx <- max(simresults[, length(within) + 1]) + 0.2
+  }
+  else {
+    maxx <- overallobs + 0.2
+  }
+  hist(simresults[, length(within) + 1], main = "Overall", 
+       xlim = c(minx, maxx), xlab = "Relatedness")
+  arrows(x0 = overallobs, y0 = iterations * 0.15, x1 = overallobs, 
+         y1 = 0, col = "red", lwd = 3)
+  ptest <- signif(((sum(simresults[, length(within) + 1] >= 
+                          overallobs) + 1)/iterations), 3)
+  mtext(bquote(p < .(ptest)), side = 3)
+  
+  # Initialize list to store p-values for summary
+  p_values <- list()
+  
+  # Collect p-values for each within group
+  for (k in 1:length(within)) {
+    ptest <- signif(((sum(simresults[, k] >= relvalues[k]) + 1) / iterations), 3)
+    p_values[[within[k]]] <- list(relvalue = relvalues[k], ptest = ptest)
+  }
+  
+  # Collect overall p-value
+  overall_ptest <- signif(((sum(simresults[, length(within) + 1] >= overallobs) + 1) / iterations), 3)
+  
+  # Save output to observed-r and expectedrel CSVs
+  write.csv(obsrel, paste(outdir, prefix, "observed-r.csv", sep = ""))
+  write.csv(simresults, paste(outdir, prefix, "expectedrel.csv", sep = ""))
+  
+  # Return values for summary
+  return(list(within_relvalues = p_values, overall_relvalue = overallobs, overall_ptest = overall_ptest))
   
 }
