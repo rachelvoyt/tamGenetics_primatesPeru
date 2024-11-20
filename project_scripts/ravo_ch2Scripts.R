@@ -110,7 +110,7 @@ get_popData_byYear <- function(
     whichAnimalIDs = c("all", "with_hairSamples"), # all in capData? or just those with hair samples for genetics?
     md_genoData = NULL,
     birthData = NULL,
-    adultsOnly = NULL # subset to adults only?
+    adultsOnly = F # subset to adults only?
     ) {
   
   # initialize list to store dataframes for each year
@@ -162,7 +162,7 @@ get_popData_byYear <- function(
       )
     
     # subset to adults only if desired
-    if(!is.null(adultsOnly)){
+    if(adultsOnly == T){
       popData_y <- popData_y %>%
         filter(born_thisSeason == FALSE)
     }else{
