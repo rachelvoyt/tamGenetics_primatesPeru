@@ -34,6 +34,7 @@ my_colors_med <- paletteer::paletteer_d("ghibli::PonyoMedium")
 my_colors_peru <- paletteer::paletteer_d("MetBrewer::Peru1")
 my_colors_klein <- paletteer::paletteer_d("MoMAColors::Klein")
 my_colors_cont <- paletteer::paletteer_c("ggthemes::Sunset-Sunrise Diverging", n = 1)
+my_colors <- paletteer::paletteer_d("rcartocolor::Antique")
 
 #library(plyr)
 #install_github("nikostourvas/PopGenUtils")
@@ -125,6 +126,74 @@ capData_2009to2019_firstEntry <- capData_2009to2023_firstEntry %>%
   filter(rowID <= 613)
 ```
 
+**Create anonymized groupNames**
+
+groupName_anon is numbered by earliest captureYear, then alphabetical
+
+```{r}
+groupRef_2009to2023 <- capData_2009to2023 %>%
+  select(species, groupName, captureYear) %>%
+  # remove loners & unk
+  filter(!groupName %in% c("Loners", "UNK")) %>%
+  arrange(species, captureYear, groupName) %>%
+  group_by(species, groupName) %>%
+  slice_min(as.numeric(captureYear)) %>%
+  ungroup() %>%
+  distinct() %>%
+  mutate(groupName_caps = toupper(groupName)) %>%
+  arrange(species, captureYear, groupName_caps) %>%
+  mutate(
+    temp = case_when(
+      species == "SIMP" ~ row_number() - 17,
+      .default = row_number()
+    ),
+    temp = sprintf("%02d", temp),
+    groupName_anon = case_when(
+      species == "LWED" ~ str_c("LW.", temp),
+      .default = str_c("TS.", temp)
+      )
+    ) %>%
+  select(-groupName_caps, -captureYear) %>%
+  mutate(groupNum = as.numeric(temp)) %>%
+  # add loners back in for both lwed & simp
+  rbind(., data.frame(species = c("LWED", "SIMP"),
+                      groupName = c("Loners", "Loners"),
+                      temp = NA,
+                      groupName_anon = c("LW.Loners", "TS.Loners"),
+                      groupNum = NA))
+
+groupRef_2009to2019 <- capData_2009to2019 %>%
+  select(species, groupName, captureYear) %>%
+  # remove loners & unk
+  filter(!groupName %in% c("Loners", "UNK")) %>%
+  arrange(species, captureYear, groupName) %>%
+  group_by(species, groupName) %>%
+  slice_min(as.numeric(captureYear)) %>%
+  ungroup() %>%
+  distinct() %>%
+  mutate(groupName_caps = toupper(groupName)) %>%
+  arrange(species, captureYear, groupName_caps) %>%
+  mutate(
+    temp = case_when(
+      species == "SIMP" ~ row_number() - 15,
+      .default = row_number()
+    ),
+    temp = sprintf("%02d", temp),
+    groupName_anon = case_when(
+      species == "LWED" ~ str_c("LW.", temp),
+      .default = str_c("TS.", temp)
+      )
+    ) %>%
+  select(-groupName_caps, -captureYear) %>%
+  mutate(groupNum = as.numeric(temp)) %>%
+  # add loners back in for both lwed & simp
+  rbind(., data.frame(species = c("LWED", "SIMP"),
+                      groupName = c("Loners", "Loners"),
+                      temp = NA,
+                      groupName_anon = c("LW.Loners", "TS.Loners"),
+                      groupNum = NA))
+```
+
 ## 3.3 capHist
 
 Filtered to 2009-2019 only
@@ -138,25 +207,31 @@ capHist_2009to2019 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoDat
 
 ## 3.4 birth/death year
 
+I had here to recode animalID 90 as juv, but based on weights plus the fact that nipple measures suggest she'd be parous at 1 years old, I really doubt this is the case
+
+60 and 62 are NOT twins!! 
+- 60 birthEst = 2011-09-17
+- 62 birthEst = 2012-01-15
+
 ```{r}
-birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") %>%
-  # edit for animalID 90 ageClass recode to juvenile
-  mutate(
-    age_capData = case_when(
-      animalID == 90 ~ "juvenile",
-      .default = age_capData
-    ),
-    birthYear_est = case_when(
-      animalID == 90 ~ 2010,
-      .default = birthYear_est
-    )
-  )
+birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") #%>%
+  # edit for animalID 90 ageClass recode to juvenile 
+#  mutate(
+#    age_capData = case_when(
+#      animalID == 90 ~ "juvenile",
+#      .default = age_capData
+#    ),
+#    birthYear_est = case_when(
+#      animalID == 90 ~ 2010,
+#      .default = birthYear_est
+#    )
+#  )
 
 birthAssignments <- birthData %>%
-  select(animalID, birthYear_est, species) %>%
-  na.omit() %>%
+  select(species, groupName, animalID, birthDate_est, birthYear_est) %>%
+  filter(!is.na(birthYear_est)) %>%
   distinct() %>%
-  arrange(animalID)
+  arrange(species, groupName, birthDate_est)
 
 deathData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv")
 
@@ -183,7 +258,8 @@ parityAssignments <- get_parityStatus(capData_file = capData_2009to2019) %>%
   distinct() %>%
   merge(., sampleRef[, c("animalID", "birthYear_est", "natalGroup")], by = "animalID", all.x = T) %>%
   merge(., capData_2009to2019[, c("animalID", "captureDate", "groupName")], by = c("animalID", "captureDate")) %>%
-  dplyr::rename("capGroup" = "groupName")
+  dplyr::rename("capGroup" = "groupName") %>%
+distinct()
 
 parousOnly <- parityAssignments %>%
   filter(parity == "parous") %>%
@@ -253,6 +329,472 @@ hairGenoData_overview %>%
 ```
 
 # 4 Basic demography stuff
+
+## 4.1 presenceMatrix
+
+For each animalID, the presenceMatrix provides species, sex, captureYear_first, & captureYear_last -- based on this info, also included are columns for each year of the study listing all animalIDs present that year. Indivs are assumed to be present in the population if the year falls between their first and last recorded captureYear, even if they weren't necessarily captured in those intervening years.
+
+### groupMembership
+
+First going to sort out group membership for each indiv in each year of the study -- for cases where indivs weren't necessarily captured, but are known to still be present in the pop (i.e., in years b/t first and last recorded capture), group membership is assumed to be that which was last recorded for that individual. 
+
+```{r}
+groupMembership_2009to2023 <- capData_2009to2023 %>%
+  select(animalID, captureDate, captureYear, groupName) %>%
+  # first need to get cases w/multiple groups in one year into single col
+  distinct() %>%
+  mutate(temp = str_c(animalID, "_", captureYear)) %>%
+  arrange(temp, captureDate) %>%
+  mutate(dup = if_else(duplicated(temp), "entry2", "entry1")) %>%
+  select(temp, groupName, dup) %>%
+  distinct() %>%
+  pivot_wider(names_from = dup,
+              values_from = groupName) %>%
+  mutate(
+    groupName = case_when(
+      is.na(entry2) ~ entry1,
+      entry1 == entry2 ~ entry1,
+      entry1 != entry2 ~ str_c(entry1, entry2, sep = "_")
+    )
+  ) %>%
+  separate("temp", into = c("animalID", "captureYear")) %>%
+  select(animalID, captureYear, groupName) %>%
+  # now can make big df
+  pivot_wider(names_from = captureYear,
+              values_from = groupName) %>%
+  arrange(as.numeric(animalID)) %>%
+  relocate(c(animalID, '2009', '2010', '2011', '2012', '2013', '2014')) %>%
+  pivot_longer(-animalID,
+               names_to = "captureYear",
+               values_to = "groupName") %>%
+  arrange(animalID, captureYear) %>%
+  # fill in (inferred) groupNames for intervening years in which indivs weren't captured
+  mutate(fill_down = groupName,
+         fill_up = groupName) %>%
+  group_by(animalID) %>%
+  fill(fill_down) %>%
+  fill(fill_up, .direction = "up") %>%
+  mutate(groupName = if_else(fill_down == fill_up, fill_down, groupName)) %>%
+  ungroup() %>%
+  select(-fill_down, -fill_up) %>%
+  # switch back to wide format
+  pivot_wider(id_cols = animalID,
+              names_from = captureYear,
+              values_from = groupName)
+```
+
+### presenceMatrix
+
+Now combining groupMembership above w/some extra metadata to create presenceMatrix:
+
+```{r}
+library(dplyr)
+library(purrr)
+conflicts_prefer(purrr::reduce)
+
+presenceMatrix_2009to2023 <- capData_2009to2023 %>%
+  select(species, animalID, sex, captureYear) %>%
+  arrange(animalID, captureYear) %>%
+  group_by(animalID) %>%
+  slice(c(1, n())) %>%
+  ungroup() %>%
+  mutate(
+    id = janitor::make_clean_names(animalID, use_make_names = F),
+    id = case_when(
+      str_detect(id, "_2") ~ "captureYear_last",
+      .default = "captureYear_first"
+      )
+    ) %>%
+  pivot_wider(id_cols = c(animalID, species, sex),
+              names_from = id,
+              values_from = captureYear) %>%
+  merge(., groupMembership_2009to2023, by = "animalID") %>%
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  relocate(birthYear_est, .before = captureYear_first) %>%
+  relocate(species) %>%
+  arrange(species, as.numeric(animalID))
+
+# 2009 to 2019
+presenceMatrix_2009to2019 <- presenceMatrix_2009to2023 %>%
+  select(species, animalID, sex, birthYear_est, captureYear_first, captureYear_last, as.character(2009:2019)) %>%
+  filter(captureYear_first <= 2019)
+```
+
+**Total indivs present per year**
+
+```{r}
+totalIndivs_perYear_lwed <- presenceMatrix_2009to2023 %>%
+  filter(species == "LWED") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+
+totalIndivs_perYear_simp <- presenceMatrix_2009to2023 %>%
+  filter(species == "SIMP") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+```
+
+## 4.2 groupComps
+
+### Data
+
+```{r}
+groupComps_temp <- presenceMatrix_2009to2019 %>%
+  # keep first capGroup for the one indiv w/2 groups in one year
+  mutate(`2010` = case_when(
+    `2010` == "Perro6_Angels" ~ "Perro6",
+    .default = `2010`
+  )) %>%
+  select(-captureYear_first, -captureYear_last) %>%
+  pivot_longer(-c(species, animalID, sex, birthYear_est),
+               names_to = "captureYear",
+               values_to = "groupName") %>%
+  filter(!is.na(groupName)) %>%
+  mutate(
+    sex = case_when(
+      birthYear_est == captureYear ~ str_c("J", sex),
+      .default = str_c("A", sex)
+    )
+  ) 
+
+groupComps <- groupComps_temp %>%
+  group_by(species, groupName, captureYear) %>%
+  summarise(
+    AF = sum(sex == "AF"),
+    AM = sum(sex == "AM"),
+    JF = sum(sex == "JF"),
+    JM = sum(sex == "JM")
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    totalAdults = AF + AM,
+    totalIndivs = AF + AM + JF + JM
+  ) %>%
+  # add groupName_anon
+  merge(., groupRef_2009to2019[, c("species", "groupName", "groupName_anon")], by = c("species", "groupName"))
+```
+
+### Analysis
+
+```{r}
+# grp comp all indivs
+View(groupComps %>%
+  # remove grps w/only 1 indiv
+    filter(totalIndivs > 1) %>%
+  group_by(species) %>%
+  summarise(
+    minTotal = min(totalIndivs),
+    maxTotal = max(totalIndivs),
+    meanTotal = mean(totalIndivs),
+    sdTotal = sd(totalIndivs),
+    minAdults = min(totalAdults),
+    maxAdults = max(totalAdults),
+    meanAdults = mean(totalAdults),
+    sdAdults = sd(totalAdults),
+    minF = min(AF),
+    maxF = max(AF),
+    meanF = mean(AF),
+    sdF = sd(AF),
+    minM = min(AM),
+    maxM = max(AM),
+    meanM = mean(AM),
+    sdM = sd(AM)
+  ))
+
+# grp comp adults only
+View(groupComps %>%
+  filter(!groupName %in% c("Loners", "Angels")) %>%
+  group_by(species) %>%
+  summarise(
+    minAdults = min(totalAdults),
+    maxAdults = max(totalAdults),
+    meanAdults = mean(totalAdults),
+    sdAdults = sd(totalAdults),
+    minF = min(AF),
+    maxF = max(AF),
+    meanF = mean(AF),
+    sdF = sd(AF),
+    minM = min(AM),
+    maxM = max(AM),
+    meanM = mean(AM),
+    sdM = sd(AM)
+  ))
+
+# count AF vs. AM
+temp <- groupComps %>%
+  select(species, AF, AM) %>%
+  mutate(test = str_c(AF, "_", AM)) %>%
+  group_by(species, test) %>%
+  summarise(count = n())
+
+# 
+groupComps %>%
+  filter(!groupName %in% c("Loners", "Angels")) %>%
+  mutate(
+    af.am = case_when(
+      AF == AM ~ "equal",
+      AF > AM ~ "afGreater",
+      AM > AF ~ "amGreater"
+      )
+    ) %>%
+  group_by(species) %>%
+  summarise(
+    sumEqual = sum(af.am == "equal"),
+    sumAFGreater = sum(af.am == "afGreater"),
+    sumAMGreater = sum(af.am == "amGreater") 
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    prop_equal = sumEqual / (sumEqual + sumAFGreater + sumAMGreater),
+    prop_afGreater = sumAFGreater / (sumEqual + sumAFGreater + sumAMGreater),
+    prop_amGreater = sumAMGreater / (sumEqual + sumAFGreater + sumAMGreater)
+    )
+```
+
+Are # of AFs signif diff from AMs?
+
+```{r}
+# LWED
+statData_af.am_lwed <- groupComps %>%
+  filter(totalIndivs > 1) %>%
+  filter(species == "LWED") %>%
+  select(groupName, AF, AM) %>%
+  pivot_longer(-groupName,
+               names_to = "sex",
+               values_to = "count")
+
+shapiro.test(statData_af.am_lwed$count) # p = 2.689e-10
+
+# "less" asks: is number of males signif greater than # of females?
+statData_af.am_lwed2 <- groupComps %>%
+  filter(totalIndivs > 1) %>%
+  filter(species == "LWED")
+
+wilcox.test(statData_af.am_lwed2$AF, statData_af.am_lwed2$AM, paired = T, alternative = "less") # p = 4.298e-05
+rstatix::pairwise_wilcox_test(statData_af.am_lwed, count ~ sex, pairwise = T)
+
+
+# SIMP
+statData_af.am_simp <- groupComps %>%
+  filter(totalIndivs > 1) %>%
+  filter(species == "SIMP") %>%
+  select(groupName, AF, AM) %>%
+  pivot_longer(-groupName,
+               names_to = "sex",
+               values_to = "count")
+shapiro.test(statData_af.am_simp$count) # p = 5.443e-09
+
+# "less" asks: is number of males signif greater than # of females?
+statData_af.am_simp2 <- groupComps %>%
+  filter(totalIndivs > 1) %>%
+  filter(species == "SIMP")
+wilcox.test(statData_af.am_simp2$AF, statData_af.am_simp2$AM, paired = T, alternative = "less") # p = 0.0908
+
+rstatix::pairwise_wilcox_test(statData_af.am_simp, count ~ sex, pairwise = T)
+```
+
+
+### Plots
+
+```{r}
+source("project_scripts/ggplot_theme_Publication-2.R")
+#axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+
+plot_groupComps_lwed <- groupComps %>%
+  select(-c(totalAdults, totalIndivs, groupName)) %>%
+  filter(species == "LWED") %>%
+  pivot_longer(-c(species, groupName_anon, captureYear),
+               names_to = "sex",
+               values_to = "count") %>%
+  ggplot(aes(x = count,
+             y = captureYear,
+             fill = sex,
+             group = groupName_anon)) +
+  geom_bar(stat = "identity") +
+  #geom_line() +
+  facet_wrap(vars(groupName_anon)) +
+  #theme_bw()
+  theme_Publication_rv() +
+  theme(legend.position = "bottom") +
+  labs(x = "Number of individuals",
+       y = "Year",
+       fill = element_blank()) +
+  scale_fill_manual(values = c("#4C413FFF",
+                               "#278B9AFF",
+                               "#E75B64FF",
+                               "#D8AF39FF"), labels = c("AF" = "Adult female",
+                            "AM" = "Adult male",
+                            "JF" = "Juvenile female",
+                            "JM" = "Juvenile male"))
+plot_groupComps_simp <- groupComps %>%
+  select(-c(totalAdults, totalIndivs, groupName)) %>%
+  filter(species == "SIMP") %>%
+  pivot_longer(-c(species, groupName_anon, captureYear),
+               names_to = "sex",
+               values_to = "count") %>%
+  ggplot(aes(x = count,
+             y = captureYear,
+             fill = sex,
+             group = groupName_anon)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(vars(groupName_anon)) +
+  theme_Publication_rv() +
+  theme(legend.position = "bottom") +
+  labs(x = "Number of individuals",
+       y = "Year",
+       fill = element_blank()) +
+  scale_fill_manual(values = c("#4C413FFF",
+                               "#278B9AFF",
+                               "#E75B64FF",
+                               "#D8AF39FF"), labels = c("AF" = "Adult female",
+                            "AM" = "Adult male",
+                            "JF" = "Juvenile female",
+                            "JM" = "Juvenile male")) +
+  scale_x_continuous(breaks = c(0,2,4,6,8))
+
+plot_groupComps_lwed
+plot_groupComps_simp
+```
+
+helpful to figure out what to set hjust/vjust: https://stackoverflow.com/questions/7263849/what-do-hjust-and-vjust-do-when-making-a-plot-using-ggplot
+
+**AF vs. AM**
+
+Number of adult females recorded in a group relative to number of adult males. 
+
+```{r}
+plotData_af.vs.am <- groupComps %>%
+  select(species, groupName, AF, AM) %>%
+  pivot_longer(-c(species, groupName),
+               names_to = "sex",
+               values_to = "count") %>%
+  mutate(
+    species = case_when(
+      species == "LWED" ~ "Saddlebacks",
+      .default = "Emperors"
+      ),
+    species = factor(species, levels = c("Saddlebacks", "Emperors")),
+    sex = case_when(
+      sex == "AF" ~ "Adult females",
+      .default = "Adult males"
+      )
+    )
+
+plot_af.vs.am <- plotData_af.vs.am %>%
+  ggplot(aes(x = sex, y = count)) +
+  geom_violin(width = 1, aes(fill = sex)) +
+  scale_fill_manual(values = c("#4C413FFF", "#278B9AFF")) +
+  geom_boxplot(width = 0.1, color = "black", alpha = 0.5, outliers = F) +
+  geom_jitter(size=1, alpha=0.5, width = 0.3) +
+  facet_grid(vars(species)) +
+  theme_Publication_rv() +
+  labs(x = element_blank(),
+       y = "Number of individuals",
+       fill = element_blank())
+
+plot_af.vs.am
+my_colors_med
+```
+
+## 4.3 New parity & inferred maternity
+
+Based on groupComps -- if only one female in the group when juvs were there + in the year prior, female = parous AND likely mother of those juvs
+
+Looks like all of the females who meet these criteria were already designated as parous by nipple measures anyway though - but at least we have more maternity assignments? -ish?
+
+```{r}
+parity_groupComps <- groupComps %>%
+  
+  mutate(yearPrev = as.numeric(captureYear) - 1,
+         yearPrev = as.character(yearPrev)) %>%
+  merge(., groupComps[, c("captureYear", "groupName", "AF")], by.x = c("yearPrev", "groupName"), by.y = c("captureYear", "groupName"), all.x = T, suffixes = c("", "prev")) %>%
+  
+  mutate(totalJuvs = JF + JM) %>%
+  filter(totalJuvs > 0) %>%
+  filter(AF == 1) %>%
+  filter(AFprev == 1) %>%
+  merge(., capData_2009to2019[, c("animalID", "sex", "captureYear", "groupName", "ageClass")], by.x = c("captureYear", "groupName"), by.y = c("captureYear", "groupName"), all.x = T) %>%
+  filter(sex == "F") %>%
+  filter(ageClass != "juvenile") %>%
+  merge(., capData_2009to2019[, c("animalID", "sex", "captureYear", "groupName", "ageClass")], by.x = c("yearPrev", "groupName"), by.y = c("captureYear", "groupName"), all.x = T, suffixes = c("", "_prev")) %>%
+  filter(sex_prev == "F") %>%
+  filter(ageClass_prev != "juvenile") %>%
+  select(-sex_prev) %>%
+  mutate(
+    prevCurrent_match = animalID == animalID_prev
+  ) %>%
+  filter(prevCurrent_match == T) %>%
+  select(-prevCurrent_match) %>%
+  merge(parityAssigments_firstParous[, c("animalID", "parityYear")], by = "animalID", all.x = T) %>%
+  distinct() %>%
+  mutate(parityCheck = as.numeric(parityYear) <= as.numeric(captureYear)) %>%
+  relocate(species, animalID, animalID_prev, captureYear, yearPrev, groupName) %>%
+  relocate(AFprev, .after = AF) %>%
+  relocate(totalJuvs, .after = totalAdults)
+```
+
+**Inferred maternity:**
+
+from Mini's dss -- 76F is mom of 2009 juvs; 117 allonursed them tho
+
+```{r}
+maternity_groupComps <- capData_2009to2019 %>%
+  filter(ageClass == "juvenile") %>%
+  filter(str_c(captureYear, groupName) %in% str_c(parity_groupComps$captureYear, parity_groupComps$groupName)) %>%
+  select(species, animalID, sex, groupName, captureYear) %>%
+  # assign inferredMat
+  merge(., parity_groupComps[, c("animalID", "sex", "groupName", "captureYear")], by = c("captureYear", "groupName"), all.x = T, suffixes = c("_off", "_mat")) %>%
+  relocate(species, groupName, captureYear, animalID_mat, animalID_off) %>%
+  #dplyr::rename("sex_off" = "sex") %>%
+  arrange(species, groupName, captureYear)
+```
+
+## 4.4 Known dispersers
+
+Perhaps of note - two records of indivs who dispersed twice (both SIMP); SIMP_4M & SIMP_15F
+
+interesting that 15F went first from DangerousPeople to Loners then stayed in Bees the rest of the time (2013-2019)
+
+```{r}
+# list of known dispersers (indivs captured in at least 2 diff groups)
+knownDispersers <- presenceMatrix_2009to2019 %>%
+  mutate(
+    uniqueGroups = apply(select(., `2009`:`2019`),
+                         1,
+                         function(x) length(unique(x[!is.na(x)]))
+                         )
+    ) %>%
+  filter(uniqueGroups >= 2)
+
+knownDispersers %>%
+  select(species, sex) %>%
+  group_by(species, sex) %>%
+  summarise(count = n()) %>%
+  as.data.frame()
+```
+
+  species sex count
+1    LWED   F     9
+2    LWED   M    11
+3    SIMP   F     3
+4    SIMP   M     6
+
+## 4.5 Juv sex ratios
+
+```{r}
+capData_2009to2019 %>%
+  filter(ageClass == "juvenile") %>%
+  group_by(species, sex) %>%
+  summarise(count = n())
+```
 
 ## Time in study
 
@@ -347,32 +889,44 @@ capData_2009to2019_first.lastEntry <- capData_2009to2019_antiSort[match(unique(c
   )
 ```
 
-## Indivs present per year
 
-Maybe good to get a list of who was present in the population each year??
-
-```{r}
-library(dplyr)
-library(purrr)
-conflicts_prefer(purrr::reduce)
-
-presenceMatrix <- capData_2009to2023_first.lastEntry %>%
-  select(animalID, species, sex, captureYear_first, captureYear_last) %>%
-  reduce(2009:2023, .init = ., ~ .x %>%
-    mutate("{.y}" := ifelse(.y >= captureYear_first & .y <= captureYear_last, animalID, NA))) %>%
-  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
-  relocate(birthYear_est, .before = captureYear_first)
-
-colSums(!is.na(presenceMatrix)) %>%
-  as.data.frame()
-```
 
 ## Group numbers
+
+**2009 to 2023**
+
+```{r}
+# 17 lwed groups, 9 simp groups
+capData_2009to2023 %>%
+  select(species, groupName) %>%
+  # ditch "UNK" grp for now
+  filter(!groupName %in% c("Loners", "UNK")) %>%
+  distinct() %>%
+  group_by(species) %>%
+  summarise(nGroups = n())
+
+# really quick and dirty avg group size estimates...
+lwed_grpSizes_2009to2023 <- capData_2009to2023 %>%
+  filter(species == "LWED") %>%
+  group_by(groupName, captureYear) %>%
+  summarise(count = n()) %>%
+  filter(groupName != "Loners")
+round(mean(lwed_grpSizes_2009to2023$count)) # 5
+
+simp_grpSizes_2009to2023 <- capData_2009to2023 %>%
+  filter(species == "SIMP") %>%
+  group_by(groupName, captureYear) %>%
+  summarise(count = n()) %>%
+  filter(groupName != "Loners")
+round(mean(simp_grpSizes_2009to2023$count)) # 5
+```
+
+**2009 to 2019**
 
 ```{r}
 # 15 lwed groups, 9 simp groups
 capData_2009to2019 %>%
-  filter(groupName != "Loners") %>%
+  #filter(groupName != "Loners") %>%
   group_by(species) %>%
   summarise(nGroups = length(unique(groupName)))
 
@@ -390,37 +944,6 @@ simp_grpSizes <- capData_2009to2019 %>%
   summarise(count = n()) %>%
   filter(groupName != "Loners")
 round(mean(simp_grpSizes$count)) # 5
-```
-
-## Group membership
-
-```{r}
-groupMembership <- capData_2009to2019 %>%
-  select(animalID, captureDate, captureYear, groupName) %>%
-  # first need to get cases w/multiple groups in one year into single col
-  distinct() %>%
-  mutate(temp = str_c(animalID, "_", captureYear)) %>%
-  arrange(temp, captureDate) %>%
-  mutate(dup = if_else(duplicated(temp), "entry2", "entry1")) %>%
-  select(temp, groupName, dup) %>%
-  distinct() %>%
-  pivot_wider(names_from = dup,
-              values_from = groupName) %>%
-  mutate(
-    groupName = case_when(
-      is.na(entry2) ~ entry1,
-      entry1 == entry2 ~ entry1,
-      entry1 != entry2 ~ str_c(entry1, entry2, sep = "_")
-    )
-  ) %>%
-  separate("temp", into = c("animalID", "captureYear")) %>%
-  select(animalID, captureYear, groupName) %>%
-  mutate(captureYear = str_c("grp", captureYear)) %>%
-  # now can make big df
-  pivot_wider(names_from = captureYear,
-              values_from = groupName) %>%
-  arrange(as.numeric(animalID)) %>%
-  relocate(c(animalID, grp2009, grp2010, grp2011, grp2012, grp2013, grp2014))
 ```
 
 # 5 Filter genos
@@ -633,7 +1156,7 @@ simp_toRemove_afChecks <- simp_alleleFreqs %>%
 lwed_genos <- lwed_genos_temp %>%
   select(!all_of(lwed_toRemove_afChecks)) %>%
   rownames_to_column("sampleID") %>%
-  mutate(pop = "lwed") %>%
+  mutate(pop = "LWED") %>%
   merge(., md[, c("animalID", "sampleID", "sex", "captureYear")], by = "sampleID", all.x = T) %>%
   merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
   relocate(sampleID, animalID, sex, birthYear_est, pop, captureYear)
@@ -641,7 +1164,7 @@ lwed_genos <- lwed_genos_temp %>%
 simp_genos <- simp_genos_temp %>%
   select(!all_of(simp_toRemove_afChecks)) %>%
   rownames_to_column("sampleID") %>%
-  mutate(pop = "simp") %>%
+  mutate(pop = "SIMP") %>%
   merge(., md[, c("animalID", "sampleID", "sex", "captureYear")], by = "sampleID", all.x = T) %>%
   merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
   relocate(sampleID, animalID, sex, birthYear_est, pop, captureYear)
@@ -738,43 +1261,56 @@ simp_pidSibs.thresh <- as.numeric(simp_pidPerm_data[which(simp_pidPerm_data$PIDs
 ```{r}
 pidPerm_data_forFig <- lwed_pidPerm$results %>%
   mutate(species = "LWED") %>%
-  rbind(., simp_pidPerm$results %>% mutate(species = "SIMP"))
+  rbind(., simp_pidPerm$results %>% mutate(species = "SIMP")) %>%
+  mutate(
+    species = case_when(
+      species == "LWED" ~ "Saddlebacks",
+      .default = "Emperors"
+      ),
+    species = factor(species, levels = c("Saddlebacks", "Emperors"))
+    )
 
-pidThreshLines_forFig <- data.frame(species = c("LWED", "SIMP"),
+pidThreshLines_forFig <- data.frame(species = c("Saddlebacks", "Emperors"),
                                     vline = c(lwed_pid.thresh,
-                                              simp_pid.thresh))
-pidSibThreshLines_forFig <- data.frame(species = c("LWED", "SIMP"),
+                                              simp_pid.thresh)) %>%
+  mutate(species = factor(species, levels = c("Saddlebacks", "Emperors")))
+pidSibThreshLines_forFig <- data.frame(species = c("Saddlebacks", "Emperors"),
                                     vline = c(lwed_pidSibs.thresh,
-                                              simp_pidSibs.thresh))
+                                              simp_pidSibs.thresh)) %>%
+  mutate(species = factor(species, levels = c("Saddlebacks", "Emperors")))
 
-pidPerm_fig <- ggplot(pidPerm_data_forFig,
-                      aes(y = value,
-                          x = loci,
-                          color = statistic)) +
+# PLOT
+plot_pidPerm <- pidPerm_data_forFig %>%
+  ggplot(aes(y = value,
+             x = loci,
+             color = statistic)) +
   geom_boxplot() +
-  scale_colour_Publication() +
+  #scale_colour_Publication() +
+  scale_color_manual(values = c("#278B9AFF", "#E75B64FF")) +
   theme_Publication() +
   
   scale_x_discrete(limits = as.character(1:25)) +
   geom_vline(data = pidThreshLines_forFig,
              aes(xintercept = vline),
-                 color = "#386cb0") +
+                 color = "#278B9AFF") +
   geom_vline(data = pidSibThreshLines_forFig,
              aes(xintercept = vline),
-             color = "#fdb462") +
+             color = "#E75B64FF",
+             linetype = "longdash") +
   
   labs(x = "Number of loci",
-       y = "Probability of identity") +
-  facet_grid(rows = vars(species))
+       y = "Probability of identity",
+       color = "Statistic") +
+  facet_grid(rows = vars(species)) +
+  theme(strip.background =element_rect(fill="white", color = "black", linetype = "solid")) +
+  theme(legend.position = "right")
 
-pidPerm_fig
-
-  xlab("Number of loci")
+plot_pidPerm
 ```
 
 # 7 Genetic diversity
 
-## Prep data
+## 7.1 Prep data
 
 Prior to assessing genetic diversity, dispersal, etc., I need to create data subsets for each year of the study, saying who was in what group each year. Since genetic diversity and dispersal estimates generally rely on adults only, I'll be removing juvs from each year.
 
@@ -793,22 +1329,30 @@ lwed_popData_perYear_adultsOnly <- get_popData_byYear(
   birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
   adultsOnly = T)
 
+lwed_popData_perYear_allIndivs <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "LWED",
+  whichYears = 2009:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = F)
+
 # now get the geno data for each subset
 ## get geno data for adults present in each year; format as genind
-lwed_genoList_genind <- get_genos_perYear(
+lwed_genoList_genind_adultsOnly <- get_genos_perYear(
   genoData_df = lwed_genos,
   genos_startCol = 7,
   popData = lwed_popData_perYear_adultsOnly,
   sampleRef = sampleRef,
   outputFormat = "genind")
 
-# doesn't work yet
-lwed_genoList_hf <- get_genos_perYear(
+lwed_genoList_genind_allIndivs <- get_genos_perYear(
   genoData_df = lwed_genos,
   genos_startCol = 7,
-  popData = lwed_popData_perYear_adultsOnly,
+  popData = lwed_popData_perYear_allIndivs,
   sampleRef = sampleRef,
-  outputFormat = "hierfstat")
+  outputFormat = "genind")
 ```
 
 **SIMP**
@@ -824,82 +1368,186 @@ simp_popData_perYear_adultsOnly <- get_popData_byYear(
   birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
   adultsOnly = T)
 
-simp_popData_perYear_adultsOnly[["2014"]]
+simp_popData_perYear_allIndivs <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "SIMP",
+  whichYears = 2011:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = F)
 
 # now get the geno data for each subset
 ## get geno data for adults present in each year; format as genind
-simp_genoList_genind <- get_genos_perYear(
+simp_genoList_genind_adultsOnly <- get_genos_perYear(
   genoData_df = simp_genos,
   genos_startCol = 7,
   popData = simp_popData_perYear_adultsOnly,
   sampleRef = sampleRef,
   outputFormat = "genind")
+
+simp_genoList_genind_allIndivs <- get_genos_perYear(
+  genoData_df = simp_genos,
+  genos_startCol = 7,
+  popData = simp_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  outputFormat = "genind")
 ```
 
-## Descriptive stats
+## 7.2 Basic stats
 
-we can use the summary() function from 'adegenet' to provide the
-following: - Number of alleles per locus - Observed heterozygosity -
-Expected heterozygosity
+Using hierfstat::basic.stats
 
 Ho - observed heterozygosity; proportion of heterozygotes observed at each locus
-Hs - gene diversity w/in subpops (expected heterozygosity w/in groups); calculated based on allele freqs
+Hs - gene diversity w/in subpops (expected heterozygosity w/in groups); calculated from the squared allele freqs
 Ht - gene diversity across entire pop; total expected heterozygosity
 Dst - genetic diversity b/t subpops
-Htp - total gene diversity accounting for diffs among pops (NA b/c no b/t-subpop diversity)
+Htp - total gene diversity accounting for diffs among pops
 Dstp - prop of total gene diversity due to diffs b/t pops
 Fst - fixation index; measures pop differentiation due to genetic structure; 0 here indicates no differentiation b/t subpops
-Fstp - similar to Fst, but accounts for differentiation b/t pops (NA b/c no subpops)
+Fstp - similar to Fst, but accounts for differentiation b/t pops
 Fis - inbreeding coefficient w/in subpops, compares Ho to Hs; + values suggest deficit of hets (inbreeding), (-) values suggest excess hets
 Dest - Jost's D (measure of differentiation); NA b/c no differentiation detected
 
+**NOTE**
+Hexp from adegenet::summary represents the expected heterozygosity under HWE + accounts for all alleles
+Hs from hierfstat::basic.stats = Nei's gene diversity, which is w/in pop heterozygosity averaged across loci weighted by pop size (accounts for subpop structure)
+
+**Function:**
 ```{r}
-# LWED
-lwed_genind_sum <- adegenet::summary(lwed_genind)
-lwed_genind_sum
+get_multi.basicStats <- function(genoList_genind, diploid = T, digits = 4, fis.byGroup = T, nboot = 100) {
+  
+  # get necessary packages
+  library(hierfstat)
+  
+  # if want overall stats only
+  if (fis.byGroup == F) {
+    
+    # initialize df for results by year
+    overall.stats_results_perYear <- data.frame()
+    
+    # get overall stats per year
+    for (year_name in names(genoList_genind)) {
+      
+      year_data <- genoList_genind[[year_name]]
+      
+      year_overall.stats <- hierfstat::basic.stats(year_data, digits = digits)
+      
+      year_overall.stats_results <- year_overall.stats$overall %>%
+        as.data.frame() %>%
+        `colnames<-`(year_name) %>%
+        t() %>%
+        as.data.frame() %>%
+        rownames_to_column("year")
+      
+      # Append results for this year using dplyr::bind_rows
+      overall.stats_results_perYear <-
+        dplyr::bind_rows(overall.stats_results_perYear,
+                         year_overall.stats_results)
+    
+    }
+    
+    return(overall.stats_results_perYear)
+    
+  }
+  
+  # if also want fis stats per group
+  if (fis.byGroup == T) {
+    
+    # initialize df for results by year
+    overall.stats_results_perYear <- data.frame()
+    fis.byGroup_results_perYear <- data.frame()
+    
+    # get overall stats per year
+    for (year_name in names(genoList_genind)) {
+      
+      year_data <- genoList_genind[[year_name]]
+      
+      year_overall.stats <- hierfstat::basic.stats(year_data, digits = digits)
+      
+      year_overall.stats_results <- year_overall.stats$overall %>%
+        as.data.frame() %>%
+        `colnames<-`(year_name) %>%
+        t() %>%
+        as.data.frame() %>%
+        rownames_to_column("year")
+      
+      # Append results for this year using dplyr::bind_rows
+      overall.stats_results_perYear <-
+        dplyr::bind_rows(overall.stats_results_perYear,
+                         year_overall.stats_results)
+    
+    # get fis by group & bootstrap for CIs
+    year_fis.byGroup <- year_overall.stats$Fis
+    year_fis.boot.byGroup <- boot.ppfis(year_data, nboot = nboot, digits = digits)
+    
+    # assemble byGroup dfs
+    year_fis.boot.byGroup_df <- year_fis.boot.byGroup$fis.ci %>%
+      `colnames<-`(c("fis.lcl", "fis.ucl")) %>%
+      mutate(groupName = levels(year_data$pop)) %>%
+      relocate(groupName)
+    
+    year_fis.byGroup_results <- year_fis.byGroup %>%
+      as.data.frame() %>%
+      rownames_to_column("locus") %>%
+      pivot_longer(-locus,
+                   names_to = "groupName",
+                   values_to = "fis") %>%
+      group_by(groupName) %>%
+      summarise(fis.mean = mean(fis, na.rm = T)) %>%
+      merge(., year_fis.boot.byGroup_df, by = "groupName") %>%
+      mutate(year = year_name) %>%
+      relocate(year)
+      
+      fis.byGroup_results_perYear <- dplyr::bind_rows(fis.byGroup_results_perYear, year_fis.byGroup_results)
+      
+    }
+    
+    return(list(overall.stats_results_perYear, fis.byGroup_results_perYear))
+    
+  }
 
-lwed_basicStats <- basic.stats(lwed_genind)
-lwed_basicStats
-
-mean(lwed_basicStats$Ho, na.rm = T) # 0.460
-min(lwed_basicStats$Ho, na.rm = T) # 0.169
-max(lwed_basicStats$Ho, na.rm = T) # 0.621
-
-mean(lwed_basicStats$Hs, na.rm = T) # 0.457
-min(lwed_basicStats$Hs, na.rm = T) # 0.179
-max(lwed_basicStats$Hs, na.rm = T) # 0.504
-
-lwed_basicStats$overall # Ht = 0.457
-
-# SIMP
-simp_genind_sum <- adegenet::summary(simp_genind)
-simp_genind_sum
-simp_basicStats <- basic.stats(simp_genind)
-simp_basicStats
-
-mean(simp_basicStats$Ho, na.rm = T) # 0.434
-min(simp_basicStats$Ho, na.rm = T) # 0.058
-max(simp_basicStats$Ho, na.rm = T) # 0.611
-
-mean(simp_basicStats$Hs, na.rm = T) # 0.439
-min(simp_basicStats$Hs, na.rm = T) # 0.128
-max(simp_basicStats$Hs, na.rm = T) # 0.505
-
-simp_basicStats$overall # Ht 0.4390
+}
 ```
 
-## HWE
+**Run function:**
+```{r}
+lwed_multi.basicStats <- get_multi.basicStats(lwed_genoList_genind_adultsOnly, digits = 2, fis.byGroup = T, nboot = 1000)
 
-### Levene's test test
+simp_multi.basicStats <- get_multi.basicStats(simp_genoList_genind_adultsOnly, digits = 2, fis.byGroup = T, nboot = 1000)
+
+lwed_multi.basicStats
+simp_multi.basicStats
+
+test <- basic.stats(lwed_genoList_genind_adultsOnly$`2015`)
+```
+
+### Table
+
+```{r}
+lwed_multi.basicStats[[2]] %>%
+  ggplot(aes(x = year, y = fis.mean, color = groupName, group = groupName)) +
+  geom_point() +
+  geom_line()
+
+lwed_multi.basicStats[[1]] %>%
+  ggplot(aes(x = year, y = Fis)) +
+  geom_point()
+```
+
+## 7.3 HWE
+
+### Levene's test
 
 **Population-wide test for heterozygosity**
 
-Levene's test is an alternative to the Bartlett test to test whether the variance among two or more groups is equal. Relative to the Bartlett test, Levene's test is less sensitive to departures from normality.
+Levene's test is an alternative to the Bartlett test to test whether the variance among two or more groups is equal (i.e., testing homogeneity of variance aka homoscedasticity b/t groups). Relative to the Bartlett test, Levene's test is less sensitive to departures from normality.
+
+homoscedasticity = "same variance"
 
 I'm using Levene's test here to compare observed vs. expected heterozygosity, where a significant result indicates that the population departs from HWE. 
 
-RESULTS: There appears to be a significant different between observed and
-expected heterozygosity for both LWED and SIMP for every single year.
+NOTE -- significant result may not actually indicate HWE departure; what this test is really saying is just that the variation in obs vs. exp heterozygosity values is significantly different; could be due to HWE departure but could also be due to other things (e.g., result of diffs in sampling strategy, pop structure, etc.)
 
 Function:
 ```{r}
@@ -930,8 +1578,11 @@ get_multi.leveneTest <- function(genoList_genind) {
       `colnames<-`(c("df", "F.value", "p.value")) %>%
       mutate(year = year_name,
              nInd = year_summary$n,
-             nGrps = length(year_summary$n.by.pop)) %>%
-      relocate(c(year, nInd, nGrps))
+             nGrps = length(year_summary$n.by.pop),
+             NA.perc = year_summary$NA.perc,
+             mean_Hobs = mean(year_summary$Hobs, na.rm = T),
+             mean_Hexp = mean(year_summary$Hexp, na.rm = T)) %>%
+      relocate(c(year, nInd, nGrps, NA.perc, mean_Hobs, mean_Hexp))
     
     # Store results in list with year_name as the key
     results_perYear <- rbind(results_perYear, year_result) %>%
@@ -945,28 +1596,79 @@ get_multi.leveneTest <- function(genoList_genind) {
 
 **Run function:**
 
+RESULTS: There appears to be a significant different between observed and
+expected heterozygosity for both LWED and SIMP for every single year.
+
+Also, 
+
 ```{r}
 lwed_multi.leveneTest <- get_multi.leveneTest(lwed_genoList_genind) %>%
   mutate(species = "Saddleback tamarins") %>% as.data.frame()
 simp_multi.leveneTest <- get_multi.leveneTest(simp_genoList_genind) %>%
   mutate(species = "Emperor tamarins") %>% as.data.frame()
+
+base::rbind(lwed_multi.leveneTest, simp_multi.leveneTest) %>%
+  select(species, year, nInd, nGrps, mean_Hobs, mean_Hexp) %>%
+  mutate(higherHobs = mean_Hobs > mean_Hexp)
+
+base::rbind(lwed_multi.leveneTest, simp_multi.leveneTest) %>%
+  select(species, year, nInd, nGrps, NA.perc, mean_Hobs, mean_Hexp) %>%
+  group_by(species) %>%
+  summarise(min.Hobs = min(mean_Hobs),
+            max.Hobs = max(mean_Hobs),
+            min.Hexp = min(mean_Hexp),
+            max.Hexp = max(mean_Hexp),
+            mean.NA.perc = mean(NA.perc))
 ```
 
-**Table**
+#### Table
 
 ```{r}
 table_leveneTest <- base::rbind(lwed_multi.leveneTest, simp_multi.leveneTest) %>%
   mutate(
+    NA.perc = round(NA.perc, 2),
+    mean_Hobs = round(mean_Hobs, 2),
+    mean_Hexp = round(mean_Hexp, 2),
     F.value = round(F.value, 2),
     p.value = format.pval(p.value, digits = 2, eps = 0.001, nsmall = 3)) %>%
   select(-df) %>%
-  gt(groupname_col = "species") %>%
+  mutate(species = case_when(
+    species == "Saddleback tamarins" ~ "x",
+    .default = "y"
+  )) %>%
+  pivot_wider(
+    names_from = species,
+    values_from = c(nInd, nGrps, NA.perc, mean_Hobs, mean_Hexp, F.value, p.value),
+    names_sep = ".",
+    names_vary = "slowest"
+  ) %>%
+  gt() %>%
+  sub_missing(columns = everything(),
+              rows = everything(),
+              missing_text = "---") %>%
+  tab_spanner(label = "Saddleback tamarins",
+              columns = contains(".x")) %>%
+  tab_spanner(label = "Emperor tamarins",
+              columns = contains(".y")) %>%
+  tab_style(style = cell_text(weight = "bold"),
+            locations = cells_column_spanners()) %>%
   cols_label(
     year = md("**Year**"),
-    nInd = md("**#Indivs**"),
-    nGrps = md("**#Grps**"),
-    F.value = md("**_F_**"),
-    p.value = md("**_p_**")
+    nInd.x = md("#Indivs"),
+    nGrps.x = md("#Grps"),
+    NA.perc.x = md("%NA"),
+    mean_Hobs.x = md("mean.Hobs"),
+    mean_Hexp.x = md("mean.Hexp"),
+    F.value.x = md("_F_"),
+    p.value.x = md("_p_"),
+    
+    nInd.y = md("#Indivs"),
+    nGrps.y = md("#Grps"),
+    NA.perc.y = md("%NA"),
+    mean_Hobs.y = md("mean.Hobs"),
+    mean_Hexp.y = md("mean.Hexp"),
+    F.value.y = md("_F_"),
+    p.value.y = md("_p_")
   ) %>%
   cols_align(., align = "center", columns = everything())
 table_leveneTest
@@ -1020,6 +1722,8 @@ get_multi.hweTest <- function(genoList_genind, B) {
 Pr(chi^2>)= analytical p-value
 Pr.exact = permuted value
 ```{r}
+hw.test(lwed_genoList_genind_adultsOnly$`2015`)
+
 lwed_multi.hweTest <- get_multi.hweTest(lwed_genoList_genind, B = 1000)
 simp_multi.hweTest <- get_multi.hweTest(simp_genoList_genind, B = 1000)
 
@@ -1029,81 +1733,86 @@ lwed_multi.hweTest_signif2 <- lwed_multi.hweTest %>%
   filter(Pr.exact < 0.05)
 ```
 
-### Plots
+#### Plots
 
-still fighting to make this plot prettier...
+Heatmap showing loci that deviate from HWE. Grey boxes = locus was monomorphic that year, white box = indivs that year weren't genotyped at that locus
 
 ```{r}
-library(lattice)
+# create "locus_anon" just based on numbers bc can't use "scales = "free"" with coord_fixed (to make squares)
+temp1 <- lwed_multi.hweTest %>%
+  select(locus) %>%
+  distinct() %>%
+  filter(locus %in% simp_multi.hweTest$locus) %>%
+  mutate(locus_anon = row_number())
+temp2 <- lwed_multi.hweTest %>%
+  select(locus) %>%
+  distinct() %>%
+  filter(!locus %in% temp1$locus) %>%
+  mutate(locus_anon = row_number() + 38)
+temp3 <- simp_multi.hweTest %>%
+  select(locus) %>%
+  distinct() %>%
+  filter(!locus %in% temp1$locus) %>%
+  mutate(locus_anon = row_number() + 38)
+temp4 <- rbind(temp1, temp2, temp3)
 
-alpha  <- 0.05
+plotData_hweHeatmap <- lwed_multi.hweTest %>%
+  mutate(species = "LWED") %>%
+  rbind(., simp_multi.hweTest %>% mutate(species = "SIMP")) %>%
+  mutate(
+    p.value = case_when(
+      df == 0 ~ NA,
+      .default = p.value
+    ),
+    p.exact = case_when(
+      df == 0 ~ NA,
+      .default = p.exact
+    )
+  ) %>%
+  select(species, locus, year, p.exact) %>%
+  merge(., temp4, by = "locus", all.x = T)
+  
 
-lwed_mat <- lwed_multi.hweTest %>%
-  select(locus, year, p.exact) %>%
-  pivot_wider(id_cols = locus,
-              names_from = year,
-              values_from = p.exact) %>%
-  column_to_rownames("locus")
-lwed_newmat <- as.matrix(lwed_mat)
-lwed_newmat[lwed_newmat > alpha] <- 1
-
-simp_mat <- simp_multi.hweTest %>%
-  select(locus, year, p.exact) %>%
-  pivot_wider(id_cols = locus,
-              names_from = year,
-              values_from = p.exact) %>%
-  column_to_rownames("locus")
-simp_newmat <- as.matrix(simp_mat)
-simp_newmat[simp_newmat > alpha] <- 1
-
-# plot!
-library(gridExtra)
-
-plot1 <- levelplot(lwed_newmat, 
-                   scales = list(draw = FALSE), # Remove tick labels
-                   xlab = NULL, ylab = NULL,
-                   colorkey = list(space = "top")) # Remove axis labels
-
-plot2 <- levelplot(simp_newmat, 
-                   scales = list(draw = FALSE), 
-                   xlab = NULL, ylab = NULL,
-                   colorkey = F)
-
-# Arrange both plots in a single layout (side by side in this example)
-grid.arrange(plot1, plot2, nrow = 2)
-
-
-# ggplot version:
-# Convert your matrix to a dataframe
-lwed_multi.hweTest
-
-lwed_df <- as.data.frame(as.table(lwed_newmat)) %>%
-  dplyr::rename("locus" = "Var1",
-                "year" = "Var2",
-                "p.exact" = "Freq")
-simp_df <- as.data.frame(as.table(simp_newmat)) %>%
-  dplyr::rename("locus" = "Var1",
-                "year" = "Var2",
-                "p.exact" = "Freq")
-
-# Plot using ggplot2
-ggplot(lwed_multi.hweTest, aes(x = year, y = locus, fill = p.exact)) +
+plot_hweHeatmap <- plotData_hweHeatmap %>%
+  mutate(
+    species = case_when(
+      species == "LWED" ~ "Saddlebacks",
+      .default = "Emperors"
+      ),
+    species = factor(species, levels = c("Saddlebacks", "Emperors")),
+    p.exact = case_when(
+      p.exact > 0.05 ~ 1,
+      .default = p.exact
+    )
+    ) %>%
+  ggplot(aes(x = factor(locus_anon), y = year, fill = p.exact, group = species)) +
   geom_tile() +
-  #scale_fill_viridis_c(option = "D", direction = 1) +
-  paletteer::scale_color_paletteer_c("ggthemes::Sunset-Sunrise Diverging", direction = 1) +
-  theme_minimal() +
-  theme(axis.title = element_blank(),
-        axis.text = element_blank(),
-        axis.ticks = element_blank(),
-        legend.position = "top") + # Move color legend to the top
-  labs(fill = "p.exact") # legend title
+  #geom_text(aes(label = p.exact), color = "black") +
+  coord_equal() +
+  facet_grid(rows = vars(species)) +
+  theme_Publication() +
+  #paletteer::scale_fill_paletteer_c("grDevices::Fall", direction = 1) +
+  paletteer::scale_fill_paletteer_c("ggthemes::Red-Gold", direction = 1) +
+  #theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        legend.position = "right") + 
+  labs(
+    y = "Year",
+    x = "Loci",
+    fill = "p.exact"
+    ) +
+  theme(strip.background = element_rect(fill = "white", color = "black", linetype = "solid"))
+plot_hweHeatmap # saved as "plot_hweHeatmap"
 ```
 
-for heatmap: https://grunwaldlab.github.io/Population_Genetics_in_R/Locus_Stats.html
+## 7.4 F-stats
 
-## F-stats
+Helpful info from Population Genetics Glossary thing (https://www.uwyo.edu/dbmcd/popecol/maylects/popgengloss.html):
 
-The fixation index (FST)
+**F-statistics:** a measure of genetic structure developed by Sewall Wright (1969, 1978). Related to statistical analysis of variance  (ANOVA)
+**FST** is the proportion of the total genetic variance contained in a subpopulation (the S subscript) relative to the total genetic variance (the T subscript). Values can range from 0 to 1. High FST implies a considerable degree of differentiation among populations.
+**FIS (inbreeding coefficient)** is the proportion of the variance in the subpopulation contained in an individual. High FIS implies a considerable degree of inbreeding.
+**Related measures:** q (theta) of Weir and Cockerham (1984) and GST of Nei (1973, 1978). [See Weir, 1996; Avise, Box 6.3, p. 206].
 
 Get per-locus f-stats w/pegas:
 
@@ -1122,7 +1831,7 @@ microbov$tab
 seppop(microbov)$Salers
 ```
 
-## Inbreeding
+## 7.5 Inbreeding
 
 (from intro to adegenet) Inbreeding = excess homozygosity in a given individual due to the mating of genetically related parents. The excess homozygosity is due to the fact that there are non-negligible chances of inheriting two identical alleles from a recent common ancestor.
 
@@ -1267,60 +1976,6 @@ het.var_simp
 hf_simp <- r2_hf(simp_genos_ir, type = "snps", nboot = 10)
 
 plot(g2_simp, col = "#94C5CCFF")
-```
-
-## Population structure
-
-As of version 2.0.0, adegenet relies on hierfstat and pegas for most F
-statistics.
-
-```{r}
-library(hierfstat)
-wc(lwed_genind) # FST 0, FIS -0.005851178
-wc(simp_genind) # FST 0, FIS 0.01158646
-```
-
-Use pegas to provide estimates by locus:
-
-```{r}
-library(pegas)
-lwed_ftab <- Fst(as.loci(lwed_genind))
-simp_ftab <- Fst(as.loci(simp_genind))
-
-lwed_ftab
-simp_ftab
-```
-
-```{r}
-lwed_basicStats <- basic.stats(lwed_genind, diploid = T)
-simp_basicStats <- basic.stats(simp_genind, diploid = T)
-
-lwed_basicStats$overall
-simp_basicStats$overall
-```
-
-lwed_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4599
-0.4573 0.4573 0.0000 NaN NaN 0.0000 NaN -0.0059 NaN
-
-simp_basicStats\$overall Ho Hs Ht Dst Htp Dstp Fst Fstp Fis Dest 0.4339
-0.4390 0.4390 0.0000 NaN NaN 0.0000 NaN 0.0116 NaN
-
-Fis
-
-```{r}
-# Fis per locus
-lwed_basicStats$Fis
-simp_basicStats$Fis
-
-# mean Fis
-apply(lwed_basicStats$Fis, MARGIN = 2, FUN = mean, na.rm = T) # -0.0013
-apply(simp_basicStats$Fis, MARGIN = 2, FUN = mean, na.rm = T) # 0.020525
-```
-
-Pairwise Fst
-
-```{r}
-lwed_fst <- genet.dist(lwed_genind, method = "WC84")
 ```
 
 # Group relatedness
@@ -1584,10 +2239,65 @@ get_multi.groupRel <- function(genoList, iterations, outdir) {
   
 }
 
-get_multi.groupRel(lwed_genos_forRelated_adultsOnly, outdir = "./DISSERTATION/ch2_demography/02_results/lwed/")
+get_multi.groupRel(lwed_genos_forRelated_adultsOnly, iterations = 1000, outdir = "./DISSERTATION/ch2_demography/02_results/lwed/")
 
-get_multi.groupRel(simp_genos_forRelated_adultsOnly, iterations = 100, outdir = "./DISSERTATION/ch2_demography/02_results/simp/")
+get_multi.groupRel(simp_genos_forRelated_adultsOnly, iterations = 1000, outdir = "./DISSERTATION/ch2_demography/02_results/simp/")
 ```
+
+## Assess results
+
+```{r}
+lwed_grpRel <- read.csv("./DISSERTATION/ch2_demography/02_results/lwed/related_summary.csv")
+simp_grpRel <- read.csv("./DISSERTATION/ch2_demography/02_results/simp/related_summary.csv")
+
+mean(lwed_grpRel$RelValue) # 0.0707462
+median(lwed_grpRel$RelValue) # 0.1161
+lwed_grpRel %>%
+  #group_by(Year) %>%
+  summarise(mean = mean(RelValue),
+            min = min(RelValue),
+            max = max(RelValue))
+lwed_grpRel %>%
+  group_by(Group) %>%
+  summarise(mean = mean(RelValue),
+            sd = sd(RelValue))
+
+simp_grpRel %>%
+  #group_by(Year) %>%
+  summarise(mean = mean(RelValue),
+            min = min(RelValue),
+            max = max(RelValue))
+simp_grpRel %>%
+  group_by(Group) %>%
+  summarise(mean = mean(RelValue),
+            sd = sd(RelValue),
+            median = median(RelValue))
+
+lwed_grpRel %>%
+  ggplot(aes(x = factor(Year), y = RelValue, group = factor(Group))) +
+  geom_point(aes(color = factor(Group))) +
+  geom_line(aes(color = factor(Group))) +
+  theme_bw()
+
+simp_grpRel %>%
+  ggplot(aes(x = factor(Year), y = RelValue, group = factor(Group))) +
+  geom_point(aes(color = factor(Group))) +
+  geom_line(aes(color = factor(Group))) +
+  theme_bw()
+
+# only two years where overall ptest > 0.05
+lwed_grpRel %>%
+  group_by(Year, OverallPTest) %>%
+  summarise(nGrps = n()) %>%
+  filter(OverallPTest > 0.05)
+
+# only one year where overall ptest > 0.05
+simp_grpRel %>%
+  group_by(Year, OverallPTest) %>%
+  summarise(nGrps = n()) %>%
+  filter(OverallPTest > 0.05)
+```
+
 
 
 
@@ -1670,6 +2380,7 @@ simp_genos_forHf <- get_genos_perYear(genoData_df = simp_genos,
                                       popData = simp_popData_perYear_adultsOnly,
                                       sampleRef = sampleRef,
                                       outputFormat = "hierfstat")
+simp_genos_forHf$`2011`$genoData
 ```
 
 ## Create multi_sexbias.test function
@@ -1710,34 +2421,43 @@ multi_sexbias.test <- function(genoData_list, nperm = NULL, alternative = c("two
     # increment index for progress bar
     index <- index + 1
     
+    # grab genoData & sexData
+    genoData <- genoData_list[[as.character(y)]]$genoData %>%
+      select(-sampleID) %>%
+      merge(., groupRef_2009to2019[, c("groupName", "groupNum")], by.x = "pop", by.y = "groupName") %>%
+      mutate(pop = groupNum) %>%
+      select(-groupNum)
+    
+    sexData <- genoData_list[[as.character(y)]]$sexData
+    
     # run each test; use "try" to account for any errors thrown
-    maic <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "mAIc",
-                           alternative = "two.sided"),
-                  silent = TRUE)
+    maic <- try(sexbias.test(genoData,
+                             sexData,
+                             nperm = nperm,
+                             test = "mAIc",
+                             alternative = "two.sided"),
+                silent = TRUE)
     
-    vaic <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "vAIc",
-                           alternative = "two.sided"),
-                  silent = TRUE)
+    vaic <- try(sexbias.test(genoData,
+                             sexData,
+                             nperm = nperm,
+                             test = "vAIc",
+                             alternative = "two.sided"),
+                silent = TRUE)
     
-    fis <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "FIS",
-                           alternative = "two.sided"),
-                  silent = TRUE)
+    fis <- try(sexbias.test(genoData,
+                            sexData,
+                            nperm = nperm,
+                            test = "FIS",
+                            alternative = "two.sided"),
+               silent = TRUE)
     
-    fst <- try(sexbias.test(genoData_list[[as.character(y)]]$genoData,
-                           genoData_list[[as.character(y)]]$sexData,
-                           nperm = nperm,
-                           test = "FST",
-                           alternative = "two.sided"),
-                  silent = TRUE)
+    fst <- try(sexbias.test(genoData,
+                            sexData,
+                            nperm = nperm,
+                            test = "FST",
+                            alternative = "two.sided"),
+               silent = TRUE)
     
     # compile results
     if (class(maic) == "try-error") {
@@ -1823,11 +2543,25 @@ multi_sexbias.test <- function(genoData_list, nperm = NULL, alternative = c("two
 Now we can try the hierfstat sexbias.test
 
 ```{r}
+temp <- lwed_genos_forHf$`2015`$genoData %>%
+  select(-sampleID) %>%
+  merge(., groupRef_2009to2019[, c("groupName", "groupNum")], by.x = "pop", by.y = "groupName") %>%
+  mutate(pop = groupNum) %>%
+  select(-groupNum)
+
+
+
+sexbias.test(temp, lwed_genos_forHf$`2015`$sexData, test = "FIS", nperm = 10)
+
 # lwed
 lwed_sexbias.testResults <- multi_sexbias.test(lwed_genos_forHf, nperm = 1000, alternative = "two.sided")
 
 # simp
 simp_sexbias.testResults <- multi_sexbias.test(simp_genos_forHf, nperm = 1000, alternative = "two.sided")
+
+# export so I don't have to rerun this ever again
+write.csv(lwed_sexbias.testResults, "./DISSERTATION/ch2_demography/02_results/lwed/lwed_sexbias.testResults.csv", row.names = F)
+write.csv(simp_sexbias.testResults, "./DISSERTATION/ch2_demography/02_results/simp/simp_sexbias.testResults.csv", row.names = F)
 
 lwed_sexbias.testResults
 simp_sexbias.testResults
@@ -1880,6 +2614,82 @@ summary(res)
 **need to make table w/both lwed and simp results**
 
 ```{r}
+# format data
+lwed_sexbias.testResults_wide <- lwed_sexbias.testResults %>%
+  mutate(statistic = round(statistic, 3)) %>%
+  select(year, test, statistic, p.value) %>%
+  dplyr::rename("stat" = "statistic",
+                "p" = "p.value") %>%
+  mutate(
+    p = case_when(
+      p > 0.05 ~ 10,
+      .default = p
+      ),
+    p = case_when(
+      as.character(p) == "10" ~ "ns",
+      .default = as.character(p)
+      )
+    ) %>%
+  pivot_wider(id_cols = test,
+              names_from = year,
+              values_from = c(stat, p),
+              names_sep = "_",
+              names_vary = "slowest" # return value1_name1, value2_name1, value1_name2, value2_name2⁠
+              ) %>%
+  mutate(species = "Saddlebacks") %>%
+  relocate(species)
+  
+simp_sexbias.testResults_wide <- simp_sexbias.testResults %>%
+  mutate(statistic = round(statistic, 3)) %>%
+  select(year, test, statistic, p.value) %>%
+  dplyr::rename("stat" = "statistic",
+                "p" = "p.value") %>%
+  mutate(
+    p = case_when(
+      p > 0.05 ~ 10,
+      .default = p
+      ),
+    p = case_when(
+      as.character(p) == "10" ~ "ns",
+      .default = as.character(p)
+      )
+    ) %>%
+  pivot_wider(id_cols = test,
+              names_from = year,
+              values_from = c(stat, p),
+              names_sep = "_",
+              names_vary = "slowest" # return value1_name1, value2_name1, value1_name2, value2_name2⁠
+              ) %>%
+  mutate(species = "Emperors") %>%
+  relocate(species)
+
+# TABLE
+table_genoDispersal <- rbind(lwed_sexbias.testResults_wide, simp_sexbias.testResults_wide) %>%
+  gt(groupname_col = "species",
+     row_group_as_column =  T) %>%
+  sub_missing(columns = everything(),
+              rows = everything(),
+              missing_text = "---") %>%
+  tab_spanner_delim(delim = "_",
+                    reverse = T) #%>%
+  
+#  tab_style(
+#    style = list(cell_fill(color = "#D9AF6BFF")),
+#    locations = list(
+#      cells_body(columns = contains("stat"),
+#                 rows = test %in% c("mAIc", "FIS") & as.numeric(stat_2011) < 0),
+#      cells_body(columns = contains("stat"),
+#                 rows = test %in% c("mAIc", "FIS") & as.numeric(stat_2012) < 0)
+#      )
+#  )
+
+table_genoDispersal
+
+table_genoDispersal %>%
+  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_genoDispersal.png")
+
+
+# old table
 table_genoDispersal <- merge(lwed_sexbias.testResults, simp_sexbias.testResults, by = c("year", "test")) %>%
   mutate_at(vars(starts_with(c("stat", "p."))), ~round(., 2)) %>%
   mutate(sexBias.x = str_c(sexBias.x, signif.x),
@@ -2196,7 +3006,7 @@ PO = parent-offspring FS = full sib HS = half sib HAN = half aunt-niece
 ```{r}
 # get observed prop missing for each locus; mean missing = 0.06394130
 lwed_missing <- poppr::info_table(lwed_genind, type = "missing", df = T) %>%
-  filter(Population == "lwed") %>%
+  filter(Population == "LWED") %>%
   filter(Locus != "Mean")
 0.06394130*53 # 3.388889
 
@@ -2215,7 +3025,7 @@ lwed_Qs
 ```{r}
 # get observed prop missing for each locus; mean missing = 0.06780303
 simp_missing <- poppr::info_table(simp_genind, type = "missing", df = T) %>%
-  filter(Population == "simp") %>%
+  filter(Population == "SIMP") %>%
   filter(Locus != "Mean")
 0.06780303*48 # 3.254545
 
@@ -3355,6 +4165,34 @@ Following Shedd et al GitHub
 
 ### Prep files
 
+What's a reasonable amount of time to count indiv as "gone"? --use capHist to see largest amount of time b/t captures of a given indiv >> most amount of time b/t seeing an indiv is 3 years (e.g., 10001), so calc deathYear_est as captureYear_last + 4
+
+```{r}
+max_zero_gap <- capHist_2009to2019 %>%
+  mutate(
+    temp = str_match(ch, "10\\s*(.*?)\\s*1")[,1],
+    zeroCount = str_count(temp, "0")
+    )
+
+max(max_zero_gap$zeroCount, na.rm = T) # max = 3
+
+# create "disappearYear" for deathYear est.
+disappearYear <- presenceMatrix_2009to2023 %>%
+  mutate(deathYear_est = case_when(
+    captureYear_last != 2023 ~ captureYear_last + 4,
+    .default = NA
+  )) %>%
+  select(species, animalID, deathYear_est) %>%
+  # add actual known deathYears & replace as needed
+  merge(., deathAssignments, by = "animalID", all.x = T) %>%
+  mutate(deathYear_est.x = case_when(
+    !is.na(deathYear_est.y) ~ deathYear_est.y,
+    .default = deathYear_est.x
+  )) %>%
+  select(-deathYear_est.y) %>%
+  dplyr::rename("deathYear_est" = "deathYear_est.x")
+```
+
 **LWED**
 
 ```{r}
@@ -3380,8 +4218,8 @@ lwed_genos_franz <- names(lwed_genos_franz_temp) %>%
   dplyr::rename("birthYear" = "birthYear_est") %>%
   relocate(birthYear, .before = "sex") %>%
   
-  # add deathYear
-  merge(., deathAssignments[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  # add deathYear (including those estimated above)
+  merge(., disappearYear[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
   dplyr::rename("deathYear" = "deathYear_est") %>%
   relocate(deathYear, .before = "sex") %>%
   
@@ -3423,7 +4261,7 @@ simp_genos_franz <- names(simp_genos_franz_temp) %>%
   relocate(birthYear, .before = "sex") %>%
   
   # add deathYear
-  merge(., deathAssignments[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  merge(., disappearYear[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
   dplyr::rename("deathYear" = "deathYear_est") %>%
   relocate(deathYear, .before = "sex") %>%
   
@@ -3504,17 +4342,16 @@ known, use Nmax instead.
 
 The FRANz manual suggests that if a good estimate of Nf/Nm is possible,
 specifying these variables is preferable to Nfmax/Nmmax (the maximum
-number of candidate female/male parents in the population). As such, I'm
-using the sex-specific abundance estimates calculated in
-ch2_demography.Rmd (currently in ch2_relatedness.Rmd tho, need to move
-it) based on capData records.
+number of candidate female/male parents in the population). 
+
+As such, I'm using the sex-specific abundance estimates calculated using CMR "Model 3" (below).
 
 ```         
-lwed_Nf = 73
-lwed_Nm = 82
+lwed_Nf = 86
+lwed_Nm = 97
 
-simp_Nf = 52
-simp_Nm = 60
+simp_Nf = 57
+simp_Nm = 64
 ```
 
 ## franz_run1
@@ -3525,7 +4362,7 @@ simp_Nm = 60
 # lwed
 cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/lwed/franz_run1
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 96 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 97 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
 
 # simp
 cd ./../../simp/franz_run1
@@ -3714,9 +4551,6 @@ lwed_po_run1 <- lwed_po_run1_file %>%
   
   relocate(parentID, poType, parent, offspring, animalID_par, animalID_off, sex_par, sex_off, diff_birth.parity, groupMatch, birthYear_par, parityYear, birthYear_off, groupName_par, groupName_off)
 
-temp <- lwed_po_run1_file %>%
-  filter(LOD > lwed_optLOD_test1)
-
 # SIMP
 simp_po_run1 <- simp_po_run1_file %>%
   # use optLOD_test1 to minimize false-positives
@@ -3764,18 +4598,19 @@ simp_po_run1 <- simp_po_run1_file %>%
 
 **PO pedigree.dat**
 
-Just filtering by groupMatch == T; filtering by diff_birth.parity gives
-too few I think
+Filter by groupMatch == T + diff_birth.parity NA or at least not negative
 
-LWED: F = 5, M = 5 SIMP: F = 3, M = 1
+LWED: F = 4, M = 4 SIMP: F = 1, M = 1
 
 ```{r}
 lwed_po_run1_forPed <- lwed_po_run1 %>%
   filter(groupMatch == TRUE) %>%
+  filter(is.na(diff_birth.parity) | diff_birth.parity >= 0) %>%
   mutate(franzPed = str_c(parent, offspring))
 
 simp_po_run1_forPed <- simp_po_run1 %>%
   filter(groupMatch == TRUE) %>%
+  filter(is.na(diff_birth.parity) | diff_birth.parity >= 0) %>%
   mutate(franzPed = str_c(parent, offspring))
 
 # overview of parent assignment numbers for pedigree.dat
@@ -3839,7 +4674,7 @@ simp_sibs_run1 <- read_franzSibs("./DISSERTATION/ch2_demography/02_results/simp/
 # lwed
 cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch2_demography/02_results/lwed/franz_run2
 
-FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 96 --pedigreein ./../../../00_data/lwed_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
+FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 97 --pedigreein ./../../../00_data/lwed_poPed_forRun2.dat --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz.dat
 
 # simp
 cd ./../../simp/franz_run2
@@ -3857,12 +4692,38 @@ FRANz --femrepro 2:30 --malerepro 2:30 --Nf 57 --Nm 64 --pedigreein ./../../../0
 lwed_po_run2_file <- read_csv("./DISSERTATION/ch2_demography/02_results/lwed/franz_run2/parentage.csv") %>%
   separate('Posterior Parent 2', c("pp2", "mlPed"), sep = ",") %>%
   `colnames<-`(colnames_parentage) %>%
-  mutate(franzRun = "run2")
+  mutate(
+    rowID = row_number(),
+    poType = case_when(
+      !is.na(parent1) & !is.na(parent2) ~ "triple",
+      !is.na(parent1) & is.na(parent2) ~ "dyad",
+      is.na(parent1) & !is.na(parent2) ~ "dyad",
+      .default = NA
+      ),
+    poType = case_when(
+      !is.na(parentage_mlPedigree) ~ str_c(poType, "_ml"),
+      .default = poType
+      )
+    ) %>%
+  relocate(c(rowID, poType))
 
 simp_po_run2_file <- read_csv("./DISSERTATION/ch2_demography/02_results/simp/franz_run2/parentage.csv") %>%
   separate('Posterior Parent 2', c("pp2", "mlPed"), sep = ",") %>%
   `colnames<-`(colnames_parentage) %>%
-  mutate(franzRun = "run2")
+  mutate(
+    rowID = row_number(),
+    poType = case_when(
+      !is.na(parent1) & !is.na(parent2) ~ "triple",
+      !is.na(parent1) & is.na(parent2) ~ "dyad",
+      is.na(parent1) & !is.na(parent2) ~ "dyad",
+      .default = NA
+      ),
+    poType = case_when(
+      !is.na(parentage_mlPedigree) ~ str_c(poType, "_ml"),
+      .default = poType
+      )
+    ) %>%
+  relocate(c(rowID, poType))
 ```
 
 **PO checks**
@@ -3872,9 +4733,10 @@ simp_po_run2_file <- read_csv("./DISSERTATION/ch2_demography/02_results/simp/fra
 lwed_po_run2 <- lwed_po_run2_file %>%
   # remove NA assignments
   filter(!is.na(parent1)) %>%
-  select(offspring, parent1, parent2, LOD, posterior) %>%
   
-  pivot_longer(-c(offspring, LOD, posterior),
+  select(rowID, poType, offspring, LOD, posterior, parent1, parent2) %>%
+  
+  pivot_longer(-c(rowID, poType, offspring, LOD, posterior),
                names_to = "parentID",
                values_to = "parent") %>%
   select(-parentID) %>%
@@ -3884,7 +4746,7 @@ lwed_po_run2 <- lwed_po_run2_file %>%
   merge(., lwed_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
   merge(., lwed_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
   
-  # add groups
+  # add groups (set parent group = group in offspring birthYear - 1)
   mutate(
     animalID_par = gsub(".*_([0-9]+)$", "\\1", parent),
     animalID_off = gsub(".*_([0-9]+)$", "\\1", offspring)
@@ -3914,17 +4776,17 @@ lwed_po_run2 <- lwed_po_run2_file %>%
     diff_birthOff.birthPar = as.numeric(birthYear_off) - as.numeric(birthYear_par)
   ) %>%
   
-  relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
-  arrange(offspring, parent)
-
+  relocate(rowID, parent, offspring, LOD, posterior, poType, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
+  arrange(as.numeric(animalID_off), LOD)
 
 # SIMP
 simp_po_run2 <- simp_po_run2_file %>%
   # remove NA assignments
   filter(!is.na(parent1)) %>%
-  select(offspring, parent1, parent2, LOD, posterior) %>%
   
-  pivot_longer(-c(offspring, LOD, posterior),
+  select(rowID, poType, offspring, LOD, posterior, parent1, parent2) %>%
+  
+  pivot_longer(-c(rowID, poType, offspring, LOD, posterior),
                names_to = "parentID",
                values_to = "parent") %>%
   select(-parentID) %>%
@@ -3934,7 +4796,7 @@ simp_po_run2 <- simp_po_run2_file %>%
   merge(., simp_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "parent", by.y = "sampleID_franz", all.x = T) %>%
   merge(., simp_genos_franz[, c("sampleID_franz", "birthYear", "sex")], by.x = "offspring", by.y = "sampleID_franz", all.x = T, suffixes = c("_par", "_off")) %>%
   
-  # add groups
+  # add groups (set parent group = group in offspring birthYear - 1)
   mutate(
     animalID_par = gsub(".*_([0-9]+)$", "\\1", parent),
     animalID_off = gsub(".*_([0-9]+)$", "\\1", offspring)
@@ -3964,9 +4826,56 @@ simp_po_run2 <- simp_po_run2_file %>%
     diff_birthOff.birthPar = as.numeric(birthYear_off) - as.numeric(birthYear_par)
   ) %>%
   
-  relocate(parent, offspring, LOD, posterior, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
+  relocate(rowID, parent, offspring, LOD, posterior, poType, animalID_par, animalID_off, sex_par, sex_off, birthYear_par, birthYear_off, diff_birthOff.birthPar, parityYear, diff_birth.parity, groupName_par, groupName_off, groupMatch) %>%
   arrange(as.numeric(animalID_off), LOD)
 ```
+
+##### Check inferredMat
+
+Checking mat assignments against inferred mat based on groupComps in 4.3 above -- the 6 offspring w/both franz assigned maternity + groupComp inferred maternity MATCHED for lwed
+
+but 0/2 matched for simp...
+
+```{r}
+# LWED
+lwed_po_run2_infMatChecks <- lwed_po_run2 %>%
+  merge(., maternity_groupComps[, c("animalID_mat", "animalID_off", "sex_mat")], by.x = c("animalID_off", "sex_par"), by.y = c("animalID_off", "sex_mat"), all.x = T) %>%
+  relocate(animalID_off, .after = animalID_par) %>%
+  relocate(sex_par, .before = sex_off) %>%
+  relocate(animalID_mat, .after = animalID_par) %>%
+  filter(!is.na(animalID_mat)) %>%
+  # filter to highest posterior when have >1 assignment per off
+  group_by(animalID_off) %>%
+  slice_max(posterior) %>%
+  ungroup() %>%
+  mutate(
+    franzComp_match = animalID_par == animalID_mat
+  ) %>%
+  relocate(franzComp_match, .after = animalID_mat)
+
+length(unique(lwed_po_run2_infMatChecks$animalID_off)) # 6/6 offspring confirmed
+
+# SIMP
+simp_po_run2_infMatChecks <- simp_po_run2 %>%
+  merge(., maternity_groupComps[, c("animalID_mat", "animalID_off", "sex_mat")], by.x = c("animalID_off", "sex_par"), by.y = c("animalID_off", "sex_mat"), all.x = T) %>%
+  relocate(animalID_off, .after = animalID_par) %>%
+  relocate(sex_par, .before = sex_off) %>%
+  relocate(animalID_mat, .after = animalID_par) %>%
+  filter(!is.na(animalID_mat)) %>%
+  # filter to highest posterior when have >1 assignment per off
+  group_by(animalID_off) %>%
+  slice_max(posterior) %>%
+  ungroup() %>%
+  mutate(
+    franzComp_match = animalID_par == animalID_mat
+  ) %>%
+  relocate(franzComp_match, .after = animalID_mat)
+
+length(unique(simp_po_run2_infMatChecks$animalID_off)) # 0/2 offspring confirmed
+```
+
+offspring 207 - genMat = 149; infMat = 15 - bees
+offspring 211 - genMat = 34; infMat = 54 - whiteemps
 
 ##### Apply LOD filters
 
@@ -4032,9 +4941,6 @@ lwed_po_lod2_counts <- lwed_po_run2_lod2_juvsOnly %>%
   as.data.frame() %>%
   mutate(count = str_c("p", count))
 
-table(lwed_po_lod1_counts$count)
-table(lwed_po_lod2_counts$count)
-
 # simp
 simp_po_lod1_counts <- simp_po_run2_lod1_juvsOnly %>%
   #filter(!is.na(birthYear_off)) %>%
@@ -4050,9 +4956,34 @@ simp_po_lod2_counts <- simp_po_run2_lod2_juvsOnly %>%
   as.data.frame() %>%
   mutate(count = str_c("p", count))
 
+
+table(lwed_po_lod1_counts$count)
 table(simp_po_lod1_counts$count)
+
+table(lwed_po_lod2_counts$count)
 table(simp_po_lod2_counts$count)
 ```
+
+scratch work--
+```{r}
+temp <- lwed_po_run2_lod1_juvsOnly %>%
+  mutate(parType = case_when(
+    sex_par == "F" ~ "dam",
+    .default = "sire"
+  )) %>%
+  select(animalID_off, parType, animalID_par) %>%
+  pivot_wider(id_cols = animalID_off,
+              names_from = parType,
+              values_from = animalID_par) %>%
+  mutate(
+    poType = case_when(
+      !is.na(dam) & !is.na(sire) ~ "trio",
+      !is.na(dam) & is.na(sire) ~ "sire",
+      is.na(dam) & !is.na(sire) ~ "dam"
+    )
+  )
+```
+
 
 #### SIB assignments
 
@@ -4079,7 +5010,8 @@ simp_sibs_run2 <- read_franzSibs("./DISSERTATION/ch2_demography/02_results/simp/
 
 ## PO vs. twin pairs
 
-**START HERE**
+LWED
+- 
 
 ```{r}
 twinList <- capData_2009to2019 %>%
@@ -4097,9 +5029,11 @@ twinList <- capData_2009to2019 %>%
 # 19 lwed and 18 simp potential sibling sets
 table(twinList$species)
 
-# ...only one sibling set per species that had parentage assignments for all indivs
+# ...only two sibling sets per species that had parentage assignments for all indivs
 # at least it was the maybe triplet lwed group? 161, 162, 163
-# plus animalID 288 & 289 for simp
+# so in total:
+## LWED: 60/62 & 161/162/163
+## SIMP: 288/289 & 167/168
 lwedSIMP_po.twinList <- twinList %>%
   mutate(twin1 = as.character(as.numeric(twin1)),
          twin2 = as.character(as.numeric(twin2)),
@@ -4119,15 +5053,34 @@ lwedSIMP_po.twinList <- twinList %>%
       .default = "-"
       )
   )
+```
 
+LWED 161/162/163
+
+LWED 60/62
+- 60M - mom = 63F, no dad assigned
+- 62M - mom = 97F, dad = 58F
+
+SIMP 167/168
+- 167M - mom = 33F
+- 168F - mom = 34F (unlikely bc 34F not parous til 2 yrs later; also 34F seems to be daughter of 33F)
+
+```{r}
 lwed_po.twinList_16123 <- lwed_po_run2 %>% filter(animalID_off %in% c(161, 162, 163)) %>% arrange(animalID_off, sex_par)
 View(capData_2009to2019 %>% filter(animalID %in% c(51, 53)))
 
-simp_po.twinList_288.289 <- simp_po_run2 %>%
-  filter(animalID_off %in% c(288, 289))
+lwed_po.twinList_60.62 <- lwed_po_run2 %>%
+  filter(animalID_off %in% c(60, 62))
+
+simp_po.twinList_checks <- simp_po_run2 %>%
+  filter(animalID_off %in% c(167, 168, 288, 289))
+
+simp_po_run2_file
 ```
 
 ## Draw pedigree
+
+**/NEED TO FIX**
 
 If there are two entries with the same indivs, just in different categories, keep the combo with the highest posterior
 
@@ -4155,8 +5108,6 @@ filterTo_highestPosterior <- function(po_df) {
   return(results)
   
 }
-
-
 ```
 
 As input, need to give ped() four vectors of equal length, including id, fid (father), mid (mothers), and sex 
@@ -4239,9 +5190,13 @@ lwed_trios_ped <- ped(id = lwed_trios$id,
     fid = lwed_trios$fid,
     mid = lwed_trios$mid,
     sex = lwed_trios$sex)
-plot(lwed_trios_ped, cex = 0.05, symbolsize = 0.5) # too big
+
+pdf(file = "./DISSERTATION/ch2_demography/02_results/lwed/ped_full_lwed.pdf", width = 20, height = 20)
+plot(lwed_trios_ped) # too big
+dev.off()
 
 
+writePed(lwed_trios_ped$`_comp1`, prefix = "./DISSERTATION/ch2_demography/02_results/lwed/pedTrios_comp1", what = "ped", famid = F)
 writePed(lwed_trios_ped$`_comp4`, prefix = "./DISSERTATION/ch2_demography/02_results/lwed/pedTrios_comp4", what = "ped", famid = F)
 
 write.table(lwed_trios, "./DISSERTATION/ch2_demography/02_results/lwed/pedTrios.txt", quote = F)
@@ -4285,11 +5240,22 @@ lwed_pedGraph <- agopen(file = lwed_pedFile, name = "pedigree")
 Rgraphviz::plot()
 ```
 
-
 # Reproductive success
 
 ```{r}
-temp <- groupMembership %>%
+# all juvs recorded
+birthAssignments
+
+
+temp <- lwed_po_run2_lod2_juvsOnly %>%
+  filter(sex_par == "F")
+
+table(temp$parent)
+```
+
+
+```{r}
+tempX <- groupMembership %>%
   pivot_longer(-animalID,
                names_to = "captureYear",
                values_to = "groupName") %>%
@@ -4308,8 +5274,38 @@ temp <- groupMembership %>%
   mutate(captureYear = gsub("grp", "", captureYear)) %>%
   arrange(as.numeric(animalID), as.numeric(captureYear)) %>%
   merge(., sampleRef[, c("animalID", "species", "sex", "natalGroup", "birthYear_est")], by = "animalID", all.x = T) %>%
-  distinct()
+  mutate(species = toupper(species)) %>%
+  distinct() %>%
+  arrange(species, animalID, captureYear)
 
+
+temp <- tempX %>%
+  filter(groupName == "Sun7") %>%
+  group_by(animalID) %>%
+  slice(c(1, n())) %>%
+  ungroup() %>%
+  mutate(id = rep(c("captureYear_first","captureYear_last"), 14)) %>%
+  pivot_wider(id_cols = c(animalID, sex, birthYear_est),
+              names_from = id,
+              values_from = captureYear) %>%
+  mutate(captureYear_first = as.numeric(captureYear_first),
+         captureYear_last = as.numeric(captureYear_last))
+class(temp$birthYear_est)
+class(temp$captureYear_first)
+
+temp %>%
+  ggplot() +
+  geom_point(aes(x = birthYear_est,
+                 y = animalID,
+                 color = sex)) +
+  geom_segment(aes(x = captureYear_first,
+                   xend = captureYear_last,
+                   y = animalID,
+                   yend = animalID,
+                   color = sex))
+  
+
+View(capData_2009to2019 %>% filter(animalID == 272))
 
 lwedF_repVar <- lwed_po_run2 %>%
   filter(!is.na(birthYear_off)) %>%
@@ -4333,6 +5329,7 @@ plot_capOverview_byGroup <- ggplot(capOverview_discrete) +
 
 lwed_clevFig <- presenceMatrix %>%
   filter(species == "LWED") %>%
+  filter(sex == "F") %>%
   mutate(temp = captureYear_last - captureYear_first) %>%
   filter(temp > 0) %>%
   arrange(desc(temp)) %>%
@@ -4347,13 +5344,36 @@ lwed_clevFig <- presenceMatrix %>%
   theme_bw() +
   theme(axis.text.y = element_blank(),
         axis.ticks.y = element_blank())
+  
 lwed_clevFig
 ```
 
 # Interbirth intervals
 
 ```{r}
+# all juvs recorded
+temp1 <- rbind(lwed_po_run2_lod2_juvsOnly, simp_po_run2_lod2_juvsOnly)
 
+temp2 <- sampleRef %>%
+  select(species, animalID, birthYear_est, natalGroup) %>%
+  na.omit() %>%
+  distinct() %>%
+  #filter(species == "LWED") %>%
+  merge(., temp1[, c("animalID_off", "animalID_par", "sex_par", "groupName_par")], by.x = "animalID", by.y = "animalID_off", all.x = T) %>%
+  filter(is.na(sex_par) | sex_par == "F") %>%
+  merge(., presenceMatrix[, c("animalID", "captureYear_last")], by = "animalID") %>%
+  arrange(species, natalGroup, birthYear_est)
+
+presenceMatrix_2009to2019
+groupRef_2009to2019
+
+lwed_po_run2_lod2_juvsOnly
+
+twinList
+sampleRef
+
+View(capData_2009to2023 %>% filter(animalID == 273))
+View(capData_2009to2023 %>% filter(groupName == "AR6"))
 ```
 
 # Attempt with blood samples
@@ -4619,7 +5639,7 @@ FROM 2009 TO 2019 ONLY!!
 ```{r}
 length(unique(capData_2009to2019$animalID)) # 247 indivs captured
 
-# capPeriods_byGroup
+# capPeriods_byIndiv
 capStarts_byIndiv <- capData_2009to2019 %>%
   select(animalID, captureDate) %>%
   group_by(animalID) %>%
@@ -4698,17 +5718,16 @@ capSummary_table %>%
 
 ### Plots
 
-Cleveland plot showing capture history for LWED and SIMP social groups
-from 2009 to 2019
+**2009 to 2023**
 
 ```{r}
 # keep all cap records
-capOverview_continuous <- capData_2009to2019 %>%
+capOverview_continuous_2009to2023 <- capData_2009to2023 %>%
   select(captureDate, captureYear, species, groupName, animalID) %>%
   distinct()
 
 # only keep one per year
-capOverview_discrete <- capData_2009to2019 %>%
+capOverview_discrete_2009to2023 <- capData_2009to2023 %>%
   select(captureYear, species, groupName, animalID) %>%
   distinct() %>%
   # add first year captured
@@ -4731,22 +5750,105 @@ capOverview_discrete <- capData_2009to2019 %>%
   ungroup() %>%
   relocate(species, groupName, firstCapture, captureYear, nextCapture, capID, nCaptured) %>%
   # remove UNK group name & Loners
-  filter(!groupName %in% c("UNK", "Loners"))
-```
+  filter(!groupName %in% c("UNK", "Loners")) %>%
+  # anonymize groupName
+  merge(., groupRef[, c("groupName", "groupName_anon")], by = "groupName") %>%
+  arrange(species, desc(groupName_anon)) %>%
+  mutate(groupName_anon = factor(groupName_anon, ordered = T))
 
-```{r}
-plot_capOverview_byGroup <- ggplot(capOverview_discrete) +
+# plot
+plot_capOverview_byGroup_2009to2023 <- capOverview_discrete_2009to2023 %>%
+  mutate(species = case_when(
+    species == "LWED" ~ "L. w. weddelli",
+    .default = "T. subgrisescens"
+  ),
+  species = factor(species, levels = c("L. w. weddelli", "T. subgrisescens"))
+  ) %>%
+  ggplot() +
   geom_segment(aes(x = captureYear,
                    xend = nextCapture,
-                   y = groupName,
-                   yend = groupName,
+                   y = groupName_anon,
+                   yend = groupName_anon,
                    color = as.factor(capID))) +
-  geom_point(aes(x = captureYear, y = groupName, color = as.factor(capID), size = nCaptured)) +
+  geom_point(aes(x = captureYear, y = groupName_anon, color = as.factor(capID), size = nCaptured)) +
+  scale_x_continuous(breaks = 2009:2023) +
+  facet_grid(rows = vars(species), scales = "free_y") +
+  theme_bw() +
+  labs(x = "Capture year",
+       y = "GroupID",
+       size = "# captured",
+       color = "Capture event") +
+  scale_color_manual(values = my_colors)
+
+plot_capOverview_byGroup_2009to2023
+```
+
+**2009 to 2019**
+
+Cleveland plot showing capture history for LWED and SIMP social groups
+from 2009 to 2019
+
+```{r}
+# keep all cap records
+capOverview_continuous_2009to2019 <- capData_2009to2019 %>%
+  select(captureDate, captureYear, species, groupName, animalID) %>%
+  distinct()
+
+# only keep one per year
+capOverview_discrete_2009to2019 <- capData_2009to2019 %>%
+  select(captureYear, species, groupName, animalID) %>%
+  distinct() %>%
+  # add first year captured
+  arrange(species, groupName, captureYear) %>%
+  group_by(groupName) %>%
+  mutate(firstCapture = min(captureYear)) %>%
+  ungroup() %>%
+  # add number of indv captured each event
+  group_by(species, captureYear, groupName, firstCapture) %>%
+  summarise(nCaptured = n()) %>%
+  # add capID
+  group_by(species, groupName) %>%
+  mutate(capID = row_number()) %>%
+  ungroup() %>%
+  arrange(species, groupName) %>%
+  # add nextCapture
+  group_by(groupName) %>%
+  mutate(nextCapture = lead(captureYear)) %>%
+  #filter(!is.na(nextCapture)) %>%
+  ungroup() %>%
+  relocate(species, groupName, firstCapture, captureYear, nextCapture, capID, nCaptured) %>%
+  # remove UNK group name & Loners
+  filter(!groupName %in% c("UNK", "Loners")) %>%
+  # anonymize groupName
+  merge(., groupRef_2009to2019[, c("groupName", "groupName_anon")], by = "groupName") %>%
+  arrange(species, desc(groupName_anon)) %>%
+  mutate(groupName_anon = factor(groupName_anon, ordered = T))
+
+# plot
+plot_capOverview_byGroup_2009to2019 <- capOverview_discrete_2009to2019 %>%
+  mutate(species = case_when(
+    species == "LWED" ~ "L. w. weddelli",
+    .default = "T. subgrisescens"
+  ),
+  species = factor(species, levels = c("L. w. weddelli", "T. subgrisescens"))
+  ) %>%
+  ggplot() +
+  geom_segment(aes(x = captureYear,
+                   xend = nextCapture,
+                   y = groupName_anon,
+                   yend = groupName_anon,
+                   color = as.factor(capID))) +
+  geom_point(aes(x = captureYear, y = groupName_anon, color = as.factor(capID), size = nCaptured)) +
   scale_x_continuous(breaks = 2009:2019) +
   facet_grid(rows = vars(species), scales = "free_y") +
-  theme_bw()
+  theme_bw() +
+  labs(x = "Capture year",
+       y = "GroupID",
+       size = "# captured",
+       color = "Capture event") +
+  scale_color_manual(values = my_colors)
 
-plot_capOverview_byGroup
+plot_capOverview_byGroup_2009to2019
 ```
 
 ## Model 1: Age-specific survival (CJS)
@@ -5586,9 +6688,8 @@ Need to create multistate version of capture histories
 Keep to 2 states (1 = confirmed natal group, 2 = dispersed/disappeared/dead) -- I've included statecodes though w/more precision if want to try other states at some point
 
 ```{r}
-# list of known dispersers
-knownDispersers <- capData_2009to2019_first.lastEntry %>%
-  filter(groupMatch == "no")
+# list of known dispersers created above
+knownDispersers
 
 # create "ghost" capture records for indivs immediately following last known capture
 m2_capHist_ghostRecords <- capData_2009to2019[, c("animalID", "captureDate", "captureYear", "groupName")] %>%
@@ -5829,6 +6930,28 @@ m2_lwed_capHist %>%
 70-8-3 # 59 disappeared for unknown reasons (either died or dispersed to a non-study group)
 ```
 
+Difference in dispersal timing b/t twins born in same group?
+
+```{r}
+m2_capHist
+
+sampleRef %>%
+  select(species, sex, animalID, natalGroup, birthYear_est) %>%
+  na.omit() %>%
+  distinct()
+
+twinList
+
+groupComps %>%
+  mutate(totalJuvs = JF + JM) %>%
+  group_by(species) %>%
+  summarise(median = median(totalJuvs),
+            count1 = sum(totalJuvs == 1),
+            count2 = sum(totalJuvs == 2),
+            count0 = sum(totalJuvs == 0))
+```
+
+
 ### Model
 
 statecodes include:
@@ -5861,6 +6984,1200 @@ summary(lwed_philopatry.df$Time.years)
 # set up the q matrix for the transitions (assume that individuals can transition from non-breeder to gone or known out of group)
 lwed_philopatry.q <- rbind(c(0, 0.5),
                            c(0, 0)) # assuming ~1 year in state 1 before disappearing
+# ^^ gives same results for 1 & 0.5, suggesting that it's the true max-likelihood estimate
+
+lwed_philopatry.df$sex <- as.factor(lwed_philopatry.df$sex)
+
+rownames(lwed_philopatry.q) <- colnames(lwed_philopatry.q) <- c("State 1", "State 2")
+
+lwed_philopatry.msm <- msm(state ~ Time.years,
+                      subject = animalID,
+                      censor = 99,
+                      censor.states = c(1,2), # could be either natal or disappeared/dispersed 
+                      covariates = ~ sex,
+                      data = lwed_philopatry.df,
+                      qmatrix = lwed_philopatry.q,
+                      na.action = na.fail, 
+                      control = list(fnscale = 4000, maxit = 10000))
+lwed_philopatry.msm
+summary(lwed_philopatry.msm)
+hazard.msm(lwed_philopatry.msm) # n.s.
+```
+
+On hazard ratios: https://chjackson.github.io/msm/msmcourse/covariates.html#interpretation-of-the-hazard-ratio
+
+Hazard ratios represent how the instantaneous risk of making a particular transition is modified by the covariate. 
+
+Interpretation of hazard analysis (for transition from State 1 to State 2):
+-   HR (hazard ratio): for indiv with factor sexM, risk of transitioning from State 1 to State 2 is 82% of the hazard for sexF
+-   L (lower 95% CI): lower bound of 95% CI for hazard is 0.43; i.e., true hazard could be as low as 44% of the baseline
+-   U (upper 95% CI): uppper bound of 95% CI is 1.56; i.e., true hazard ratio could be as high as 156% (1.56x) the baseline hazard
+
+--    Since hazard ratio (0.82) < 1, suggests that males have a lower risk of transitioning from State 1 to State 2 vs. females (i.e., lower likelihood of dispersal)
+--    CI 0.43 to 1.56 crosses 1, meaning effect is not statistically significant since can't confidently say that hazard ratio differs from 1
+--    since result is not significant, can't conclude that sex has a clear effect on transition b/t these states
+
+**SIMP**
+
+```{r}
+simp_philopatry.df <- m2_simp_capHist
+
+table(simp_philopatry.df$statecode)
+
+statetable.msm(state = state,
+               subject = animalID,
+               data = simp_philopatry.df)
+
+summary(simp_philopatry.df$Time.years)
+
+# set up the q matrix for the transitions (assume that individuals can transition from non-breeder to gone or known out of group)
+simp_philopatry.q <- rbind(c(0, 0.5),
+                           c(0, 0)) # assuming ~1 year in state 1 before disappearing
+# ^^ gives same results for 1 & 0.5, suggesting that it's the true max-likelihood estimate
+
+simp_philopatry.df$sex <- as.factor(simp_philopatry.df$sex)
+
+rownames(simp_philopatry.q) <- colnames(simp_philopatry.q) <- c("State 1", "State 2")
+
+simp_philopatry.msm <- msm(state ~ Time.years,
+                      subject = animalID,
+                      censor = 99,
+                      censor.states = c(1,2), # could be either natal or disappeared/dispersed 
+                      covariates = ~ sex,
+                      data = simp_philopatry.df,
+                      qmatrix = simp_philopatry.q,
+                      na.action = na.fail, 
+                      control = list(fnscale = 4000, maxit = 10000))
+simp_philopatry.msm
+summary(simp_philopatry.msm)
+hazard.msm(simp_philopatry.msm) # n.s. (barely though)
+```
+
+--    Since hazard ratio (2.22) > 1, suggests that males have a HIGHER risk of transitioning from State 1 to State 2 vs. females (i.e., HIGHER likelihood of dispersal)
+--    CI 0.984 to 5.01 crosses 1, meaning effect is not statistically significant since can't confidently say that hazard ratio differs from 1
+--    since result is not significant, can't conclude that sex has a clear effect on transition b/t these states
+
+### Plots
+
+#### General plots
+
+**1) Overall results**
+
+```{r}
+par(mfrow = c(1,1))
+plot.survfit.msm(lwed_philopatry.msm, from = 1, las = 1) # overall
+```
+
+**2) Sex-specific results**
+
+Plus-signs = right-censored records
+
+**NOTE** that these plots fit a different curve (red) for each sex, but maintain the general empirical data (blue lines/points). As such, we'll need to extract this separately for females and males from above and combine the plots together (see below)
+
+```{r}
+# LWED
+par(mfrow = c(1,2))
+lwed_survdat.females <- plot.survfit.msm(lwed_philopatry.msm, from = 1, las = 1,
+                                         covariates = list(sex = "F"),
+                                         interp = "midpoint",
+                                         range = c(0,5),
+                                         survdata = TRUE) # set survdata to TRUE to get Kaplan Meier survdat dataframe
+lwed_survdat.males <- plot.survfit.msm(lwed_philopatry.msm, from = 1, las = 1,
+                                       covariates = list(sex = "M"),
+                                       interp = "midpoint",
+                                       range = c(0,5),
+                                       survdata = TRUE) # set survdata to TRUE to get Kaplan Meier survdat dataframe
+
+# SIMP
+simp_survdat.females <- plot.survfit.msm(simp_philopatry.msm, from = 1, las = 1,
+                                         covariates = list(sex = "F"),
+                                         interp = "midpoint",
+                                         range = c(0,8),
+                                         survdata = TRUE) # set survdata to TRUE to get Kaplan Meier survdat dataframe
+simp_survdat.males <- plot.survfit.msm(simp_philopatry.msm, from = 1, las = 1,
+                                       covariates = list(sex = "M"),
+                                       interp = "midpoint",
+                                       range = c(0,8),
+                                       survdata = TRUE) # set survdata to TRUE to get Kaplan Meier survdat dataframe
+```
+
+#### Prevalence plots
+
+**LWED**
+
+We can view the overall prevalence results in the plot below:
+
+```{r}
+# get the prevalences to compare Females to Males
+plot.prevalence.msm(
+  lwed_philopatry.msm,
+  xlab = "Time since first captured, years")
+```
+
+To get sex-specific prevalence data, need to run sex-specific prevalence function:
+
+**NOTE** that to obtain sex-specific observed prevalences, we need to provide a vector of the subject identifiers to "subset"
+
+```{r}
+# create subject list to specify basis for obs values
+m2_female_subjectList <- m2_lwed_capHist %>%
+  filter(sex == "F") %>% select(animalID) %>%
+  pull()
+m2_male_subjectList <- m2_lwed_capHist %>%
+  filter(sex == "M") %>% select(animalID) %>%
+  pull()
+
+# run prevalence fxn
+philopatry.prevalence.msm.females <- msm:::prevalence.msm(
+  lwed_philopatry.msm,
+  ci = "normal",
+  subset = m2_female_subjectList,
+  covariates = list(sex = "F"))
+philopatry.prevalence.msm.males <- msm:::prevalence.msm(
+  lwed_philopatry.msm,
+  ci = "normal",
+  subset = m2_male_subjectList,
+  covariates = list(sex = "M"))
+```
+
+Then reformat results to prep for plotting --
+
+```{r}
+#  females - keep values for State.1 only (for natal group prevalence)
+femalephilopatry.observed <- philopatry.prevalence.msm.females$`Observed percentages` %>%
+  data.frame() %>%
+  set_names(c("obsPrevalence", "State.2")) %>% select(-State.2)
+femalephilopatry.expected.estimates <- philopatry.prevalence.msm.females$`Expected percentages`$estimates %>%
+  data.frame() %>%
+  set_names(c("expPrevalence", "State.2")) %>% select(-State.2)
+femalephilopatry.expected.lci <- philopatry.prevalence.msm.females$`Expected percentages`$ci[,,1] %>% 
+  data.frame() %>%
+  set_names(c("l95ci", "State.2")) %>% select(-State.2)
+femalephilopatry.expected.uci <- philopatry.prevalence.msm.females$`Expected percentages`$ci[,,2]%>% 
+  data.frame() %>%
+  set_names(c("u95ci", "State.2")) %>% select(-State.2)
+
+femalephilopatry_forPlot <- cbind(femalephilopatry.observed,
+                                  femalephilopatry.expected.estimates,
+                                  femalephilopatry.expected.lci, # 95% lci
+                                  femalephilopatry.expected.uci) %>% # 95% uci
+  rownames_to_column("Time")
+  
+#  males - keep values for State.1 only (for natal group prevalence)
+malephilopatry.observed <- philopatry.prevalence.msm.males$`Observed percentages` %>%
+  data.frame() %>%
+  set_names(c("obsPrevalence", "State.2")) %>% select(-State.2)
+malephilopatry.expected.estimates <- philopatry.prevalence.msm.males$`Expected percentages`$estimates %>%
+  data.frame() %>%
+  set_names(c("expPrevalence", "State.2")) %>% select(-State.2)
+malephilopatry.expected.lci <- philopatry.prevalence.msm.males$`Expected percentages`$ci[,,1] %>% 
+  data.frame() %>%
+  set_names(c("l95ci", "State.2")) %>% select(-State.2)
+malephilopatry.expected.uci <- philopatry.prevalence.msm.males$`Expected percentages`$ci[,,2]%>% 
+  data.frame() %>%
+  set_names(c("u95ci", "State.2")) %>% select(-State.2)
+
+malephilopatry_forPlot <- cbind(malephilopatry.observed,
+                                malephilopatry.expected.estimates,
+                                malephilopatry.expected.lci, # 95% lci
+                                malephilopatry.expected.uci) %>% # 95% uci
+  rownames_to_column("Time") # 95% uci
+```
+
+Now we can make the plot (saved as m2_natalPhilopatry.png):
+
+```{r}
+# OLD below-
+# --> plots, predicted philopatry of males and females with CI
+par(mfrow = c(1,1))
+plot(expectedprevalence ~ Time, data = subset(femalephilopatry.expected, state == "ingroup"), type = "n", las = 1, bty = "l", ylab= "Probability of presence in natal group (%)", xlab = 'Time since first captured (years)', ylim = c(0, 101), xlim = c(0, 8))
+# 95% CI polygons
+with(femalephilopatry_forPlot, 
+     polygon(c(Time, rev(Time)), c(l95ci, rev(u95ci)), 
+             col = adjustcolor("#1F9E89FF", alpha = 0.2), border = NA))
+with(malephilopatry_forPlot, 
+     polygon(c(Time, rev(Time)), c(l95ci, rev(u95ci)), 
+             col = adjustcolor("black", alpha = 0.1), border = NA))
+# expected values
+points(expPrevalence ~ Time, 
+       data = femalephilopatry_forPlot, type = "l", col = "#1F9E89FF", lwd = 2)
+points(expPrevalence ~ Time, 
+       data = malephilopatry_forPlot, type = "l", col = "black", lwd = 2)
+
+# observed data... but need the Kaplan Meier empirical data
+#points(obsPrevalence ~ Time, data = femalephilopatry_forPlot, type = "l", col = "#1F9E89FF", lty = 2, lwd = 0.5) # observed
+#points(obsPrevalence ~ Time, data = malephilopatry_forPlot, type = "l", col = "black", lty = 2, lwd = 0.5) # observed
+
+axis(1, at = seq(0, 8, 0.5), labels = NA)
+axis(2, at = seq(0, 100, 10), labels = NA)
+legend("topright", legend = c("Female", "Male"), lwd = c(2,2), bty = "n", col = c("#1F9E89FF", "black"))
+```
+
+**SIMP**
+
+```{r}
+# get the prevalences to compare Females to Males
+plot.prevalence.msm(
+  simp_philopatry.msm,
+  xlab = "Time since first captured, years")
+```
+
+To get sex-specific prevalence data, need to run sex-specific prevalence function:
+
+**NOTE** that to obtain sex-specific observed prevalences, we need to provide a vector of the subject identifiers to "subset"
+
+```{r}
+# create subject list to specify basis for obs values
+m2_simpF_subjectList <- m2_simp_capHist %>%
+  filter(sex == "F") %>% select(animalID) %>%
+  pull()
+m2_simpM_subjectList <- m2_simp_capHist %>%
+  filter(sex == "M") %>% select(animalID) %>%
+  pull()
+
+# run prevalence fxn
+philopatry.prevalence.msm.simpF <- msm:::prevalence.msm(
+  simp_philopatry.msm,
+  ci = "normal",
+  subset = m2_simpF_subjectList,
+  covariates = list(sex = "F"))
+philopatry.prevalence.msm.simpM <- msm:::prevalence.msm(
+  simp_philopatry.msm,
+  ci = "normal",
+  subset = m2_simpM_subjectList,
+  covariates = list(sex = "M"))
+```
+
+Then reformat results to prep for plotting --
+
+```{r}
+#  females - keep values for State.1 only (for natal group prevalence)
+simpF.philopatry.observed <- philopatry.prevalence.msm.simpF$`Observed percentages` %>%
+  data.frame() %>%
+  set_names(c("obsPrevalence", "State.2")) %>% select(-State.2)
+simpF.philopatry.expected.estimates <- philopatry.prevalence.msm.simpF$`Expected percentages`$estimates %>%
+  data.frame() %>%
+  set_names(c("expPrevalence", "State.2")) %>% select(-State.2)
+simpF.philopatry.expected.lci <- philopatry.prevalence.msm.simpF$`Expected percentages`$ci[,,1] %>% 
+  data.frame() %>%
+  set_names(c("l95ci", "State.2")) %>% select(-State.2)
+simpF.philopatry.expected.uci <- philopatry.prevalence.msm.simpF$`Expected percentages`$ci[,,2]%>% 
+  data.frame() %>%
+  set_names(c("u95ci", "State.2")) %>% select(-State.2)
+
+simpF.philopatry_forPlot <- cbind(simpF.philopatry.observed,
+                                  simpF.philopatry.expected.estimates,
+                                  simpF.philopatry.expected.lci, # 95% lci
+                                  simpF.philopatry.expected.uci) %>% # 95% uci
+  rownames_to_column("Time")
+  
+#  males - keep values for State.1 only (for natal group prevalence)
+simpM.philopatry.observed <- philopatry.prevalence.msm.simpM$`Observed percentages` %>%
+  data.frame() %>%
+  set_names(c("obsPrevalence", "State.2")) %>% select(-State.2)
+simpM.philopatry.expected.estimates <- philopatry.prevalence.msm.simpM$`Expected percentages`$estimates %>%
+  data.frame() %>%
+  set_names(c("expPrevalence", "State.2")) %>% select(-State.2)
+simpM.philopatry.expected.lci <- philopatry.prevalence.msm.simpM$`Expected percentages`$ci[,,1] %>% 
+  data.frame() %>%
+  set_names(c("l95ci", "State.2")) %>% select(-State.2)
+simpM.philopatry.expected.uci <- philopatry.prevalence.msm.simpM$`Expected percentages`$ci[,,2]%>% 
+  data.frame() %>%
+  set_names(c("u95ci", "State.2")) %>% select(-State.2)
+
+simpM.philopatry_forPlot <- cbind(simpM.philopatry.observed,
+                                simpM.philopatry.expected.estimates,
+                                simpM.philopatry.expected.lci, # 95% lci
+                                simpM.philopatry.expected.uci) %>% # 95% uci
+  rownames_to_column("Time") # 95% uci
+```
+
+Now we can make the plot (saved as m2_natalPhilopatry.png):
+
+```{r}
+# --> plots, predicted philopatry of males and females with CI
+par(mfrow = c(1,1))
+plot(expPrevalence ~ Time, data = simpF.philopatry_forPlot, type = "n", las = 1, bty = "l", ylab= "Probability of presence in natal group (%)", xlab = 'Time since first captured (years)', ylim = c(0, 101), xlim = c(0, 8))
+# 95% CI polygons
+with(simpF.philopatry_forPlot, 
+     polygon(c(Time, rev(Time)), c(l95ci, rev(u95ci)), 
+             col = adjustcolor("#1F9E89FF", alpha = 0.2), border = NA))
+with(simpM.philopatry_forPlot, 
+     polygon(c(Time, rev(Time)), c(l95ci, rev(u95ci)), 
+             col = adjustcolor("black", alpha = 0.1), border = NA))
+# expected values
+points(expPrevalence ~ Time, 
+       data = simpF.philopatry_forPlot, type = "l", col = "#1F9E89FF", lwd = 2)
+points(expPrevalence ~ Time, 
+       data = simpM.philopatry_forPlot, type = "l", col = "black", lwd = 2)
+
+# observed data... but need the Kaplan Meier empirical data
+#points(obsPrevalence ~ Time, data = femalephilopatry_forPlot, type = "l", col = "#1F9E89FF", lty = 2, lwd = 0.5) # observed
+#points(obsPrevalence ~ Time, data = malephilopatry_forPlot, type = "l", col = "black", lty = 2, lwd = 0.5) # observed
+
+axis(1, at = seq(0, 8, 0.5), labels = NA)
+axis(2, at = seq(0, 100, 10), labels = NA)
+legend("topright", legend = c("Female", "Male"), lwd = c(2,2), bty = "n", col = c("#1F9E89FF", "black"))
+```
+
+#### GGPLOT version
+
+```{r}
+plotData_fmPhilopatry <- rbind(
+  femalephilopatry_forPlot %>% mutate(sex = "Female",
+                                      species = "Saddlebacks"),
+  malephilopatry_forPlot %>% mutate(sex = "Male",
+                                    species = "Saddlebacks"),
+  simpF.philopatry_forPlot %>% mutate(sex = "Female",
+                                      species = "Emperors"),
+  simpM.philopatry_forPlot %>% mutate(sex = "Male",
+                                      species = "Emperors")) %>%
+  mutate(species = factor(species, levels = c("Saddlebacks", "Emperors")))
+
+plotData_fmPhilopatry %>%
+  mutate(Time = as.numeric(Time)) %>%
+  ggplot() +
+  geom_line(aes(x = Time, y = expPrevalence, group = sex, color = sex), size = 1) +
+  geom_ribbon(aes(x = Time, ymin = l95ci, ymax = u95ci, group = sex, fill = sex), alpha = 0.25) +
+  #theme_Publication_rv() +
+  theme_classic() +
+  scale_color_manual(values = c("Female" = "#4C413FFF", "Male" = "#278B9AFF")) +
+  scale_fill_manual(values = c("Female" = "#4C413FFF", "Male" = "#278B9AFF")) +
+  labs(x = "Time since first captured (years)",
+       y = "Probability of presence in natal group (%)",
+       color = element_blank(),
+       fill = element_blank()) +
+  facet_grid(cols = vars(species)) +
+  theme(text = element_text(size = 14)) +
+  scale_x_continuous(breaks = 0:9)
+```
+
+
+### Mean sojourn times for females/males in natal groups
+
+The mean sojourn time in a state "r" is the expected length of one period spent in that state.
+
+https://chjackson.github.io/msm/msmcourse/outputs.html#mean-sojourn-time
+
+**LWED**
+
+```{r}
+# mean sojourn times for males and females in their natal group
+lwedF_sojourn <- sojourn.msm(lwed_philopatry.msm, covariates = list(sex = "F"))
+
+lwedM_sojourn <- sojourn.msm(lwed_philopatry.msm, covariates = list(sex = "M"))
+
+# avg age at capture (based on Mini diss info)
+birthData %>%
+  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+  distinct() %>%
+  filter(species == "LWED") %>%
+  select(age_watsaDiss_months, sex) %>%
+  na.omit() %>%
+  mutate(ageMonths = age_watsaDiss_months/12) %>%
+  group_by(sex) %>%
+  summarise(
+    n = n(),
+    meanAge_years = mean(ageMonths),
+    sdAge_years = sd(ageMonths),
+    minAge_months = min(age_watsaDiss_months),
+    maxAge_months = max(age_watsaDiss_months)
+  )
+
+# numbers are from table above^^
+(0.393 - 0.264) + (lwedF_sojourn$estimates - lwedF_sojourn$SE) # 1.255813 yrs
+(0.393 + 0.264) + (lwedF_sojourn$estimates + lwedF_sojourn$SE) # 2.6328 yrs
+
+(0.567 - 0.189) + (lwedM_sojourn$estimates - lwedM_sojourn$SE) # 1.975707 yrs
+(0.567 + 0.189) + (lwedM_sojourn$estimates + lwedM_sojourn$SE) # 3.136409 yrs
+```
+
+**SIMP**
+
+```{r}
+# mean sojourn times for males and females in their natal group
+simpF_sojourn <- sojourn.msm(simp_philopatry.msm, covariates = list(sex = "F"))
+
+simpM_sojourn <- sojourn.msm(simp_philopatry.msm, covariates = list(sex = "M"))
+
+# avg age at capture (based on Mini diss info)
+birthData %>%
+  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+  distinct() %>%
+  filter(species == "SIMP") %>%
+  select(age_watsaDiss_months, sex) %>%
+  na.omit() %>%
+  mutate(ageMonths = age_watsaDiss_months/12) %>%
+  group_by(sex) %>%
+  summarise(
+    n = n(),
+    meanAge_years = mean(ageMonths),
+    sdAge_years = sd(ageMonths),
+    minAge_months = min(age_watsaDiss_months),
+    maxAge_months = max(age_watsaDiss_months)
+  )
+
+# numbers are from table above^^
+(0.470 - 0.171) + (simpF_sojourn$estimates - simpF_sojourn$SE) # 3.091203 yrs
+(0.470 + 0.171) + (simpF_sojourn$estimates + simpF_sojourn$SE) # 5.854625 yrs
+
+(0.484 - 0.240) + (simpM_sojourn$estimates - simpM_sojourn$SE) # 1.535228 yrs
+(0.484 + 0.240) + (simpM_sojourn$estimates + simpM_sojourn$SE) # 3.039199 yrs
+```
+
+## Model 3: Abundance
+
+### Prep data
+
+**LWED**
+
+```{r}
+# 1) create capture histories
+m3_lwed_capHist <- capHist_2009to2019 %>%
+  filter(species == "LWED") %>%
+  select(-species, -animalID)
+
+table(m3_lwed_capHist$sex)
+# F  M 
+#68 77 
+
+# 2) get time intervals b/t sampling periods
+m3_lwed_capIntervals <- get_capData_summary(capData_2009to2019, "LWED") %>%
+  # only 2010-2019 to account for birthYear start
+  filter(captureYear %in% 2009:2019) %>%
+  # ditch interval for first year
+  mutate(
+    capInterval_days = case_when(
+      captureYear == min(captureYear) ~ NA,
+      .default = capInterval_days
+    )
+  ) %>%
+  select(capInterval_days) %>%
+  # normalized interval
+  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
+  select(intNorm) %>%
+  na.omit() %>%
+  pull()
+m3_lwed_capIntervals
+
+# 3) process data
+m3_lwed.js.proc <- process.data(
+  m3_lwed_capHist,
+  begin.time = 2009,
+  model = "POPAN",
+  groups = "sex",
+  time.intervals = m3_lwed_capIntervals
+  )
+
+# 4) design data
+## 4a) initial design data
+m3_lwed.js.ddl <- make.design.data(m3_lwed.js.proc)
+
+## 4b) add ageClass (use data from model 1)
+library(combinat)
+### start subadult at ages (1 year in study):
+min(m3_lwed_capIntervals) # 0.59
+max(m3_lwed_capIntervals) # 1.2
+### end subadult at ages (3 years in study):
+subad <- combinat::combn(m3_lwed_capIntervals, m = 3, fun = sum) %>%
+  as.data.frame() %>%
+  dplyr::rename("combo" = ".") %>%
+  arrange(combo)
+min(subad$combo) # 2.34
+max(subad$combo) # 3.31
+### adjust phi in ddl
+m3_lwed.js.ddl <- add.design.data(m3_lwed.js.proc,
+                                   m3_lwed.js.ddl,
+                                   parameter = "Phi",
+                                   type = "age",
+                                   bins = c(0,0.5,2.3,15),
+                                   name = "ageClass")
+### adjust p in ddl
+m3_lwed.js.ddl <- add.design.data(m3_lwed.js.proc,
+                                   m3_lwed.js.ddl,
+                                   parameter = "p",
+                                   type = "age",
+                                   bins = c(0,0.5,2.3,15),
+                                   name = "ageClass")
+
+## 4c) add effort covariate
+m3_lwed_newTimes <- as.character(unique(c(m3_lwed.js.ddl$Phi$time, m3_lwed.js.ddl$p$time)))
+
+m3_lwed_covGrps <- data.frame(
+  time = m3_lwed_newTimes,
+  nGrps = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2009:2019, "nGroups"]
+)
+
+m3_lwed.js.ddl$p <- merge_design.covariates(m3_lwed.js.ddl$p,
+                                             m3_lwed_covGrps)
+
+# view:
+m3_lwed.js.ddl$Phi
+m3_lwed.js.ddl$p
+```
+
+**SIMP**
+
+```{r}
+# 1) create capture histories
+m3_simp_capHist <- capHist_2009to2019 %>%
+  filter(species == "SIMP") %>%
+  select(-species, -animalID) %>%
+  # simp starts in 2011
+  mutate(ch = str_sub(ch, 3, -1))
+
+table(m3_simp_capHist$sex)
+# F  M 
+#48 54
+
+# 2) get time intervals b/t sampling periods
+m3_simp_capIntervals <- get_capData_summary(capData_2009to2019, "SIMP") %>%
+  # only 2011-2019 (when simps were captured)
+  filter(captureYear %in% 2011:2019) %>%
+  # ditch interval for first year
+  mutate(
+    capInterval_days = case_when(
+      captureYear == min(captureYear) ~ NA,
+      .default = capInterval_days
+    )
+  ) %>%
+  select(capInterval_days) %>%
+  # normalized interval
+  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
+  select(intNorm) %>%
+  na.omit() %>%
+  pull()
+m3_simp_capIntervals
+# 1.16 1.09 1.00 1.02 1.02 0.96 1.02 1.03
+
+# 3) process data
+m3_simp.js.proc <- process.data(
+  m3_simp_capHist,
+  begin.time = 2011,
+  model = "POPAN",
+  groups = "sex",
+  time.intervals = m3_simp_capIntervals
+  )
+
+# 2) design data
+## 2a) initial design data
+m3_simp.js.ddl <- make.design.data(m3_simp.js.proc)
+
+## 2b) add ageClass
+library(combinat)
+### start subadult at ages (1 year in study):
+min(m3_simp_capIntervals) # 0.96
+max(m3_simp_capIntervals) # 1.16
+### end subadult at ages (3 years in study):
+subad <- combinat::combn(m3_simp_capIntervals, m = 3, fun = sum) %>%
+  as.data.frame() %>%
+  dplyr::rename("combo" = ".") %>%
+  arrange(combo)
+min(subad$combo) # 2.98
+max(subad$combo) # 3.28
+### adjust phi in ddl (lwed bins should still work here)
+m3_simp.js.ddl <- add.design.data(m3_simp.js.proc,
+                                   m3_simp.js.ddl,
+                                   parameter = "Phi",
+                                   type = "age",
+                                   bins = c(0,0.5,2.7,15),
+                                   name = "ageClass")
+### adjust p in ddl (lwed bins should still work here)
+m3_simp.js.ddl <- add.design.data(m3_simp.js.proc,
+                                   m3_simp.js.ddl,
+                                   parameter = "p",
+                                   type = "age",
+                                   bins = c(0,0.5,2.7,15),
+                                   name = "ageClass")
+
+## 2c) add effort covariate
+m3_simp_newTimes <- as.character(unique(c(m3_simp.js.ddl$Phi$time, m3_simp.js.ddl$p$time)))
+
+m3_simp_covGrps <- data.frame(
+  time = m3_simp_newTimes,
+  nGrps = simp_capSummary_byGroup[simp_capSummary_byGroup$captureYear %in% 2011:2019, "nGroups"]
+)
+
+m3_simp.js.ddl$p <- merge_design.covariates(m3_simp.js.ddl$p,
+                                             m3_simp_covGrps)
+
+m3_simp.js.ddl$Phi
+m3_simp.js.ddl$p
+```
+
+### Prep models
+
+```{r}
+m3_fit.js.models <- function(dataProc, dataDesign) {
+  
+  # Phi formulas
+  Phi.dot <- list(formula=~1)
+  Phi.time <- list(formula=~time)
+  
+  # p formulas
+  p.dot <- list(formula=~1)
+  
+  # pent formulas. pent estimates MUST SUM to 1 (for each group).
+  # This is constrained using a Multinomial Logit link
+  pent.time <- list(formula=~time)
+  pent.sex <- list(formula=~sex)
+  pent.dot <- list(formula=~1)
+  
+  # Nsuper formulas. Don't confuse "N" from model with predicted population size
+  N.sex <- list(formula=~sex)
+  N.dot <- list(formula=~1)
+  
+  # Construct all combinations and put into one model table
+  cml <- RMark::create.model.list(c("POPAN")) # makes all possible combinations of those parameter formulas
+  
+  # run & return list of models
+  results <- mark.wrapper(cml,
+                          data = dataProc,
+                          ddl = dataDesign,
+                          external = FALSE,
+                          accumulate = TRUE,
+                          hessian = TRUE)
+  
+  return(results)
+  
+}
+```
+
+### Run function
+
+```{r}
+m3_lwed.js.models <- m3_fit.js.models(m3_lwed.js.proc, m3_lwed.js.ddl)
+m3_simp.js.models <- m3_fit.js.models(m3_simp.js.proc, m3_simp.js.ddl)
+
+m3_lwed.js.models
+m3_simp.js.models
+
+summary(m3_lwed.js.models[[1]])
+summary(m3_simp.js.models[[1]])
+```
+
+### Predict (real) values
+
+ffs. do the popan.derived thing. 
+
+```{r}
+m3_lwed.js.derived <- popan.derived(m3_lwed.js.proc,
+                                    m3_lwed.js.models[[1]])
+m3_simp.js.derived <- popan.derived(m3_simp.js.proc,
+                                    m3_simp.js.models[[1]])
+
+# superpopulation for F and M
+m3_lwed.js.derived$NGross # 85.96187 96.50888
+# N by sex each year
+m3_lwed.js.derived$N 
+# total N each year
+m3_lwed.js.derived$Nbyocc # year11 = 46.72 +/1 SE 3.75
+
+m3_simp.js.derived$NGross # 57.02435 63.52291
+m3_simp.js.derived$N
+m3_simp.js.derived$Nbyocc # year9 = 44.52 +/0 SE 5.12
+
+# pop density based on these numbers:
+## lwed
+46.72/5 # 9.344
+44.52/5 # 8.904
+```
+
+### Plots
+
+```{r}
+m3_lwed_forPlot <- m3_lwed.js.derived$N %>%
+  mutate(Occasion = Occasion + 2008,
+         species = "Saddlebacks")
+m3_simp_forPlot <- m3_simp.js.derived$N %>%
+  mutate(Occasion = Occasion + 2010,
+         species = "Emperors")
+
+# total cap per year:
+temp <- rbind(totalIndivs_perYear_lwedF %>% mutate(species = "Saddlebacks",
+                                                   sex = "F"),
+              totalIndivs_perYear_lwedM %>% mutate(species = "Saddlebacks",
+                                                   sex = "M"),
+              totalIndivs_perYear_simpF %>% mutate(species = "Emperors",
+                                                   sex = "F"),
+              totalIndivs_perYear_simpM %>% mutate(species = "Emperors",
+                                                   sex = "M")) %>%
+  dplyr::rename("Occasion" = "year")
+
+plotData_m3_popSize <- rbind(m3_lwed_forPlot, m3_simp_forPlot) %>%
+  merge(., temp, by = c("species", "Occasion", "sex")) %>%
+  mutate(species = factor(species, levels = c("Saddlebacks", "Emperors"))) %>%
+  arrange(species, Occasion)
+
+plot_m3_popSize <- plotData_m3_popSize %>%
+  ggplot(aes(x = Occasion, y = N, color = sex, fill = sex)) +
+  # Shaded area for confidence intervals with separate fills by sex
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.2) +
+  # Smoothed lines by sex with matching colors
+  geom_smooth(formula = y ~ x, method = "loess", se = FALSE) +
+  # Adding points for individual observations
+  geom_point(size = 2, shape = 16) +
+  
+  # add line for total captured - jk that's v ugly
+  #geom_line(aes(x = Occasion, y = totalIndivs, color = sex)) +
+  
+  # Axis labels
+  labs(x = "Year", y = "Population Estimate (N)", color = "Sex", fill = "Sex") +
+  # Classic theme with adjustments for clarity
+  theme_classic() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 10)
+  ) +
+  # Custom color scheme for male and female
+  scale_color_manual(values = c("F" = "#4C413FFF", "M" = "#278B9AFF")) +
+  scale_fill_manual(values = c("F" = "#4C413FFF", "M" = "#278B9AFF")) +
+  facet_grid(cols = vars(species)) +
+  scale_x_continuous(breaks = c(2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+plot_m3_popSize
+
+my_colors_med
+```
+
+# TESTING 
+
+## Model 1: Female survival
+
+Following Thorley et al. https://github.com/JThor1990/DMR_GroupSizeEffects/blob/main/R%20scripts/Thorley_GroupsizeeffectsinDMR_v_natalphilopatry.R
+
+### Create input df
+
+Need to create multistate version of capture histories
+
+**NOTE:** animalID 27 started in AR6, went to O.Sky for a couple years, then went back to AR6 -- recode animalID 27's entries for 2017, 2018, and 2019 as "2" (confirmedDispersal)
+
+**Create initial input df**
+
+I'm assigning females as "breeder" based on parity designations from nipple length measurements; while I did check to see if any additional females could be designated as parous based on group composition (i.e., for year when juvs first captured, a particular female was the only one present that year and the only one present in the year prior) - HOWEVER, the females I identified through that method were already designated as parous by nipple measures anyway (see section 4.3 New parity & inferred maternity)
+
+**NOTE** - based on franz results, lwed_202F appears to be mother of 270F in 2019 in WhiteSf - this was the only franz result that I could confidently use for female parents born during the study
+
+```{r}
+# fullset minus ghost records
+m1_capHist_temp <- capData_2009to2019[, c("animalID", "captureDate", "captureYear")] %>%
+  # ensure only one cap per year; choose the first one
+  group_by(animalID, captureYear) %>%
+  slice_max(captureDate) %>%
+  ungroup() %>%
+  select(-captureYear) %>%
+  dplyr::rename("captureDate_capYear" = "captureDate") %>%
+  mutate(statecode = NA,
+         state = NA) %>%
+  # keep only those w/birthYear_est
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID") %>%
+  arrange(animalID, captureDate_capYear) %>%
+  
+  # add first captureDates
+  merge(., capPeriods_byIndiv[, c("animalID", "capPeriod_start")], by = "animalID") %>%
+  dplyr::rename("captureDate_birthYear" = "capPeriod_start") %>%
+  # add species/sex info
+  merge(., capData_2009to2019[, c("animalID", "species", "sex")],
+        by = "animalID",
+        all.x = T) %>%
+  distinct() %>%
+  # add groupName for birthYear
+  merge(., capData_2009to2019[, c("animalID", "captureDate", "groupName")],
+        by.x = c("animalID", "captureDate_birthYear"),
+        by.y = c("animalID", "captureDate"),
+        all.x = T) %>%
+  # add groupName for capYear
+  merge(., capData_2009to2019[, c("animalID", "captureDate", "groupName")],
+        by.x = c("animalID", "captureDate_capYear"),
+        by.y = c("animalID", "captureDate"),
+        all.x = T,
+        suffixes = c("_birthYear", "_capYear")) %>%
+  # add cap period for that year
+  mutate(captureYear = str_sub(captureDate_capYear, 1, 4)) %>%
+  merge(., capPeriods_byYear, by = "captureYear", all.x = T) %>%
+  # calc times
+  mutate(
+    Time.days = as.numeric(as.Date(captureDate_capYear) - as.Date(captureDate_birthYear)),
+    Time.years = Time.days / 365
+  ) %>%
+  # assign statecodes
+  merge(., parityAssigments_firstParous[, c("animalID", "parityYear")], by = "animalID", all.x = T) %>%
+  mutate(
+    statecode = case_when(
+      # males still in natal grp
+      sex == "M" & groupName_capYear == groupName_birthYear ~ "natal",
+      sex == "M" & groupName_capYear != groupName_birthYear ~ "dispersed",
+      # 27_M left natal group, then came back in 2017; recode those yrs to knownDispersal
+      animalID == 27 & captureYear %in% 2017:2019 ~ "dispersed",
+      
+      # females still in natal grp...
+      ## & non-breeder
+      sex == "F" & groupName_capYear == groupName_birthYear & is.na(parityYear) ~ "natal", 
+      sex == "F" & groupName_capYear == groupName_birthYear & captureYear < parityYear ~ "natal", 
+      ## & breeder
+      sex == "F" & groupName_capYear == groupName_birthYear & captureYear >= parityYear ~ "natal.breeder",
+      
+      # females dispersed...
+      ## & just existing
+      sex == "F" & groupName_capYear != groupName_birthYear & is.na(parityYear) ~ "dispersed",
+      sex == "F" & groupName_capYear != groupName_birthYear & captureYear < parityYear ~ "dispersed", 
+      ## & breeder
+      sex == "F" & groupName_capYear != groupName_birthYear & captureYear >= parityYear ~ "dispersed.breeder",
+      
+      .default = NA
+    )
+  ) %>%
+  # organize a bit
+  mutate(censor = NA) %>%
+  select(species, animalID, groupName_capYear, captureDate_capYear, capPeriod_start, capPeriod_end, sex, captureDate_birthYear, censor, Time.days, Time.years, statecode, state) %>%
+  dplyr::rename("groupName" = "groupName_capYear",
+                "captureDate" = "captureDate_capYear",
+                "captureDate_firstCap" = "captureDate_birthYear") %>%
+  arrange(as.numeric(animalID), captureDate) %>%
+  # manually adjust animalID 202 as breeder based on franz results
+  mutate(
+    statecode = case_when(
+      animalID == 202 & str_sub(captureDate, 1, 4) == 2019 ~ "dispersed.breeder",
+      .default = statecode
+    )
+  )
+```
+
+**Ghost records**
+
+Keep to 4 states (1 = confirmed natal group, 2 = dispersed, 3 = breeder, 4 = died/dispersed from pop) -- I've included statecodes though w/more precision if want to try other states at some point
+
+```{r}
+# create "ghost" capture records for indivs immediately following last known capture
+m1_capHist_ghostRecords <- m1_capHist_temp %>%
+  # extract last known captureDate
+  group_by(animalID) %>%
+  slice_max(captureDate) %>%
+  ungroup() %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  merge(., capPeriods_byYear[, c("captureYear", "capID")], by = "captureYear") %>%
+  dplyr::rename("last_captureDate" = "captureDate",
+                "last_captureYear" = "captureYear",
+                "last_statecode" = "statecode",
+                "last_capID" = "capID",
+                "last_groupName" = "groupName") %>%
+  select(animalID, species, sex, last_captureDate, last_captureYear, last_statecode, last_capID, last_groupName, captureDate_firstCap) %>%
+  # adjust last_capIDs for knownDeaths
+  merge(., disappearYear[, c("animalID", "deathYear_est")], by = "animalID", all.x = T) %>%
+  merge(., capPeriods_byYear[, c("captureYear", "capID")], by.x = "deathYear_est", by.y = "captureYear", all.x = T) %>%
+  # add capPeriods for ghost records (cap at 2019)
+  mutate(
+    ghost_capID = last_capID + 1,
+    ghost_capID = case_when(
+      # cap at 2019
+      ghost_capID > 11 ~ 11,
+      # recode known deaths to capID from deathYear (added above)
+      animalID %in% deathAssignments$animalID ~ capID,
+      .default = ghost_capID
+    )
+  ) %>%
+  select(-capID) %>%
+  merge(., capPeriods_byYear, by.x = "ghost_capID", by.y = "capID") %>%
+  # add statecodes
+  mutate(
+    statecode = case_when(
+      animalID %in% deathAssignments$animalID ~ "knownDeath",
+      last_captureYear == 2019 ~ last_statecode,
+      deathYear_est <= 2019 ~ str_c("gone4plus_", last_statecode),
+      .default = str_c("gone3less_", last_statecode)
+    )
+  ) %>%
+  # define new captureDate
+  mutate(
+    captureDate = case_when(
+      # if indiv has deathYear_est, set to capPeriod_end for that year's cap season
+      statecode == "knownDeath" ~ capPeriod_end,
+      # if last capYear is 2019, set to ending date of 2019 cap season
+      last_captureYear == 2019 ~ capPeriod_end,
+      # if last capYear < 2019 & set to starting capture date of next cap season
+      last_captureYear < 2019 ~ capPeriod_start,
+      # if group last capYear < 2019 & not captured again til after 2019, set to starting date of 2019 cap season
+      is.na(deathYear_est) ~ capPeriod_start,
+      .default = NA
+      ),
+    # if captureDate_capYear (ghostYear) == captureDate (last year), add a day to captureDate_capYear
+    captureDate = case_when(
+      as.Date(captureDate) == as.Date(last_captureDate) ~ as.Date(captureDate) + 1,
+      .default = as.Date(captureDate)
+    ),
+    # switch back to character data type
+    captureDate = as.character(captureDate),
+    last_captureDate = as.character(last_captureDate)
+  ) %>%
+  # organize a bit
+  mutate(
+    censor = NA,
+    state = NA,
+    Time.days = as.numeric(as.Date(captureDate) - as.Date(captureDate_firstCap)),
+    Time.years = Time.days / 365
+    ) %>%
+  select(species, sex, animalID, last_groupName, captureDate, capPeriod_start, capPeriod_end, captureDate_firstCap, censor, Time.days, Time.years, statecode, state) %>%
+  dplyr::rename("groupName" = "last_groupName") %>%
+  arrange(as.numeric(animalID), captureDate) 
+```
+
+**FULL SET**
+
+For statecodes, combine natal.breeder and dispersed.breeder into one since there aren't many instances of either (see general metrics)
+Also, if gone > 3 years, assign state to 4 (same as knownDeath)
+
+```{r}
+# both females and males
+m1_capHist_FM <- rbind(m1_capHist_temp, m1_capHist_ghostRecords) %>%
+  arrange(as.numeric(animalID), captureDate) %>%
+  # assign state
+  mutate(
+    state = case_when(
+      statecode == "natal" ~ "1",
+      statecode == "dispersed" ~ "2",
+      
+      statecode == "natal.breeder" ~ "3",
+      statecode == "dispersed.breeder" ~ "3",
+      
+      statecode == "knownDeath" ~ "4",
+      statecode == "gone4plus_natal" ~ "4",
+      statecode == "gone4plus_dispersed" ~ "4",
+      statecode == "gone4plus_natal.breeder" ~ "4",
+      statecode == "gone4plus_dispersed.breeder" ~ "4",
+      
+      statecode == "gone3less_natal" ~ "99",
+      statecode == "gone3less_dispersed" ~ "99",
+      statecode == "gone3less_natal.breeder" ~ "4",
+      statecode == "gone3less_dispersed.breeder" ~ "4",
+      
+      .default = NA
+    )
+  ) %>%
+  mutate(censor = case_when(
+    state == "99" ~ "99",
+    .default = NA
+  ))
+
+# and subset to F only + make species subsets
+m1_capHist <- m1_capHist_FM %>%
+  filter(sex == "F")
+
+m1_capHist_lwed <- m1_capHist %>%
+  filter(species == "LWED")
+
+m1_capHist_simp <- m1_capHist %>%
+  filter(species == "SIMP")
+```
+
+### General metrics
+
+```{r}
+# 25 lwed females, 26 simp females
+m1_capHist %>%
+  group_by(species) %>%
+  summarise(
+    count = length(unique(animalID))
+  )
+
+# 2 instances in which female inherited breeding position, 2 LWED (animalIDs 7) & 1 SIMP (animalID 135)
+m1_capHist %>%
+  select(species, animalID, statecode) %>%
+  filter(statecode == "natal.breeder") %>%
+  distinct()
+
+# 1 each where dispersed to breed; lwed animalID 202, SIMP animalID 34
+m1_capHist %>%
+  select(species, animalID, statecode) %>%
+  filter(statecode == "dispersed.breeder") %>%
+  distinct()
+```
+
+### Plots
+
+```{r}
+fm.fates <- m1_capHist_FM %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  group_by(animalID, captureYear) %>%
+  slice_max(captureDate) %>%
+  ungroup() %>%
+  merge(., capPeriods_byIndiv[, c("animalID", "capPeriod_end")], by = "animalID", all.x = T, suffixes = c("", "_last")) %>%
+  mutate(
+    captureYear_firstCap = str_sub(captureDate_firstCap, 1, 4),
+    captureYear_lastCap = as.numeric(str_sub(capPeriod_end_last, 1, 4)),
+    captureYear_lastCap = case_when(
+      animalID %in% deathAssignments$animalID ~ captureYear_lastCap,
+      captureYear_lastCap < 2019 ~ captureYear_lastCap + 1,
+      .default = captureYear_lastCap
+    ),
+    captureYear_lastCap = as.character(captureYear_lastCap),
+    # Order animalID based on captureYear_firstCap
+    animalID = fct_reorder(animalID, as.numeric(captureYear_firstCap))
+  ) %>%
+  arrange(captureYear_firstCap) %>%
+  mutate(
+    new_statecode = case_match(
+      statecode,
+      "gone3less_dispersed" ~ "censored",
+      "gone3less_natal" ~ "censored",
+      "gone4plus_natal" ~ "dead/gone",
+      "gone4plus_dispersed" ~ "dead/gone",
+      "gone4plus_natal.breeder" ~ "dead/gone",
+      "knownDeath" ~ "dead/gone",
+      .default = statecode
+    ),
+    new_statecode = factor(new_statecode, levels = c("natal", "dispersed", "censored", "natal.breeder", "dispersed.breeder", "dead/gone"))
+  ) %>%
+  # add natal group
+  merge(., sampleRef[, c("animalID", "natalGroup")], by = "animalID", all.x = T) %>%
+  distinct()
+
+plot_fm.fates_lwed <- fm.fates %>%
+  filter(species == "LWED") %>%
+  mutate(species = "Saddlebacks",
+         sex = case_match(
+           sex,
+           "F" ~ "Females",
+           "M" ~ "Males"
+         )) %>%
+  ggplot() +
+  geom_segment(aes(x = captureYear_firstCap,
+                   xend = captureYear_lastCap,
+                   y = animalID,
+                   yend = animalID)) +
+  geom_point(aes(x = captureYear,
+                 y = animalID,
+                 color = new_statecode,
+                 shape = new_statecode),
+             size = 2.5,
+             stroke = 1) +
+  theme_Publication_rv() +
+  theme(legend.position = "right",
+        #axis.text.y = element_blank(),
+        #axis.ticks.y = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  labs(x = "Year",
+       y = "AnimalID",
+       color = "State",
+       shape = "State") +
+  facet_wrap(vars(sex), scales = "free") +
+  scale_color_manual(values = c("#5A6F80FF",
+                                "#278B9AFF",
+                                "#278B9AFF",
+                                "#E75B64FF",
+                                "#D8AF39FF",
+                                "black"),
+                     labels = c("Natal group",
+                                "Dispersed",
+                                "Censored",
+                                "Natal breeder",
+                                "Dispersed breeder",
+                                "Dead/Disappeared")) +
+  scale_shape_manual(values = c(16,
+                                17,
+                                23,
+                                9,
+                                8,
+                                4),
+                     labels = c("Natal group",
+                                "Dispersed",
+                                "Censored",
+                                "Natal breeder",
+                                "Dispersed breeder",
+                                "Dead/Disappeared"))
+plot_fm.fates_lwed
+
+
+plot_fm.fates_simp <- fm.fates %>%
+  filter(species == "SIMP") %>%
+  mutate(species = "Emperors",
+         sex = case_match(
+           sex,
+           "F" ~ "Females",
+           "M" ~ "Males"
+         )) %>%
+  ggplot() +
+  geom_segment(aes(x = captureYear_firstCap,
+                   xend = captureYear_lastCap,
+                   y = animalID,
+                   yend = animalID)) +
+  geom_point(aes(x = captureYear,
+                 y = animalID,
+                 color = new_statecode,
+                 shape = new_statecode),
+             size = 2.5,
+             stroke = 1) +
+  theme_Publication_rv() +
+  theme(legend.position = "right",
+        #axis.text.y = element_blank(),
+        #axis.ticks.y = element_blank(),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  labs(x = "Year",
+       y = "AnimalID",
+       color = "State",
+       shape = "State") +
+  facet_wrap(vars(sex), scales = "free") +
+  scale_color_manual(values = c("#5A6F80FF",
+                                "#278B9AFF",
+                                "#278B9AFF",
+                                "#E75B64FF",
+                                "#D8AF39FF",
+                                "black"),
+                     labels = c("Natal group",
+                                "Dispersed",
+                                "Censored",
+                                "Natal breeder",
+                                "Dispersed breeder",
+                                "Dead/Disappeared")) +
+  scale_shape_manual(values = c(16,
+                                17,
+                                23,
+                                9,
+                                8,
+                                4),
+                     labels = c("Natal group",
+                                "Dispersed",
+                                "Censored",
+                                "Natal breeder",
+                                "Dispersed breeder",
+                                "Dead/Disappeared"))
+plot_fm.fates_simp
+
+twinList
+```
+
+### Model
+
+statecodes include:
+-   disappeared_priorDispersal
+-   disappeared_priorNatal
+-   knownDeath
+-   knownDispersal
+-   natalGroup
+-   rightCensor_priorDispersal
+-   rightCensor_priorNatal
+
+**LWED**
+
+```{r}
+#detach("package:msmtools", unload=TRUE)
+library(msm)
+#devtools::install_github("contefranz/msmtools")
+#library(msmtools) # can't get it to work properly
+
+m1_lwed_philopatry.df <- m1_capHist_lwed
+
+table(m1_lwed_philopatry.df$statecode)
+
+statetable.msm(state = state,
+               subject = animalID,
+               data = m1_lwed_philopatry.df)
+
+summary(m1_lwed_philopatry.df$Time.years)
+
+# set up the q matrix for the transitions (assume that individuals can transition from non-breeder to gone or known out of group)
+m1_lwed_philopatry.q <- rbind(c(0, 0.5),
+                              c(0, 0)) # assuming ~1 year in state 1 before disappearing
 # ^^ gives same results for 1 & 0.5, suggesting that it's the true max-likelihood estimate
 
 lwed_philopatry.df$sex <- as.factor(lwed_philopatry.df$sex)
@@ -6244,293 +8561,6 @@ birthData %>%
   )
 ```
 
-## Model 3: Abundance
-
-### Prep data
-
-**LWED**
-
-```{r}
-# 1) create capture histories
-m3_lwed_capHist <- capHist_2009to2019 %>%
-  filter(species == "LWED") %>%
-  select(-species, -animalID)
-
-table(m3_lwed_capHist$sex)
-# F  M 
-#68 77 
-
-# 2) get time intervals b/t sampling periods
-m3_lwed_capIntervals <- get_capData_summary(capData_2009to2019, "LWED") %>%
-  # only 2010-2019 to account for birthYear start
-  filter(captureYear %in% 2009:2019) %>%
-  # ditch interval for first year
-  mutate(
-    capInterval_days = case_when(
-      captureYear == min(captureYear) ~ NA,
-      .default = capInterval_days
-    )
-  ) %>%
-  select(capInterval_days) %>%
-  # normalized interval
-  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
-  select(intNorm) %>%
-  na.omit() %>%
-  pull()
-m3_lwed_capIntervals
-
-# 3) process data
-m3_lwed.js.proc <- process.data(
-  m3_lwed_capHist,
-  begin.time = 2009,
-  model = "POPAN",
-  groups = "sex",
-  time.intervals = m3_lwed_capIntervals
-  )
-
-# 4) design data
-## 4a) initial design data
-m3_lwed.js.ddl <- make.design.data(m3_lwed.js.proc)
-
-## 4b) add ageClass (use data from model 1)
-library(combinat)
-### start subadult at ages (1 year in study):
-min(m3_lwed_capIntervals) # 0.59
-max(m3_lwed_capIntervals) # 1.2
-### end subadult at ages (3 years in study):
-subad <- combinat::combn(m3_lwed_capIntervals, m = 3, fun = sum) %>%
-  as.data.frame() %>%
-  dplyr::rename("combo" = ".") %>%
-  arrange(combo)
-min(subad$combo) # 2.34
-max(subad$combo) # 3.31
-### adjust phi in ddl
-m3_lwed.js.ddl <- add.design.data(m3_lwed.js.proc,
-                                   m3_lwed.js.ddl,
-                                   parameter = "Phi",
-                                   type = "age",
-                                   bins = c(0,0.5,2.3,15),
-                                   name = "ageClass")
-### adjust p in ddl
-m3_lwed.js.ddl <- add.design.data(m3_lwed.js.proc,
-                                   m3_lwed.js.ddl,
-                                   parameter = "p",
-                                   type = "age",
-                                   bins = c(0,0.5,2.3,15),
-                                   name = "ageClass")
-
-## 4c) add effort covariate
-m3_lwed_newTimes <- as.character(unique(c(m3_lwed.js.ddl$Phi$time, m3_lwed.js.ddl$p$time)))
-
-m3_lwed_covGrps <- data.frame(
-  time = m3_lwed_newTimes,
-  nGrps = lwed_capSummary_byGroup[lwed_capSummary_byGroup$captureYear %in% 2009:2019, "nGroups"]
-)
-
-m3_lwed.js.ddl$p <- merge_design.covariates(m3_lwed.js.ddl$p,
-                                             m3_lwed_covGrps)
-
-# view:
-m3_lwed.js.ddl$Phi
-m3_lwed.js.ddl$p
-```
-
-**SIMP**
-
-```{r}
-# 1) create capture histories
-m3_simp_capHist <- capHist_2009to2019 %>%
-  filter(species == "SIMP") %>%
-  select(-species, -animalID) %>%
-  # simp starts in 2011
-  mutate(ch = str_sub(ch, 3, -1))
-
-table(m3_simp_capHist$sex)
-# F  M 
-#48 54
-
-# 2) get time intervals b/t sampling periods
-m3_simp_capIntervals <- get_capData_summary(capData_2009to2019, "SIMP") %>%
-  # only 2011-2019 (when simps were captured)
-  filter(captureYear %in% 2011:2019) %>%
-  # ditch interval for first year
-  mutate(
-    capInterval_days = case_when(
-      captureYear == min(captureYear) ~ NA,
-      .default = capInterval_days
-    )
-  ) %>%
-  select(capInterval_days) %>%
-  # normalized interval
-  mutate(intNorm = round(capInterval_days / 360, 2)) %>%
-  select(intNorm) %>%
-  na.omit() %>%
-  pull()
-m3_simp_capIntervals
-# 1.16 1.09 1.00 1.02 1.02 0.96 1.02 1.03
-
-# 3) process data
-m3_simp.js.proc <- process.data(
-  m3_simp_capHist,
-  begin.time = 2011,
-  model = "POPAN",
-  groups = "sex",
-  time.intervals = m3_simp_capIntervals
-  )
-
-# 2) design data
-## 2a) initial design data
-m3_simp.js.ddl <- make.design.data(m3_simp.js.proc)
-
-## 2b) add ageClass
-library(combinat)
-### start subadult at ages (1 year in study):
-min(m3_simp_capIntervals) # 0.96
-max(m3_simp_capIntervals) # 1.16
-### end subadult at ages (3 years in study):
-subad <- combinat::combn(m3_simp_capIntervals, m = 3, fun = sum) %>%
-  as.data.frame() %>%
-  dplyr::rename("combo" = ".") %>%
-  arrange(combo)
-min(subad$combo) # 2.98
-max(subad$combo) # 3.28
-### adjust phi in ddl (lwed bins should still work here)
-m3_simp.js.ddl <- add.design.data(m3_simp.js.proc,
-                                   m3_simp.js.ddl,
-                                   parameter = "Phi",
-                                   type = "age",
-                                   bins = c(0,0.5,2.7,15),
-                                   name = "ageClass")
-### adjust p in ddl (lwed bins should still work here)
-m3_simp.js.ddl <- add.design.data(m3_simp.js.proc,
-                                   m3_simp.js.ddl,
-                                   parameter = "p",
-                                   type = "age",
-                                   bins = c(0,0.5,2.7,15),
-                                   name = "ageClass")
-
-## 2c) add effort covariate
-m3_simp_newTimes <- as.character(unique(c(m3_simp.js.ddl$Phi$time, m3_simp.js.ddl$p$time)))
-
-m3_simp_covGrps <- data.frame(
-  time = m3_simp_newTimes,
-  nGrps = simp_capSummary_byGroup[simp_capSummary_byGroup$captureYear %in% 2011:2019, "nGroups"]
-)
-
-m3_simp.js.ddl$p <- merge_design.covariates(m3_simp.js.ddl$p,
-                                             m3_simp_covGrps)
-
-m3_simp.js.ddl$Phi
-m3_simp.js.ddl$p
-```
-
-### Prep models
-
-```{r}
-m3_fit.js.models <- function(dataProc, dataDesign) {
-  
-  # Phi formulas
-  Phi.dot <- list(formula=~1)
-  Phi.time <- list(formula=~time)
-  
-  # p formulas
-  p.dot <- list(formula=~1)
-  
-  # pent formulas. pent estimates MUST SUM to 1 (for each group).
-  # This is constrained using a Multinomial Logit link
-  pent.time <- list(formula=~time)
-  pent.sex <- list(formula=~sex)
-  pent.dot <- list(formula=~1)
-  
-  # Nsuper formulas. Don't confuse "N" from model with predicted population size
-  N.sex <- list(formula=~sex)
-  N.dot <- list(formula=~1)
-  
-  # Construct all combinations and put into one model table
-  cml <- RMark::create.model.list(c("POPAN")) # makes all possible combinations of those parameter formulas
-  
-  # run & return list of models
-  results <- mark.wrapper(cml,
-                          data = dataProc,
-                          ddl = dataDesign,
-                          external = FALSE,
-                          accumulate = TRUE,
-                          hessian = TRUE)
-  
-  return(results)
-  
-}
-```
-
-### Run function
-
-```{r}
-m3_lwed.js.models <- m3_fit.js.models(m3_lwed.js.proc, m3_lwed.js.ddl)
-m3_simp.js.models <- m3_fit.js.models(m3_simp.js.proc, m3_simp.js.ddl)
-
-m3_lwed.js.models
-m3_simp.js.models
-
-summary(m3_lwed.js.models[[1]])
-summary(m3_simp.js.models[[1]])
-```
-
-### Predict (real) values
-
-ffs. do the popan.derived thing. 
-
-```{r}
-m3_lwed.js.derived <- popan.derived(m3_lwed.js.proc,
-                                    m3_lwed.js.models[[1]])
-m3_simp.js.derived <- popan.derived(m3_simp.js.proc,
-                                    m3_simp.js.models[[1]])
-
-m3_lwed.js.derived$NGross # superpopulation for F and M
-m3_lwed.js.derived$N # N by sex each year
-m3_lwed.js.derived$Nbyocc # total N each year
-
-m3_simp.js.derived$NGross
-m3_simp.js.derived$N
-m3_simp.js.derived$Nbyocc
-```
-
-### Plots
-
-```{r}
-m3_lwed_forPlot <- m3_lwed.js.derived$N %>%
-  mutate(Occasion = Occasion + 2008,
-         species = "Saddleback tamarins")
-m3_simp_forPlot <- m3_simp.js.derived$N %>%
-  mutate(Occasion = Occasion + 2010,
-         species = "Emperor tamarins")
-
-rbind(m3_lwed_forPlot, m3_simp_forPlot) %>%
-  
-  ggplot(aes(x = Occasion, y = N, color = sex, fill = sex)) +
-  # Shaded area for confidence intervals with separate fills by sex
-  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.2) +
-  # Smoothed lines by sex with matching colors
-  geom_smooth(formula = y ~ x, method = "loess", se = FALSE) +
-  # Adding points for individual observations
-  geom_point(size = 2, shape = 16) +
-  # Axis labels
-  labs(x = "Occasion", y = "Population Estimate (N)", color = "Sex", fill = "Sex") +
-  # Classic theme with adjustments for clarity
-  theme_classic() +
-  theme(
-    legend.position = "right",
-    legend.title = element_text(face = "bold"),
-    legend.text = element_text(size = 10)
-  ) +
-  # Custom color scheme for male and female
-  scale_color_manual(values = c("F" = "#1C9D7CFF", "M" = "#3A507FFF")) +
-  scale_fill_manual(values = c("F" = "#1C9D7CFF", "M" = "#3A507FFF")) +
-  facet_grid(cols = vars(species)) +
-  scale_x_continuous(breaks = c(2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019)) +
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
-
-my_colors_peru
-```
 
 
 
@@ -6639,4 +8669,167 @@ plot.survfit.msm(philopatry.msm, from = 1, las = 1,
                  covariates = list(sex = "F"),
                  interp = "midpoint",
                  range = c(0,5))
+```
+
+```{r}
+# LWED
+lwed_genind_sum <- adegenet::summary(lwed_genind)
+lwed_genind_sum
+
+lwed_genind_sum$Hobs
+
+lwed_basicStats <- basic.stats(lwed_genind)
+lwed_basicStats
+
+mean(lwed_basicStats$Ho, na.rm = T) # 0.460
+min(lwed_basicStats$Ho, na.rm = T) # 0.169
+max(lwed_basicStats$Ho, na.rm = T) # 0.621
+
+mean(lwed_basicStats$Hs, na.rm = T) # 0.457
+min(lwed_basicStats$Hs, na.rm = T) # 0.179
+max(lwed_basicStats$Hs, na.rm = T) # 0.504
+
+lwed_basicStats$overall # Ht = 0.457
+
+# SIMP
+simp_genind_sum <- adegenet::summary(simp_genind)
+simp_genind_sum
+simp_basicStats <- basic.stats(simp_genind)
+simp_basicStats
+
+mean(simp_basicStats$Ho, na.rm = T) # 0.434
+min(simp_basicStats$Ho, na.rm = T) # 0.058
+max(simp_basicStats$Ho, na.rm = T) # 0.611
+
+mean(simp_basicStats$Hs, na.rm = T) # 0.439
+min(simp_basicStats$Hs, na.rm = T) # 0.128
+max(simp_basicStats$Hs, na.rm = T) # 0.505
+
+simp_basicStats$overall # Ht 0.4390
+```
+
+presenceMatrix old code:
+```{r}
+library(dplyr)
+library(purrr)
+conflicts_prefer(purrr::reduce)
+
+presenceMatrix <- capData_2009to2023 %>%
+  select(species, animalID, sex, captureYear) %>%
+  arrange(animalID, captureYear) %>%
+  group_by(animalID) %>%
+  slice(c(1, n())) %>%
+  ungroup() %>%
+  mutate(
+    id = janitor::make_clean_names(animalID, use_make_names = F),
+    id = case_when(
+      str_detect(id, "_2") ~ "captureYear_last",
+      .default = "captureYear_first"
+      )
+    ) %>%
+  pivot_wider(id_cols = c(animalID, species, sex),
+              names_from = id,
+              values_from = captureYear) %>%
+  # list animalID as present for all years >= capYear_first & <= capYear_last
+  reduce(2009:2023, .init = ., ~ .x %>%
+    mutate("{.y}" := ifelse(.y >= captureYear_first & .y <= captureYear_last, animalID, NA))) %>%
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  relocate(birthYear_est, .before = captureYear_first) %>%
+  relocate(species) %>%
+  arrange(species, as.numeric(animalID))
+
+# get total indivs present in pop per year (based on presenceMatrix)
+totalIndivs_perYear_lwed <- presenceMatrix %>%
+  filter(species == "LWED") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+
+totalIndivs_perYear_lwedF <- presenceMatrix %>%
+  filter(species == "LWED") %>%
+  filter(sex == "F") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+totalIndivs_perYear_lwedM <- presenceMatrix %>%
+  filter(species == "LWED") %>%
+  filter(sex == "M") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+
+temp <- groupMembership_2009to2023 %>%
+  #filter(species == "LWED") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+
+totalIndivs_perYear_simp <- presenceMatrix %>%
+  filter(species == "SIMP") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+totalIndivs_perYear_simpF <- presenceMatrix %>%
+  filter(species == "SIMP") %>%
+  filter(sex == "F") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+totalIndivs_perYear_simpM <- presenceMatrix %>%
+  filter(species == "SIMP") %>%
+  filter(sex == "M") %>%
+  select(contains("20")) %>%
+  t() %>%
+  as.data.frame() %>%
+  mutate(totalIndivs = rowSums(!is.na(.))) %>%
+  rownames_to_column("year") %>%
+  select(year, totalIndivs)
+```
+
+Perhaps of note -- 2 records of indivs who dispersed twice; both SIMP
+
+```{r}
+# list of known dispersers (indivs captured in at least 2 diff groups)
+knownDispersers <- presenceMatrix_2009to2019 %>%
+  mutate(
+    uniqueGroups = apply(select(., `2009`:`2019`),
+                         1,
+                         function(x) length(unique(x[!is.na(x)]))
+                         )
+    ) %>%
+  filter(uniqueGroups >= 2)
+
+capPeriods_byIndiv_lastCaps <- capData_2009to2019 %>%
+  select(animalID, captureYear) %>%
+  arrange(animalID, as.numeric(captureYear)) %>%
+  group_by(animalID) %>%
+  slice_tail(n = 2) %>%
+  mutate(id = row_number()) %>%
+  pivot_wider(id_cols = animalID,
+              names_from = id,
+              values_from = captureYear) %>%
+  dplyr::rename("capYear_penult" = "1",
+                "capYear_last" = "2") %>%
+  mutate(capYear_last = case_when(
+    is.na(capYear_last) ~ capYear_penult,
+    .default = capYear_last
+  ))
 ```
