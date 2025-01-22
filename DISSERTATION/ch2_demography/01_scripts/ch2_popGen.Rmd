@@ -5752,17 +5752,17 @@ capOverview_discrete_2009to2023 <- capData_2009to2023 %>%
   # remove UNK group name & Loners
   filter(!groupName %in% c("UNK", "Loners")) %>%
   # anonymize groupName
-  merge(., groupRef[, c("groupName", "groupName_anon")], by = "groupName") %>%
+  merge(., groupRef_2009to2019[, c("groupName", "groupName_anon")], by = "groupName") %>%
   arrange(species, desc(groupName_anon)) %>%
   mutate(groupName_anon = factor(groupName_anon, ordered = T))
 
 # plot
 plot_capOverview_byGroup_2009to2023 <- capOverview_discrete_2009to2023 %>%
   mutate(species = case_when(
-    species == "LWED" ~ "L. w. weddelli",
-    .default = "T. subgrisescens"
+    species == "LWED" ~ "Saddleback tamarins",
+    .default = "Emperor tamarins"
   ),
-  species = factor(species, levels = c("L. w. weddelli", "T. subgrisescens"))
+  species = factor(species, levels = c("Saddleback tamarins", "Emperor tamarins"))
   ) %>%
   ggplot() +
   geom_segment(aes(x = captureYear,
@@ -5778,7 +5778,9 @@ plot_capOverview_byGroup_2009to2023 <- capOverview_discrete_2009to2023 %>%
        y = "GroupID",
        size = "# captured",
        color = "Capture event") +
-  scale_color_manual(values = my_colors)
+  theme_Publication_rv() +
+  scale_color_manual(values = my_colors) +
+  theme(legend.position = "right")
 
 plot_capOverview_byGroup_2009to2023
 ```
@@ -6597,13 +6599,14 @@ I don't understand why I'm getting the duplicate error if I set accumulate to TR
 **LWED**
 
 ```{r}
-table_m1_lwed.cjs.models <- m1.p_lwed.cjs.models$model.table %>%
+data_table_m1_lwed.cjs.models <- m1.p_lwed.cjs.models$model.table %>%
   select(-Phi, -p, -AICc) %>%
   mutate(rank = row_number(),
          DeltaAICc = round(DeltaAICc, 2),
          weight = round(weight, 2),
          Deviance = round(Deviance, 2)) %>%
-  relocate(rank) %>%
+  relocate(rank)
+table_m1_lwed.cjs.models <- data_table_m1_lwed.cjs.models %>%
   gt() %>%
   cols_label(
     rank = md("**Rank**"),
@@ -6626,13 +6629,14 @@ table_m1_lwed.cjs.models %>%
 **SIMP**
 
 ```{r}
-table_m1_simp.cjs.models <- m1.p_simp.cjs.models$model.table %>%
+data_table_m1_simp.cjs.models <- m1.p_simp.cjs.models$model.table %>%
   select(-Phi, -p, -AICc) %>%
   mutate(rank = row_number(),
          DeltaAICc = round(DeltaAICc, 2),
          weight = round(weight, 2),
          Deviance = round(Deviance, 2)) %>%
-  relocate(rank) %>%
+  relocate(rank)
+table_m1_simp.cjs.models <- data_table_m1_simp.cjs.models %>%
   gt() %>%
   cols_label(
     rank = md("**Rank**"),
@@ -6651,6 +6655,36 @@ table_m1_simp.cjs.models
 table_m1_simp.cjs.models %>%
   gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table_m1_simp.cjs.models.png", vwidth = 1500, vheight = 1000)
 ```
+
+COMBINE LWED/SIMP TABLES
+
+```{r}
+data_table2.5 <- data_table_m1_lwed.cjs.models %>%
+  mutate(species = "Saddleback tamarins") %>%
+  rbind(., data_table_m1_simp.cjs.models %>% mutate(species = "Emperor tamarins"))
+
+table2.5 <- data_table2.5 %>%
+  filter(DeltaAICc <= 3) %>%
+  group_by(species) %>%
+  gt() %>%
+  cols_label(
+    rank = md("**Rank**"),
+    model = md("**Model**"),
+    npar = md("**K**"),
+    DeltaAICc = md("**DeltaAICc**"),
+    weight = md("**Weight**"),
+    Deviance = md("**Deviance**")
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = everything()
+  )
+table2.5
+
+table2.5 %>%
+  gtsave("./DISSERTATION/ch2_demography/02_results/00_tablesFigures/table2.5.png")
+```
+
 
 ### c-hat again
 

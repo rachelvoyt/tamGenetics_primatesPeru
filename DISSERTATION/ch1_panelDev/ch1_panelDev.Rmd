@@ -21,6 +21,7 @@ dissertation Chapter 1 on SNP panel development.
 # 2 Packages
 
 ```{r, message=FALSE}
+library(conflicted)
 library(ggpubr)
 library(ggthemes)
 library(gsubfn)
@@ -2414,7 +2415,7 @@ run4_gtseq_sampleSum <- get_genoSuccess(genoFile = run4_genos_gtseq,
 
 ## 7.3 Read metrics
 
-## by_sampleType
+### by_sampleType
 
 ahhh I've messed up and put geno success stuff here...
 
@@ -2427,9 +2428,9 @@ run4_gtseq_sampleSum %>%
   )
 ```
 
-### bySample OLD STUFF BELOW
+#### bySample OLD STUFF BELOW
 
-#### lociSets
+##### lociSets
 
 ```{r}
 
@@ -2482,7 +2483,7 @@ run4_gtscore_sampleSum_lociAll %>%
   relocate(otProp, otReads, primerProp, primerReads, totalReads)
 ```
 
-#### sampleTypes
+##### sampleTypes
 
 **performance by sampleType only**
 
@@ -2526,9 +2527,9 @@ tamRun4_ill_gtscore_sampleSum %>%
   relocate(sampleType, lociSet, otProp, otReads, primerProp, primerReads, totalReads)
 ```
 
-### byLocus
+#### byLocus
 
-#### Overview
+##### Overview
 
 ```{r}
 tamRun4_ill_gtscore_locusSum %>%
@@ -2546,7 +2547,7 @@ tamRun4_ill_gtscore_locusSum %>%
   relocate(sampleSet, otProp, otReads, primerReads)
 ```
 
-#### dualLoci
+##### dualLoci
 
 lwed vs. simp vs. both performance
 
@@ -2566,7 +2567,7 @@ tamRun4_ill_gtscore_locusSum %>%
   relocate(sampleSet, otProp, otReads, primerReads)
 ```
 
-#### lwedLoci
+##### lwedLoci
 
 lwed vs. simp samples (\* indicates target sampleSet)
 
@@ -2591,7 +2592,7 @@ tamRun4_ill_gtscore_locusSum %>%
   )
 ```
 
-#### simpLoci
+##### simpLoci
 
 lwed vs. simp samples (\* indicates target sampleSet)
 
@@ -2779,8 +2780,12 @@ shapiro.test(temp$fecal) # 0.000103
 shapiro.test(temp$hair) # 0.001348
 
 run4_stat.test_genoSuccess_bySampleType <- run4_gtseq_genoSuccess_bySample %>%
-  rstatix::pairwise_wilcox_test(genoSuccess ~ sampleType, paired = T) %>%
+  rstatix::pairwise_wilcox_test(genoSuccess ~ sampleType,
+                                paired = T,
+                                p.adjust.method = "holm") %>%
   rstatix::add_xy_position(x = "sampleType")
+run4_stat.test_genoSuccess_bySampleType
+
 run4_stat.test_genoSuccess_bySampleType$groups
 ```
 
@@ -2801,9 +2806,9 @@ run4_gtseq_sampleSum %>%
   stat_pvalue_manual(run4_stat.test_genoSuccess_bySampleType, label = "p.adj.signif", tip.length = 0.01, inherit.aes = F, bracket.nudge.y = 100, step.increase = 0.07) +
   scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
   scale_color_manual(values = c("#CD4F38FF", "#3D4F7DFF", "#E48C2AFF")) +
-  theme_bw() +
   labs(x = "Sample type",
        y = "Percent loci genotyped") +
+  theme_Publication_rv() +
   theme(legend.position = "none")
 
 my_colors_med
@@ -2865,7 +2870,17 @@ run4_spAssignments_gtseq %>%
     mix = sum(spAssigned == "MIX", na.rm = T),
     mdMatch = sum(mdMatch == TRUE, na.rm = T)
   ) %>%
-  as.data.frame()
+  as.data.frame() %>%
+  mutate(propMatch = mdMatch / (mdMatch + mdMismatch)) %>%
+  ggplot(aes(x = sampleType, y = propMatch, color = sampleType)) +
+  geom_bar(stat = "identity", aes(color = sampleType)) +
+  theme_Publication_rv() +
+  scale_color_manual(values = my_colors_med) +
+  labs(
+    x = element_blank(),
+    y = "% match"
+  )
+my_colors_med
 ```
 
 ### Sex
@@ -2935,6 +2950,14 @@ run4_sexAssignments_gtseq %>%
     totalSamples = mdMatch + mdMismatch,
     propMatch = mdMatch/totalSamples,
     propMatch_majority = mdMatch_maj/totalSamples
+  ) %>%
+  ggplot(aes(x = sampleType, y = propMatch_majority, color = sampleType)) +
+  geom_bar(stat = "identity") +
+  theme_Publication_rv() +
+  scale_color_manual(values = my_colors_med) +
+  labs(
+    x = element_blank(),
+    y = "% match"
   )
 ```
 
@@ -2948,7 +2971,7 @@ run4_genos_gtseq_clean <- run4_genos_gtseq %>%
   select(-tamRun4.053)
 ```
 
-## 7.7 PID, PIDsibs
+## 7.8 PID, PIDsibs
 
 ### Create genind
 
@@ -3091,7 +3114,7 @@ run4_simp_pidSibs.thresh <- run4_simp_pidPerm_data %>%
   )
 ```
 
-## 5.3 Plots
+## 7.9 Plots
 
 ```{r}
 pidPerm_data_forFig <- lwed_pidPerm$results %>%
@@ -3130,25 +3153,25 @@ pidPerm_fig
   xlab("Number of loci")
 ```
 
-
-## 7.6 Sample type discordance
-
-### bySample
+# 7.10 Sample type discordance
 
 Examining geno concordance for GTseq genos 1. Set up genoCompare df; set
 any genos for non-target species to NA 2. Get total/prop common/mismatch
 genos per animalID; remove indivs whose sample types don't have at least
 50% common genos (relative to their species' loci set)
 
-Avg common genos: - blood_vs_fecal = 134.4167 (median = 139) -
-blood_vs_hair = 119.25 (median = 119.5) - fecal_vs_hair = 122.5833
-(median = 123)
+## Data
 
 ```{r}
+# get animalIDs w/all sampleTypes over 50% genoSuccess
 run4_genoCompare_sampleTypes_sampleList <- run4_md %>%
   filter(animalID %in% run4_gtseq_genoSuccess_bySample_setsOver50$animalID) %>%
   filter(animalID != 210)
 
+# end up w/12 animalIDs
+length(unique(run4_genoCompare_sampleTypes_sampleList$animalID)) # 12 sets
+
+# compare genos called b/t sampleTypes
 run4_genoCompare_sampleTypes_gtseq <- run4_genos_gtseq %>%
   select(run4_genoCompare_sampleTypes_sampleList$sampleID_ill) %>%
   t() %>%
@@ -3168,10 +3191,70 @@ run4_genoCompare_sampleTypes_gtseq <- run4_genos_gtseq %>%
     fhMatch = fecal == hair
   )
 
-length(unique(run4_genoCompare_sampleTypes_gtseq$animalID))
+run4_genoCompare_sampleTypes_gtseq %>%
+  nrow() # 2496 records w/o filtering
+run4_genoCompare_sampleTypes_gtseq %>%
+  na.omit() %>%
+  nrow() # 1363 if only only keep records where genos for all sampleTypes
 
+test <- run4_genoCompare_sampleTypes_gtseq %>%
+  select(locus) %>%
+  distinct(locus) %>%
+  merge(., run4_genoCompare_sampleTypes_gtseq[, c("animalID", "locus", "bfMatch", "bhMatch", "fhMatch")], by = "locus", all.x = T) %>%
+  na.omit() %>%
+  group_by(locus) %>%
+  summarise(count = n()) %>%
+  filter(count >= 10)
+```
 
+## Analysis
+
+Not going to filter to loci genotyped across all sampletypes for all indivs; going on a pair basis
+
+Avg common genos: - blood_vs_fecal = 134.4167 (median = 139) -
+blood_vs_hair = 119.25 (median = 119.5) - fecal_vs_hair = 122.5833
+(median = 123)
+
+```{r}
+run4_genoCompare_sampleTypes_gtseq %>%
+  group_by(animalID) %>%
+  summarise(
+    bfCommon = sum(!is.na(bfMatch)),
+    bhCommon = sum(!is.na(bhMatch)),
+    fhCommon = sum(!is.na(fhMatch)),
+    
+    bfMatch = sum(bfMatch == TRUE, na.rm = T),
+    bhMatch = sum(bhMatch == TRUE, na.rm = T),
+    fhMatch = sum(fhMatch == TRUE, na.rm = T)
+  ) %>%
+  as.data.frame() %>%
+  mutate(
+    bf_propMatch = bfMatch/bfCommon,
+    bh_propMatch = bhMatch/bhCommon,
+    fh_propMatch = fhMatch/fhCommon
+  ) %>%
+  summarise(
+    mean_bfCommon = mean(bfCommon),
+    sd_bfCommon = sd(bfCommon),
+    mean_bhCommon = mean(bhCommon),
+    sd_bhCommon = sd(bhCommon),
+    mean_fhCommon = mean(fhCommon),
+    sd_fhCommon = sd(fhCommon),
+    
+    mean_bfMatch = mean(bf_propMatch)*100,
+    sd_bfMatch = sd(bf_propMatch)*100,
+    mean_bhMatch = mean(bh_propMatch)*100,
+    sd_bhMatch = sd(bh_propMatch)*100,
+    mean_fhMatch = mean(fh_propMatch)*100,
+    sd_fhMatch = sd(fh_propMatch)*100
+  )
+```
+
+summary:
+```{r}
 run4_genoCompare_sampleTypes_gtseq_sampleSum <- run4_genoCompare_sampleTypes_gtseq %>%
+  # retain only loci genotyped at all sampleTypes for at least 10/12 samples
+  #filter(locus %in% test$locus) %>%
 #  na.omit() %>%
   group_by(animalID) %>%
   summarise(
@@ -3199,44 +3282,54 @@ run4_genoCompare_sampleTypes_gtseq_sampleSum <- run4_genoCompare_sampleTypes_gts
 #      str_detect(animalID, "LWED") ~ genosCommon/173,
 #      str_detect(animalID, "SIMP") ~ genosCommon/175
       
-      str_detect(animalID, "LWED") ~ bfCommon/173,
-      str_detect(animalID, "SIMP") ~ bfCommon/175
+      str_detect(animalID, "LWED") ~ bfCommon/nrow(run4_lwedLoci),
+      str_detect(animalID, "SIMP") ~ bfCommon/nrow(run4_simpLoci)
     ),
     bh_propCommon = case_when(
 #      str_detect(animalID, "LWED") ~ genosCommon/173,
 #      str_detect(animalID, "SIMP") ~ genosCommon/175
       
-      str_detect(animalID, "LWED") ~ bhCommon/173,
-      str_detect(animalID, "SIMP") ~ bhCommon/175
+      str_detect(animalID, "LWED") ~ bhCommon/nrow(run4_lwedLoci),
+      str_detect(animalID, "SIMP") ~ bhCommon/nrow(run4_simpLoci)
     ),
     fh_propCommon = case_when(
 #      str_detect(animalID, "LWED") ~ genosCommon/173,
 #      str_detect(animalID, "SIMP") ~ genosCommon/175
       
-      str_detect(animalID, "LWED") ~ fhCommon/173,
-      str_detect(animalID, "SIMP") ~ fhCommon/175
+      str_detect(animalID, "LWED") ~ fhCommon/nrow(run4_lwedLoci),
+      str_detect(animalID, "SIMP") ~ fhCommon/nrow(run4_simpLoci)
     )
   )
-
-# common genos
-mean(run4_genoCompare_sampleTypes_gtseq_sampleSum$bfCommon) # 134.4167
-mean(run4_genoCompare_sampleTypes_gtseq_sampleSum$bhCommon) # 119.25
-mean(run4_genoCompare_sampleTypes_gtseq_sampleSum$fhCommon) # 122.5833
-
-median(run4_genoCompare_sampleTypes_gtseq_sampleSum$bfCommon) # 139
-median(run4_genoCompare_sampleTypes_gtseq_sampleSum$bhCommon) # 119.5
-median(run4_genoCompare_sampleTypes_gtseq_sampleSum$fhCommon) # 123
-
-
-# concordance
-mean(run4_genoCompare_sampleTypes_gtseq_sampleSum$bf_propMatch) # 0.8871016
-mean(run4_genoCompare_sampleTypes_gtseq_sampleSum$bh_propMatch) # 0.860932
-mean(run4_genoCompare_sampleTypes_gtseq_sampleSum$fh_propMatch) # 0.908682
-
-median(run4_genoCompare_sampleTypes_gtseq_sampleSum$bf_propMatch) # 0.9104492
-median(run4_genoCompare_sampleTypes_gtseq_sampleSum$bh_propMatch) # 0.8583387
-median(run4_genoCompare_sampleTypes_gtseq_sampleSum$fh_propMatch) # 0.9388099
 ```
+
+stats:
+```{r}
+run4_genoCompare_sampleTypes_stats.df <- run4_genoCompare_sampleTypes_gtseq_sampleSum %>%
+  select(animalID, contains("propMatch")) %>%
+  pivot_longer(-animalID,
+               names_to = "compType",
+               values_to = "propMatch")
+
+temp <- run4_genoCompare_sampleTypes_stats.df %>%
+  pivot_wider(id_cols = animalID,
+              names_from = compType,
+              values_from = propMatch)
+
+# all but fecal vs. hair are normally distributed >> run wilcox vs. t-test anyway
+shapiro.test(temp$bf_propMatch) # 0.5282
+shapiro.test(temp$bh_propMatch) # 0.1928
+shapiro.test(temp$fh_propMatch) # 0.02262
+
+run4_stat.test_genoCompare_sampleTypes <- run4_genoCompare_sampleTypes_stats.df %>%
+  rstatix::pairwise_wilcox_test(propMatch ~ compType, paired = T) %>%
+  rstatix::add_xy_position(x = "compType")
+run4_stat.test_genoCompare_sampleTypes$groups
+
+# no sig diffs b/t groups
+run4_stat.test_genoCompare_sampleTypes
+```
+
+## Plots
 
 210_LWED and 74_SIMP fecal samples both seem incorrect
 --s053_lwed_210_fecal; rnaL_1166; t8 --s040_simp_74_fecal; rnaL_241; t20
@@ -3244,7 +3337,7 @@ median(run4_genoCompare_sampleTypes_gtseq_sampleSum$fh_propMatch) # 0.9388099
 ```{r}
 View(run4_md %>% filter(sampleID_unique %in% c("210_fecal", "74_fecal")))
 
-run4_genoCompare_sampleTypes_gtseq_sampleSum %>%
+fig1.2 <- run4_genoCompare_sampleTypes_gtseq_sampleSum %>%
   select(animalID, contains("propMatch")) %>%
   dplyr::rename("blood_vs_feces" = "bf_propMatch",
                 "blood_vs_hair" = "bh_propMatch",
@@ -3256,19 +3349,23 @@ run4_genoCompare_sampleTypes_gtseq_sampleSum %>%
   ggplot(aes(x = compType, y = propMatch, color = compType)) +
   geom_boxplot(outlier.shape = NA) +
   geom_point(position = position_jitterdodge()) +
-  scale_colour_Publication() +
-  theme_Publication() +
-  labs(title = "Genotyping concordance between sample types",
-       x = "",
+  #scale_colour_Publication() +
+  theme_Publication_rv() +
+  scale_color_manual(values = c("#4C413FFF", "#E75B64FF", "#278B9AFF")) +
+  labs(x = "",
        y = "% concordant genotypes") +
   theme(legend.position = "none") +
   ylim(0, 100)
-```
+fig1.2
 
-### byLocus
+my_colors_med
 
-```{r}
+# not significant; don't add
+  #stat_pvalue_manual(run4_stat.test_genoCompare_sampleTypes, label = "p.adj.signif", tip.length = 0.01, inherit.aes = F, bracket.nudge.y = 100, step.increase = 0.07)
 
+
+
+my_colors_med
 ```
 
 # 8 GTseq vs. GTscore
@@ -4194,7 +4291,10 @@ run4_dsGenoCompare_dsAll.arML <- rbind(run4_dsGenoCompare_dsAll.ar,
 Save results so I don't have to run them again--
 
 ```{r}
-write.csv(run4_dsGenoCompare_dsAll.arML, "./DISSERTATION/ch1_panelDev/02_results/run4_dsGenoCompare_dsAll.arML.csv", row.names = F)
+#write.csv(run4_dsGenoCompare_dsAll.arML, "./DISSERTATION/ch1_panelDev/02_results/run4_dsGenoCompare_dsAll.arML.csv", row.names = F)
+
+# read back in
+run4_dsGenoCompare_dsAll.arML <- read.csv("./DISSERTATION/ch1_panelDev/02_results/run4_dsGenoCompare_dsAll.arML.csv")
 ```
 
 ### Geno consistency
@@ -4223,6 +4323,25 @@ run4_dsGenoCompare_dsAll.arML %>%
 **Stats**
 
 ```{r}
+# should be doing non-param test--
+run4_stat.test_dsGenoCompare <- run4_dsGenoCompare_dsAll.arML %>%
+  filter(!ds %in% c("3x", "6x")) %>%
+  select(ds, sampleID, locus, max_propMatch, pipeline) %>%
+  group_by(ds, sampleID) %>%
+  pairwise_wilcox_test(max_propMatch ~ pipeline, paired = T)
+
+  pivot_wider(id_cols = c(ds, sampleID, locus),
+              names_from = pipeline,
+              values_from = max_propMatch) %>%
+  group_by(ds, sampleID) %>%
+  pairwise_wilcox_test()
+ttest.propMatch.dsAll
+
+run4_genoCompare_sampleTypes_stats.df %>%
+  rstatix::pairwise_wilcox_test(propMatch ~ compType, paired = T) %>%
+  rstatix::add_xy_position(x = "compType")
+
+# OLD BELOW
 # paired by sample/loci combo
 ttest.propMatch.dsAll <- run4_dsGenoCompare_dsAll.arML %>%
   filter(!ds %in% c("3x", "6x")) %>%
@@ -4330,7 +4449,7 @@ ttest.totalGenos.dsAll <- run4_dsGenoCompare_dsAll.arML %>%
 ttest.totalGenos.dsAll
 ```
 
-#### Table
+#### Analysis
 
 ```{r}
 table_ttest.totalGenos.dsAll <- ttest.totalGenos.dsAll %>%
@@ -4363,11 +4482,92 @@ table_ttest.totalGenos.dsAll %>%
 
 All plots are derived from data with sampleID as the base (vs. for example, by each sample/locus combo) - this makes visualization a bit easier on the eyes and interpretation easier too
 
-```{r}
-run4_dsGenoCompare_dsAll.arML$ds <- factor(run4_dsGenoCompare_dsAll.arML$ds, levels = c("3x", "6x", "10x", "20x", "30x", "50x", "100x"))
+### Fig 1.3 + stats
 
-# Variation in mean geno consistency for gtseq vs. gtscore
-plot1_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
+```{r}
+# AR ONLY - Variation in mean geno consistency for each sample type
+## data for plot
+data_fig1.3 <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  filter(pipeline == "Allele-ratio") %>%
+  filter(!ds %in% c("3x", "6x")) %>%
+  mutate(ds = factor(ds, levels = c("10x", "20x", "30x", "50x", "100x"))) %>%
+  group_by(ds, sampleType, sampleID) %>%
+  summarise(
+    mean_maxMatch = mean(max_propMatch)
+  ) %>%
+  as.data.frame()
+
+# stats
+stats_fig1.3 <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(ds = factor(ds, levels = c("10x", "20x", "30x", "50x", "100x"))) %>%
+  filter(pipeline == "gtseq") %>%
+  filter(!ds %in% c("3x", "6x")) %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by = "sampleID") %>%
+  pivot_wider(id_cols = c(ds, animalID, locus),
+              names_from = sampleType,
+              values_from = max_propMatch) %>%
+  pivot_longer(-c(ds, animalID, locus),
+               names_to = "sampleType",
+               values_to = "max_propMatch") %>%
+  group_by(ds) %>%
+  rstatix::pairwise_wilcox_test(
+        formula = max_propMatch ~ sampleType,
+        paired = T,
+        p.adjust.method = "holm") %>%
+  rstatix::add_x_position(x = "ds",
+                          group = "sampleType",
+                          dodge = 0.8)
+
+# plot (couldn't get it to work w/ggplot, but ggpubr seems happy enough)
+fig1.3 <- data_fig1.3 %>%
+  mutate(mean_maxMatch = mean_maxMatch*100) %>%
+  ggboxplot(x = "ds", y = "mean_maxMatch", fill = "sampleType", outlier.size = 0.5) +
+  ggpubr::stat_pvalue_manual(stats_fig1.3,
+                             label = "p.adj.signif",
+                             tip.length = 0.01,
+                             y.position = 100,
+                             bracket.nudge.y = 0.25,
+                             step.group.by = "ds",
+                             step.increase = 0.05,
+                             hide.ns = T) +
+  scale_y_continuous(
+    breaks = c(90, 92, 94, 96, 98, 100)
+    ) +
+  theme_Publication_rv() +
+  scale_fill_manual(values = c("#E7A79BFF", "#9FA7BEFF", "#F2C695FF")) +
+  labs(x = "Read depth",
+       y = "Mean % genotype concordance") +
+  guides(fill = guide_legend(title = "Sample type")) +
+  theme(legend.position = "right")
+fig1.3
+```
+
+### Fig 1.4 + stats
+
+Variation in mean geno consistency for gtseq vs. gtscore
+
+```{r}
+# stats
+stats_fig1.4 <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(ds = factor(ds, levels = c("3x", "6x", "10x", "20x", "30x", "50x", "100x"))) %>%
+  filter(!ds %in% c("3x", "6x")) %>%
+  select(ds, pipeline, max_propMatch) %>%
+  group_by(ds) %>%
+  rstatix::pairwise_wilcox_test(
+    max_propMatch ~ pipeline,
+    paired = T,
+    p.adjust.method = "holm"
+  ) %>%
+  rstatix::add_x_position(x = "ds",
+                          group = "pipeline",
+                          dodge = 0.8)
+
+data_fig1.4 <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(ds = factor(ds, levels = c("3x", "6x", "10x", "20x", "30x", "50x", "100x"))) %>%
   mutate(pipeline = case_when(
     pipeline == "gtseq" ~ "Allele-ratio",
     pipeline == "gtscore" ~ "Max-likelihood"
@@ -4377,16 +4577,146 @@ plot1_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
   summarise(
     mean_maxMatch = mean(max_propMatch)
   ) %>%
+  as.data.frame() %>%
+  mutate(mean_maxMatch = mean_maxMatch*100)
+
+# plot
+fig1.4 <- data_fig1.4 %>%
+  ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = pipeline)) +
+  geom_boxplot(position = position_dodge2(preserve = "single"),
+               outlier.size = 0.5) +
+  #coord_cartesian(ylim = c(0.96, 1)) +
+  theme_Publication_rv() +
+  scale_fill_manual(values = c("#ADB7C0FF", "#ECD89DFF")) +
+  labs(x = "Read depth",
+       y = "Mean % genotype concordance") +
+  guides(fill = guide_legend(title = "Pipeline")) +
+  theme(legend.position = "right")+
+  ggpubr::stat_pvalue_manual(stats_fig1.4,
+                             label = "p.adj.signif",
+                             tip.length = 0.01,
+                             y.position = 101,
+                             bracket.nudge.y = 0.25,
+                             step.group.by = "ds",
+                             step.increase = 0.05,
+                             hide.ns = T,
+                             inherit.aes = F)
+fig1.4
+```
+
+#### Stats = Table 1.3
+
+effect size: https://rpkgs.datanovia.com/rstatix/reference/wilcox_effsize.html
+
+```{r}
+effSize_fig1.4 <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(ds = factor(ds, levels = c("3x", "6x", "10x", "20x", "30x", "50x", "100x"))) %>%
+  filter(!ds %in% c("3x", "6x")) %>%
+  select(ds, pipeline, max_propMatch) %>%
+  group_by(ds) %>%
+  rstatix::wilcox_effsize(
+    max_propMatch ~ pipeline,
+    paired = T,
+    p.adjust.method = "holm"
+  )
+
+table1.3 <- stats_fig1.4 %>%
+  mutate(
+    p.adj = round(p.adj, 2),
+    p.adj = case_when(
+      p.adj < 0.0001 ~ NA,
+      .default = p.adj
+    ),
+    p.adj = as.character(p.adj),
+    p.adj = case_when(
+      is.na(p.adj) ~ "< 0.0001",
+      .default = p.adj
+    )
+  ) %>%
+  select(ds, statistic, p.adj) %>%
+  cbind(., effSize_fig1.4[, c("effsize", "magnitude")]) %>%
+  mutate(effsize = round(effsize, 2)) %>%
+  gt() %>%
+  cols_label(
+    ds = md("**Depth**"),
+    statistic = md("**Statistic**"),
+    p.adj = md("_**p**_"),
+    effsize = md("_**r**_"),
+    magnitude = md("**Magnitude**")
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()
+  )
+table1.3
+
+table1.3 %>%
+  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/table1.3.png")
+```
+
+
+
+```{r}
+# NOT WORKING
+fig_1.4 <- data_fig1.4 %>%
+  rbind(., data.frame(
+    pipeline = c("Max-likelihood", "Max-likelihood"),
+    ds = c("3x", "6x"),
+    sampleID = NA,
+    mean_maxMatch = NA
+  )) %>%
+  ggboxplot(x = "ds",
+            y = "mean_maxMatch",
+            fill = "pipeline",
+            outlier.size = 0.5) +
+  ggpubr::stat_pvalue_manual(stats_fig1.4,
+                             label = "p.adj.signif",
+                             tip.length = 0.01,
+                             y.position = 101,
+                             bracket.nudge.y = 0.25,
+                             step.group.by = "ds",
+                             step.increase = 0.05,
+                             hide.ns = T) +
+  theme_Publication_rv() +
+  scale_fill_manual(values = c("#ADB7C0FF", "#ECD89DFF")) +
+  labs(x = "Read depth",
+       y = "Mean % genotype concordance") +
+  guides(fill = guide_legend(title = "Pipeline")) +
+  theme(legend.position = "right")
+fig_1.4
+
+
+# OLD
+run4_dsGenoCompare_dsAll.arML$ds <- factor(run4_dsGenoCompare_dsAll.arML$ds, levels = c("3x", "6x", "10x", "20x", "30x", "50x", "100x"))
+
+# Variation in mean geno consistency for gtseq vs. gtscore
+data_fig1.4 <- run4_dsGenoCompare_dsAll.arML %>%
+  mutate(ds = factor(ds, levels = c("3x", "6x", "10x", "20x", "30x", "50x", "100x"))) %>%
+  mutate(pipeline = case_when(
+    pipeline == "gtseq" ~ "Allele-ratio",
+    pipeline == "gtscore" ~ "Max-likelihood"
+  )) %>%
+  #filter(ds != "6x") %>%
+  group_by(pipeline, ds, sampleID) %>%
+  summarise(
+    mean_maxMatch = mean(max_propMatch)
+  ) %>%
+  as.data.frame() %>%
+  mutate(mean_maxMatch = mean_maxMatch*100) %>%
   ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = pipeline)) +
   geom_boxplot(position = position_dodge2(preserve = "single"),
                outlier.size = 0.25) +
   #coord_cartesian(ylim = c(0.96, 1)) +
-  theme_bw() +
-  scale_fill_manual(values = c("#B3B8B1FF", "#F5EDC9FF")) +
+  theme_Publication_rv() +
+  scale_fill_manual(values = c("#ADB7C0FF", "#ECD89DFF")) +
   labs(x = "Read depth",
-       y = "Mean genotype concordance") +
-  guides(fill = guide_legend(title = "Pipeline"))
-plot1_dsGenoCompare_ar.vs.ml
+       y = "Mean % genotype concordance") +
+  guides(fill = guide_legend(title = "Pipeline")) +
+  theme(legend.position = "right")
+data_fig1.4
+
+my_colors_med
+my_colors_light
 
 # Variation in mean geno consistency for each sample type for AR vs. ML
 plot2_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
@@ -4409,59 +4739,15 @@ plot2_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
   guides(fill = guide_legend(title = "Sample type")) +
   facet_grid(rows = vars(pipeline))
 plot2_dsGenoCompare_ar.vs.ml
-
-# AR ONLY - Variation in mean geno consistency for each sample type
-plot2b_dsGenoCompare_arOnly <- run4_dsGenoCompare_dsAll.arML %>%
-  mutate(pipeline = case_when(
-    pipeline == "gtseq" ~ "Allele-ratio",
-    pipeline == "gtscore" ~ "Max-likelihood"
-  )) %>%
-  filter(pipeline == "Allele-ratio") %>%
-  filter(!ds %in% c("3x", "6x")) %>%
-  group_by(ds, sampleType, sampleID) %>%
-  summarise(
-    mean_maxMatch = mean(max_propMatch)
-  ) %>%
-  ggplot(aes(x = factor(ds), y = mean_maxMatch, fill = sampleType)) +
-  geom_boxplot(position = position_dodge2(preserve = "single"),
-               outlier.size = 0.25) +
-  theme_bw() +
-  scale_fill_manual(values = c("#E7A79BFF", "#9FA7BEFF", "#F2C695FF")) +
-  labs(x = "Read depth",
-       y = "Mean genotype concordance") +
-  guides(fill = guide_legend(title = "Sample type"))
-plot2b_dsGenoCompare_arOnly
-
-# booo no signif diffs 
-test <- run4_dsGenoCompare_dsAll.arML %>%
-  mutate(pipeline = case_when(
-    pipeline == "gtseq" ~ "Allele-ratio",
-    pipeline == "gtscore" ~ "Max-likelihood"
-  )) %>%
-  filter(pipeline == "Allele-ratio") %>%
-  filter(!ds %in% c("3x", "6x")) %>%
-  merge(., sampleRef[, c("sampleID", "animalID")], by = "sampleID") %>%
-  pivot_wider(id_cols = c(ds, animalID, locus),
-              names_from = sampleType,
-              values_from = max_propMatch) %>%
-  pivot_longer(-c(ds, animalID, locus),
-               names_to = "sampleType",
-               values_to = "max_propMatch") %>%
-  nest_by(ds) %>%
-  mutate(w.test = list(rstatix::pairwise_wilcox_test(
-    detailed = T,
-    formula = max_propMatch ~ sampleType,
-    paired = T,
-    data = data))) %>%
-  select(-data) %>%
-  ungroup %>%
-  unnest(c(w.test))
-test %>%
-  select(ds, group1, group2, estimate, statistic, p, p.adj.signif) %>%
-  gt()
+```
 
 
 
+
+
+Other tests--
+
+```{r}
 # Variation in mean geno consistency for each geno class for AR vs. ML
 plot3_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
   mutate(pipeline = case_when(
@@ -4506,6 +4792,8 @@ plot4_dsGenoCompare_ar.vs.ml <- run4_dsGenoCompare_dsAll.arML %>%
   guides(fill = guide_legend(title = "Pipeline")) +
   facet_grid(rows = vars(max_genoClass), cols = vars(sampleType))
 plot4_dsGenoCompare_ar.vs.ml
+
+my_colors_med
 ```
 
 
@@ -4620,7 +4908,87 @@ run4_sexAssignments_ngmerge_gtscore <- assignSex(genoFile = run4_genos_ngmerge_g
   relocate(c(sexMajority, mdMatch_sexMajority), .after = sexAssigned)
 ```
 
-# Plots (general)
+# Tables & figures (general)
+
+```{r}
+library(xtable)
+library(gt)
+```
+
+## Table 1.1 - GTseq studies
+
+```{r}
+data_table1.1 <- read.csv("./DISSERTATION/ch1_panelDev/00_data/googleSheets_table1.1_gtseqExamples.csv") %>%
+  filter(noninvasive. == "yes") %>%
+  select(2:11) %>%
+  mutate(conversionRate = finalPanel / primersDesigned) %>%
+  mutate(pipeline = case_match(
+    pipeline,
+    "AR" ~ "Allele-ratio",
+    .default = pipeline
+  ))
+
+# Create the table
+table1.1 <- data_table1.1 %>%
+  #relocate(primersDesigned, .before = finalPanel) %>%
+  select(-group) %>%
+  gt() %>%
+  cols_label(
+    #group = "Group",
+    speciesCommon = "Common Name",
+    speciesScientific = "Scientific Name",
+    sampleTypes_hq = "High-Quality Samples",
+    sampleTypes_lq = "Low-Quality Samples",
+    pipeline = "Pipeline",
+    finalPanel = "Final Panel",
+    primersDesigned = "Primers Designed",
+    conversionRate = "Conversion Rate",
+    publication = "Publication"
+  ) %>%
+  fmt_integer(
+    columns = c(finalPanel, primersDesigned)
+  ) %>%
+  fmt_percent(
+    columns = conversionRate,
+    decimals = 1  # Display percentage with one decimal place
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(style = "italic")
+    ),
+    locations = cells_body(
+      columns = speciesScientific
+    )
+  ) %>%
+  tab_options(
+    table.font.size = "small",
+    table.align = "center",
+    column_labels.font.weight = "bold"
+  ) %>%
+  tab_footnote(
+    footnote = "Specific type unspecified",
+    locations = cells_body(
+      columns = sampleTypes_hq,
+      rows = sampleTypes_hq %in% c("Biopsies", "Tissue", "Blood, tissue")
+    )
+  )
+
+
+  cols_align(
+    align = "center",
+    columns = everything()
+  )
+
+table1.1
+
+table1.1 %>%
+  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/table1.1_gtseqExamples.png")
+```
+
 
 ## Panel optimization
 
@@ -4660,6 +5028,45 @@ table_gVers
 table_gVers %>%
   gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/SI_table1_alleleRatioVersions.png")
 ```
+
+## Table A.2
+
+```{r}
+data_tableA.2 <- read.csv("./DISSERTATION/ch1_panelDev/00_data/quip_tamGenetics_extractionsHair_master_columnDefinitions.csv") %>%
+  filter(Column.name %in% c("lysisProtocol", "xtnProtocol")) %>%
+  select(-Notes) %>%
+  filter(Input.values != "omegaTL_b")
+
+tableA.2 <- data_tableA.2 %>%
+  mutate(
+    Column.name = case_match(
+      Column.name,
+      "lysisProtocol" ~ "Lysis protocols",
+      "xtnProtocol" ~ "Extraction protocols"
+    )
+  ) %>%
+  dplyr::rename("Protocol description" = "Definition") %>%
+  gt(groupname_col = "Column.name", rowname_col = "Input.values")
+  cols_label(
+    #group = "Group",
+    speciesCommon = "Common Name",
+    speciesScientific = "Scientific Name",
+    sampleTypes_hq = "High-Quality Samples",
+    sampleTypes_lq = "Low-Quality Samples",
+    pipeline = "Pipeline",
+    finalPanel = "Final Panel",
+    primersDesigned = "Primers Designed",
+    conversionRate = "Conversion Rate",
+    publication = "Publication"
+  ) 
+
+tableA.2
+
+tableA.2 %>%
+  gtsave("./DISSERTATION/ch1_panelDev/02_results/00_tablesFigures/SI_tableA.2_hairXtns.png")
+```
+
+
 
 # XXX SCRAPS XXX
 
@@ -4855,4 +5262,101 @@ D_j = sum(temp$mismatchType == "het_hom", na.rm = T)
 A_het.j = nrow(temp)
 
 D_j / A_het.j
+```
+
+
+```{r}
+# OLD
+fig1.3 <- data_fig1.3 %>%
+  #mutate(group1 = sampleType) %>%
+  ggplot(aes(x = factor(ds), y = mean_maxMatch)) +
+  geom_boxplot(aes(fill = sampleType),
+               position = position_dodge2(preserve = "single"),
+               outlier.size = 0.25) +
+  ggpubr::stat_pvalue_manual(stats_fig1.3,
+                             label = "p.adj.signif",
+                             tip.length = 0.01,
+                             y.position = 1,
+                             step.increase = 0.05) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+  
+  ggpubr::stat_pvalue_manual(stats_fig1.3,
+                             label = "p.adj.signif",
+                             tip.length = 0.01,
+                             group = "ds",
+                     bracket.nudge.y = 0.01,
+                     step.increase = 0.07) +
+  scale_y_continuous(limits = c(0.9, 1.1))
+  
+  theme_Publication_rv() +
+  scale_fill_manual(values = c("#E7A79BFF", "#9FA7BEFF", "#F2C695FF")) +
+  labs(x = "Read depth",
+       y = "Mean genotype concordance") +
+  guides(fill = guide_legend(title = "Sample type")) +
+  theme(legend.position = "right")
+
+# OLD below
+  nest_by(ds) %>%
+  mutate(
+    w.test = list(
+      rstatix::pairwise_wilcox_test(
+        detailed = T,
+        formula = max_propMatch ~ sampleType,
+        paired = T,
+        p.adjust.method = "holm",
+        data = data)
+      )
+    ) %>%
+  select(-data) %>%
+  ungroup %>%
+  unnest(c(w.test)) %>%
+  rstatix::add_x_position(x = "sampleType",
+                          group = "ds",
+                          dodge = 0.8)
+  
+   %>%
+        rstatix::add_xy_position(x = "sampleType",
+                                 comparisons = list(c("blood", "fecal"), c("blood", "hair"), c("fecal", "hair")))
+
+str(stats_fig1.3)
+  
+  mutate(
+    x = case_match(
+      ds,
+      "10x" ~ 1,
+      "20x" ~ 2,
+      "30x" ~ 3,
+      "50x" ~ 4,
+      "100x" ~ 5
+    ),
+    xmin = case_when(
+      group1 == "blood" ~ x - 0.1,
+      group1 == "fecal" ~ x - 0.3,
+      group1 == "hair" ~ x - 0.6
+    ),
+    xmax = case_when(
+      group2 == "blood" ~ xmin + 0.1,
+      group2 == "fecal" ~ xmin + 0.3,
+      group2 == "hair" ~ xmin + 0.6
+    )
+  )
+
+str(stats_fig1.3)
+
+#%>%
+  #mutate(sampleType = group1)
+
+
+  
+  #scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+fig1.3
+
+stat_pvalue_manual(stats_fig1.3,
+                     label = "p.adj.signif",
+                     tip.length = 0.01,
+                     inherit.aes = F,
+                     bracket.nudge.y = 100,
+                     step.increase = 0.07)
+
+fig1.3
 ```

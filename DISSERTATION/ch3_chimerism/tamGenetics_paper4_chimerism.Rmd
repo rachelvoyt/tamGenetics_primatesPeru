@@ -421,7 +421,9 @@ genos_clean_blood_simp <- genos_clean_blood %>%
 lwed_genos_franz_plusBlood <- rbind(lwed_genos_franz, genos_clean_blood_lwed)
 
 simp_genos_franz_plusBlood <- rbind(simp_genos_franz, genos_clean_blood_simp)
+```
 
+```{r}
 # export
 write.csv(lwed_genos_franz_plusBlood, "./DISSERTATION/ch3_chimerism/00_data/lwed_genos_franz_plusBlood.csv", row.names = F)
 write.csv(simp_genos_franz_plusBlood, "./DISSERTATION/ch3_chimerism/00_data/simp_genos_franz_plusBlood.csv", row.names = F)
@@ -443,12 +445,12 @@ Can't include lwed/simp_poPed_forRun2.dat created in ch2_demography b/c doesn't 
 
 ```{bash}
 # lwed
-cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch3_chimerism/02_results/00_franz/00_lwed
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/DISSERTATION/ch3_chimerism/02_results/franz/lwed
 
 FRANz --femrepro 2:30 --malerepro 2:30 --Nf 86 --Nm 96 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/lwed_genos_franz_plusBlood.dat
 
 # simp
-cd ./../01_simp
+cd ./../simp
 
 FRANz --femrepro 2:30 --malerepro 2:30 --Nf 57 --Nm 64 --fullsibtest --fullsibparental --updatefreqs --poutformat 2 ./../../../00_data/simp_genos_franz_plusBlood.dat
 ```
@@ -881,10 +883,10 @@ toRemove_bloodDups <- bloodDups %>%
 
 # clean!
 bloodTest_genos <- bloodTest_genos_temp %>%
-  select(-toRemove_bloodDups)
+  select(-all_of(toRemove_bloodDups))
 
 bloodTest_readCounts <- readCounts_bloodTest %>%
-  select(-toRemove_bloodDups)
+  select(-all_of(toRemove_bloodDups))
 ```
 
 ### AGHmatrix
@@ -991,7 +993,7 @@ stats_vanRaden_lwed <- gMat_vanRaden_lwed %>%
   merge(., sampleRef[, c("sampleID", "animalID")], by.x = "indiv1", by.y = "sampleID", all.x = T) %>%
   merge(., sampleRef[, c("sampleID", "animalID")], by.x = "indiv2", by.y = "sampleID", all.x = T, suffixes = c("1", "2")) #%>%
   
-  mutate(RMSE.PO = sqrt(mean(est.r - 0.5)^2))
+  #mutate(RMSE.PO = sqrt(mean(est.r - 0.5)^2))
   
 test <- stats_vanRaden_lwed %>%
   filter(animalID1 %in% c(161, 162, 163, 51, 53, 58, 60)) %>%
@@ -1139,7 +1141,11 @@ twinPairs_confirmed_twin2 <- twinPairs_confirmed %>%
          "sampleID_hair" = "sampleID_hair_twin2",
          "sampleID_blood" = "sampleID_blood_twin2")
 
-twinPairs_confirmed_l <- rbind(twinPairs_confirmed_twin1, twinPairs_confirmed_twin2)
+twinPairs_confirmed_l <- rbind(twinPairs_confirmed_twin1, twinPairs_confirmed_twin2) %>%
+  arrange(twinID, animalID) %>%
+  group_by(twinID) %>%
+  mutate(twinID2 = str_c("twin", row_number())) %>%
+  ungroup()
 
 # Twin sample ID lists by sample type
 twinPairs_confirmed_hair_sampleList <- data.frame(
@@ -1429,6 +1435,9 @@ As such, I'm doing the following:
     2.  chimProp_c2 - correct based on blood sample bias
     3.  chimProp_c3 - correct based on hair AND blood sample bias
 
+
+Note -- I originally used "median" here vs mean, but I feel like when they say "average" they really do mean the "mean"?? Gonna change it to that instead.
+
 ### Functions
 
 ```{r}
@@ -1494,9 +1503,9 @@ vafDev <- (vaf_allReads - 0.5) %>%
   rownames_to_column("locus") %>%
   rowwise() %>%
   mutate(
-    b1 = median(c_across(all_of(hairSamples_clean)), na.rm = TRUE),
-    b2 = median(c_across(all_of(vaf_bloodReads_sampleList)), na.rm = TRUE),
-    b3 = median(c_across(where(is.numeric)), na.rm = TRUE)
+    b1 = mean(c_across(all_of(hairSamples_clean)), na.rm = TRUE),
+    b2 = mean(c_across(all_of(vaf_bloodReads_sampleList)), na.rm = TRUE),
+    b3 = mean(c_across(where(is.numeric)), na.rm = TRUE)
     ) %>%
   select(c("locus", "b1", "b2", "b3"))
 
@@ -1529,81 +1538,84 @@ twinChimerism_simp_corrected <- twinChimerism_allTwins_corrected %>%
   filter(species == "SIMP")
 ```
 
-## 6.6 Trueness
+### Analysis
 
 ```{r}
-# avg HC est b/t type2.uc_vs_type1.c
-figData_mean.type2.uc_vs_mean.type1.c <- twinChimerism_allTwins_corrected %>%
-  mutate(
-    chimProp = case_when(
-      !chimType %in% c("type20", "type21") ~ NA,
-      .default = chimProp
-    ),
-    chimProp_c3 = case_when(
-      chimType %in% c("type20", "type21") ~ NA,
-      .default = chimProp_c3
-      )
-    ) %>%
-  group_by(animalID) %>%
+biasMetrics <- twinChimerism_allTwins_corrected %>%
+  group_by(locus) %>%
   summarise(
-    mean.type2.uc = mean(chimProp, na.rm = T),
-    mean.type1.c = mean(chimProp_c3, na.rm = T)
-  ) %>%
-  mutate(
-    diff = mean.type2.uc - mean.type1.c
+    n = n(),
+    meanBias = mean(b3)
+    ) %>%
+  as.data.frame() %>%
+  arrange(meanBias) %>%
+  mutate(locus = factor(locus, levels = locus))
+
+# bias estimate % range
+biasMetrics %>%
+  summarise(
+    min = min(meanBias)*100,
+    max = max(meanBias)*100
   )
 
-figData_mean.type2.uc_vs_mean.type1.c %>%
-  ggplot(aes(x = mean.type1.c, y = diff)) +
-  geom_point() +
-  ylim(-0.5, 0.5)
-
-# avg HC est b/t type2.c_vs_type1.c
-figData_mean.type2.c_vs_mean.type1.c <- twinChimerism_allTwins_corrected %>%
-  mutate(
-    chimProp = case_when(
-      !chimType %in% c("type20", "type21") ~ NA,
-      .default = chimProp
-    ),
-    chimProp_c3 = case_when(
-      chimType %in% c("type20", "type21") ~ NA,
-      .default = chimProp_c3
-      )
-    ) %>%
-  group_by(animalID) %>%
-  summarise(
-    mean.type2.c = mean(chimProp, na.rm = T),
-    mean.type1.c = mean(chimProp_c3, na.rm = T)
-  ) %>%
-  mutate(
-    diff = mean.type2.uc - mean.type1.c
-  )
-
-figData_mean.type2.uc_vs_mean.type1.c %>%
-  ggplot(aes(x = mean.type1.c, y = diff)) +
-  geom_point() +
-  ylim(-0.5, 0.5)
+# little plot
+biasMetrics %>%
+  ggplot(aes(x = meanBias, y = locus)) +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(limits = c(-0.04, 0.04)) +
+  theme_Publication_rv()
 
 
+# diff b/t pre- and post-correct chimProp estimates?
+
+
+
+
+# bias in hair vs. blood samples
+# lollll don't use this
 twinChimerism_allTwins_corrected %>%
-  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
-  distinct() %>%
-  group_by(sex) %>%
-  summarise(mean = mean(chimProp))
+  ggplot(aes(x = b1, y = b2)) +
+  geom_point() +
+  geom_smooth(method = "lm", 
+              formula = y ~ x) +
+  #stat_regline_equation() +
+  stat_cor(aes(label = ..rr.label..)) +
+  theme_Publication_rv()
 ```
 
-
-## 6.7 Summaries
+Diff b/t chimProp pre- and post- bias correction?
 
 ```{r}
+# use non-parametric test
+shapiro.test(twinChimerism_allTwins_corrected$chimProp) # p-value = 0.01191
+shapiro.test(twinChimerism_allTwins_corrected$chimProp_c3) # p-value = 0.006705
+
+# no significant diff
+wilcox.test(twinChimerism_allTwins_corrected$chimProp, twinChimerism_allTwins_corrected$chimProp_c3, paired = T, alternative = "two.sided") # p-value = 0.6561
+```
+
+## 6.6 Summaries
+
+```{r}
+twinChimerism_summary <- twinChimerism_allTwins_corrected %>%
+  group_by(species, twinID, animalID) %>%
+  summarise(
+    n_loci = n(),
+    mean_chimProp = mean(chimProp, na.rm = T),
+    mean_chimProp_c1 = mean(chimProp_c1, na.rm = T),
+    mean_chimProp_c2 = mean(chimProp_c2, na.rm = T),
+    mean_chimProp_c3 = mean(chimProp_c3, na.rm = T)
+  ) %>%
+  as.data.frame()
+
 twinChimerism_lwed_summary <- twinChimerism_lwed_corrected %>%
   group_by(animalID) %>%
   summarise(
     n_loci = n(),
-    mean_chimProp = round(mean(chimProp, na.rm = T), 2),
-    mean_chimProp_c1 = round(mean(chimProp_c1, na.rm = T), 2),
-    mean_chimProp_c2 = round(mean(chimProp_c2, na.rm = T), 2),
-    mean_chimProp_c3 = round(mean(chimProp_c3, na.rm = T), 2)
+    mean_chimProp = mean(chimProp, na.rm = T),
+    mean_chimProp_c1 = mean(chimProp_c1, na.rm = T),
+    mean_chimProp_c2 = mean(chimProp_c2, na.rm = T),
+    mean_chimProp_c3 = mean(chimProp_c3, na.rm = T)
   ) %>%
   as.data.frame() %>%
   mutate(species = "LWED") %>%
@@ -1618,10 +1630,10 @@ twinChimerism_simp_summary <- twinChimerism_simp_corrected %>%
   group_by(animalID) %>%
   summarise(
     n_loci = n(),
-    mean_chimProp = round(mean(chimProp, na.rm = T), 2),
-    mean_chimProp_c1 = round(mean(chimProp_c1, na.rm = T), 2),
-    mean_chimProp_c2 = round(mean(chimProp_c2, na.rm = T), 2),
-    mean_chimProp_c3 = round(mean(chimProp_c3, na.rm = T), 2)
+    mean_chimProp = mean(chimProp, na.rm = T),
+    mean_chimProp_c1 = mean(chimProp_c1, na.rm = T),
+    mean_chimProp_c2 = mean(chimProp_c2, na.rm = T),
+    mean_chimProp_c3 = mean(chimProp_c3, na.rm = T)
   ) %>%
   as.data.frame() %>%
   mutate(species = "SIMP") %>%
@@ -1633,9 +1645,12 @@ twinChimerism_simp_summary %>%
   scroll_box(fixed_thead = list(enabled = T, background = "#363636"), height = "300px")
 ```
 
-Average number of loci per indiv?
+# 7 Analysis
+
+## Average number of loci per indiv? Overall avg chimerism?
 
 ```{r}
+# avg loci per indiv
 rbind(twinChimerism_lwed_summary,
       twinChimerism_simp_summary) %>%
   group_by(species) %>%
@@ -1644,26 +1659,382 @@ rbind(twinChimerism_lwed_summary,
     min_n.loci = min(n_loci),
     mean_n.loci = mean(n_loci),
     sd_n.loci = sd(n_loci))
+
+# avg chimerism % per indiv - both species
+twinChimerism_allTwins_corrected %>%
+  group_by(animalID) %>%
+  summarise(
+    mean_chimProp_c3 = mean(chimProp_c3),
+    sd_chimProp_c3 = sd(chimProp_c3)
+  ) %>%
+  as.data.frame() %>%
+  summarise(
+    mean = mean(mean_chimProp_c3)
+  )
+
+mean_chimProp_overall <- mean(twinChimerism_allTwins_corrected$chimProp_c3, na.rm = T) # 0.4765462
+
+# avg chimerism % per indiv - both species
+twinChimerism_allTwins_corrected %>%
+  group_by(species, animalID) %>%
+  summarise(
+    mean_chimProp_c3 = mean(chimProp_c3),
+    sd_chimProp_c3 = sd(chimProp_c3)
+  ) %>%
+  as.data.frame() %>%
+  group_by(species) %>%
+  summarise(
+    min = min(mean_chimProp_c3),
+    max = max(mean_chimProp_c3),
+    mean = mean(mean_chimProp_c3),
+    sd = sd(mean_chimProp_c3)
+  )
+
+# now w/twinIDs 5, 19, and 22 ditched
+twinChimerism_allTwins_corrected %>%
+  filter(!twinID %in% c(5, 22, 19)) %>%
+  group_by(species, animalID) %>%
+  summarise(
+    mean_chimProp_c3 = mean(chimProp_c3),
+    sd_chimProp_c3 = sd(chimProp_c3)
+  ) %>%
+  as.data.frame() %>%
+  group_by(species) %>%
+  summarise(
+    min = min(mean_chimProp_c3),
+    max = max(mean_chimProp_c3),
+    mean = mean(mean_chimProp_c3),
+    sd = sd(mean_chimProp_c3)
+  )
+
+# min/max for mean chimerism per indiv
+twinChimerism_allTwins_corrected %>%
+  group_by(animalID) %>%
+  summarise(
+    mean_chimProp_c3 = mean(chimProp_c3),
+    sd_chimProp_c3 = sd(chimProp_c3)
+  ) %>%
+  as.data.frame() %>%
+  summarise(min = min(mean_chimProp_c3)*100,
+            max = max(mean_chimProp_c3)*100)
+
+```
+
+## chimDiffs
+
+### b/t twins
+
+Set up comparison dataframe
+
+```{r}
+# set up comparison dataframe
+chimProp_twinCompare <- twinChimerism_allTwins_corrected %>%
+  select(twinID, animalID, locus, chimProp_c3) %>%
+  merge(., twinPairs_confirmed_l[, c("animalID", "twinID2")], by = "animalID") %>%
+  pivot_wider(id_cols = c(twinID, locus),
+              names_from = twinID2,
+              values_from = chimProp_c3) %>%
+  na.omit() %>%
+  merge(twinPairs_confirmed[, c("twinID", "animalID_twin1", "animalID_twin2")], by = "twinID")
+```
+
+Since I'm interested in the diffs b/t twin1 and twin2 values, I need to check if the differences themselves are normally distributed-- they're not, so I should use the non-parametric Wilcoxen signed-rank test
+
+```{r}
+# use univariate shapiro-wilks test - shows that diffs are not normally dist
+chimProp_twinCompare %>%
+  mutate(diff = twin1 - twin2) %>%
+  rstatix::shapiro_test(diff) # p = 0.00289 >> not normally distributed
+
+# wilcox test
+chimProp_twinCompare %>%
+  pivot_longer(cols = c(twin1, twin2), names_to = "group", values_to = "value") %>%
+  group_by(twinID) %>%
+  rstatix::pairwise_wilcox_test(
+    value ~ group,
+    paired = T,
+    p.adjust.method = "fdr"
+    ) #%>%
+  #ungroup() %>%
+ # mutate(p.adjusted_globally = p.adjust(p, method = "fdr"))
+
+head(chimProp_twinCompare)
+```
+
+### by sex?
+
+```{r}
+chimProp_twinCompare_l <- twinChimerism_allTwins_corrected %>%
+  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+  distinct() %>%
+  select(species, sex, twinID, animalID, locus, chimProp_c3)
+
+table(chimProp_twinCompare_l$sex)
+
+chimProp_twinCompare_l %>%
+  group_by(species) %>%
+  rstatix::wilcox_test(
+    chimProp_c3 ~ sex,
+    paired = F,
+    p.adjust.method = "fdr"
+    )
 ```
 
 
-
-
-
-
-
-# 7 Figures & tables for chapter
-
-**n_loci vs. chimProp**
+### Does % chimerism in twins add to 1?
 
 ```{r}
-rbind(twinChimerism_lwed_summary,
-      twinChimerism_simp_summary) 
+temp1 <- chimProp_twinCompare %>%
+  select(twinID, twin1, animalID_twin1) %>%
+  group_by(twinID, animalID_twin1) %>%
+  summarise(
+    mean_twin1 = mean(twin1)
+  )
+temp2 <- chimProp_twinCompare %>%
+  select(twinID, twin2, animalID_twin2) %>%
+  group_by(twinID, animalID_twin2) %>%
+  summarise(
+    mean_twin2 = mean(twin2)
+  )
+
+temp3 <- merge(temp1, temp2, by = "twinID") %>%
+  # ditch poor performing pairs
+  filter(!twinID %in% c(5, 19, 22)) %>%
+  mutate(sum = mean_twin1 + mean_twin2,
+         diff = mean_twin1 - mean_twin2) 
+
+chimProp_twinCompare  %>%
+  # ditch poor performing pairs
+  filter(!twinID %in% c(5, 19, 22)) %>%
+  mutate(sum = twin1 + twin2) %>%
+  group_by(twinID) %>%
+  rstatix::wilcox_test(
+    sum ~ 1,
+    paired = F,
+    p.adjust.method = "holm"
+    )
+
+temp <- chimProp_twinCompare  %>%
+  # ditch poor performing pairs
+  #filter(!twinID %in% c(5, 19, 22)) %>%
+  mutate(sum = twin1 + twin2,
+         diff = 1 - sum)
+
+chimProp_twinCompare  %>%
+  # ditch poor performing pairs
+  filter(!twinID %in% c(5, 19, 22)) %>%
+  mutate(sum = twin1 + twin2,
+         diff = 1 - sum) %>%
+  ggplot(aes(x = twinID, y = diff)) +
+  geom_boxplot() +
+  geom_jitter()
+```
+
+## Time diffs in sampling?
+
+chimProp can change over time; checking here to see if individuals were at least sampled at the same time -- some yes, some no
+
+```{r}
+twinComp_samplingDates <- twinPairs_confirmed %>%
+  select(twinID, animalID_twin1, animalID_twin2) %>%
+  merge(., md_blood_clean[, c("animalID", "captureDate")], by.x = "animalID_twin1", by.y = "animalID") %>%
+  merge(., md_blood_clean[, c("animalID", "captureDate")], by.x = "animalID_twin2", by.y = "animalID", suffixes = c("_1", "_2")) %>%
+  distinct() %>%
+  relocate(twinID, animalID_twin1, animalID_twin2) %>%
+  mutate(dateDiff = as.Date(captureDate_1) - as.Date(captureDate_2)) %>%
+  # check age at sampling for each twin
+  merge(., sampleRef[, c("animalID", "birthYear_est")], by.x = "animalID_twin1", by.y = "animalID") %>%
+  merge(., sampleRef[, c("animalID", "birthYear_est")], by.x = "animalID_twin2", by.y = "animalID") %>%
+  distinct() %>%
+  relocate(twinID, animalID_twin1) %>%
+  arrange(twinID)
+
+sampleRef %>%
+  filter(animalID %in% c(56, 33, 34)) %>%
+  distinct()
 ```
 
 
+## Type-1 vs. type-2 estimates
+
+Chim estimates diff b/t type-1 and type-2 markers?
+
 ```{r}
-count_typeI.II_markers <- twinChimerism_allTwins_corrected %>%
+chimProp_type1.2_l <- twinChimerism_allTwins_corrected %>%
+  # ditch twins w/poor genoSuccess
+  filter(!twinID %in% c(5, 22, 19)) %>%
+  # 00, 01, 10, 11 = type 1, 20, 21 = type2
+  mutate(markerType = case_when(
+    chimType %in% c('type00', 'type01', 'type10', 'type11') ~ "type1",
+    chimType %in% c('type20', 'type21') ~ "type2",
+    .default = NA
+  )) %>%
+  group_by(animalID, markerType) %>%
+  summarise(
+    chimProp = mean(chimProp_c3)
+  )
+
+rstatix::pairwise_wilcox_test(chimProp_type1.2_l, chimProp ~ markerType, pairwise = T)
+
+chimProp_type1.2 <- chimProp_type1.2_l %>%
+  pivot_wider(id_cols = animalID,
+              names_from = markerType,
+              values_from = chimProp)
+
+wilcox.test(chimProp_type1.2$type1, chimProp_type1.2$type2, paired = T, alternative = "two.sided")
+```
+
+
+# X FM chimerism
+
+find female blood samples
+
+```{r}
+bloodReads_fmChim <- bloodReads %>%
+  select(contains("SEXID")) %>%
+  rownames_to_column("sampleID") %>%
+  merge(., sampleRef[, c("sampleID", "sampleType", "species", "sex", "animalID")], by = "sampleID") %>%
+  filter(sampleType == "blood") %>%
+  filter(sex == "F")
+  
+```
+
+
+Ok so twinID 37 (animalIDs 136, 137) have genos that, based on sexKey, likely result from allelic dropout since the "TT" geno supposedly shouldn't be possible here--
+SEXID_200 136 = TT, 137 = CT (sexKey: CT, CC)
+SEXID_222 136 = GT, 137 = TT (sexKey: GT, GG)
+
+similar issue with twinID 5
+
+Filter to twin pair 21 & 27 = mixed sex
+
+```{r}
+sexChecks_blood <- assignSex(genos10x, md, "sampleID", exclude_nonTargetSp = "yes") %>%
+  merge(., sampleRef[, c("sampleID", "animalID")], by = "sampleID")
+View(sexChecks_blood %>% filter(animalID %in% c(136, 137)))
+View(genos10x %>% select(tamRun5.088, tamRun5.173))
+
+temp <- genos_clean %>%
+  select(tamRun5.351, tamRun5.367)
+temp2 <- genos10x %>%
+  select(tamRun5.351, tamRun5.367)
+
+twinChimerism_simp_summary
+
+test <- twinChimerism_allTwins_corrected %>%
+  filter(str_detect(locus, "SEXID"))
+
+test %>%
+  filter(twinID %in% c(21, 27)) %>%
+  group_by(twinID, animalID) %>%
+  summarise(
+    mean = mean(chimProp_c3)
+  )
+```
+
+
+# 7 Tables & figures
+
+## Table 3.1
+
+```{r}
+data_table3.1 <- read.csv("./DISSERTATION/ch3_chimerism/00_data/googleSheets_table3.1.csv") %>%
+  select(-c(n_females, n_males, Results, Fragment.analysis, Other, studyYear, X, X.1), -starts_with("Presence")) %>%
+  filter(Species != "unk") %>%
+  mutate(XX.XY.based = case_match(
+    XX.XY.based,
+    "X" ~ "yes",
+    NA ~ "no"
+  ))
+
+length(unique(data_table3.1$Citation)) # 15 unique papers
+
+table3.1 <- data_table3.1 %>%
+  gt() %>%
+  cols_label(
+    Species = md("**Species**"),
+    Sample.size = md("**Sample size**"),
+    Methods = md("**Method**"),
+    XX.XY.based = md("**Mixed-sex twins only?**"),
+    Citation = md("**Reference**")
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(style = "italic")
+    ),
+    locations = cells_body(
+      columns = Species
+    )
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = everything()
+  ) %>%
+  tab_footnote(
+    footnote = "In cases where multiple sample types were used in a study, we report only the sample size for blood samples.",
+    locations = cells_column_labels(columns = Sample.size)
+  ) %>%
+  tab_footnote(
+    footnote = "FISH: fluorescence in situ hybridization; qPCR: quantitative PCR; qfPCR: quantitative fluorescence PCR; STR: short tandem repeats; VNTR: variable number tandem repeats; WGS: whole genome sequencing",
+    locations = cells_column_labels(columns = Methods)
+  ) %>%
+  opt_footnote_marks(marks= "standard")
+table3.1
+
+table3.1 %>%
+  gtsave("./DISSERTATION/ch3_chimerism/02_results/00_tablesFigures/table3.1_calliChimerism.png")
+```
+
+## Table 3.2
+
+```{r}
+data_table3.2 <- read.csv("./DISSERTATION/ch3_chimerism/00_data/googleSheets_table3.2.csv") %>%
+  filter(methodType == "Molecular") %>%
+  select(Method, Markers, DNA.quantity, Sensitivity, Precision, mySource) %>%
+  filter(Method != "RFLP") %>%
+  select(-Precision)
+
+table3.2 <- data_table3.2 %>%
+  gt() %>%
+  cols_label(
+    Method = md("**Method**"),
+    Markers = md("**Markers**"),
+    DNA.quantity = md("**DNA quantity**"),
+    Sensitivity = md("**Sensitivity**"),
+    #Precision = md("**Precision**"),
+    mySource = md("**Reference**")
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = everything()
+  ) %>%
+  tab_footnote(
+    footnote = "dPCR: digital PCR; ddPCR: digital droplet PCR; qPCR: quantitative PCR; qfPCR: quantitative fluorescence PCR; STR: short tandem repeats; VNTR: variable number tandem repeats; WGS: whole genome sequencing",
+    locations = cells_column_labels(columns = Method)
+  ) %>%
+  tab_footnote(
+    footnote = "1. Blouin et al. 2021, 2. Picard et al. 2023, 3. Tozzo et al. 2021",
+    locations = cells_column_labels(columns = mySource)
+  ) %>%
+  opt_footnote_marks(marks= "standard")
+table3.2
+
+table3.2 %>%
+  gtsave("./DISSERTATION/ch3_chimerism/02_results/00_tablesFigures/table3.2_chimerismMethods.png")
+```
+
+
+## Table 3.5
+
+```{r}
+chimSums <- twinPairs_confirmed %>%
+  select(twinID, animalID_twin1, animalID_twin2) %>%
+  merge(., twinChimerism_summary[, c("animalID", "mean_chimProp_c3")], by.x = "animalID_twin1", by.y = "animalID") %>%
+  merge(., twinChimerism_summary[, c("animalID", "mean_chimProp_c3")], by.x = "animalID_twin2", by.y = "animalID", suffixes = c("_1", "_2")) %>%
+  mutate(chimSum = mean_chimProp_c3_1 + mean_chimProp_c3_2)
+
+# data for table
+data_table3.5_marker.typeCounts <- twinChimerism_allTwins_corrected %>%
   # 00, 01, 10, 11 = type 1, 20, 21 = type2
   mutate(broadType = case_when(
     chimType %in% c('type00', 'type01', 'type10', 'type11') ~ "type1",
@@ -1682,14 +2053,24 @@ count_typeI.II_markers <- twinChimerism_allTwins_corrected %>%
   mutate(total = sum(type1, type2, na.rm = T)) %>%
   merge(., twinPairs_confirmed_l[, c("animalID", "twinID", "species")], by = "animalID", all = T) %>%
   merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
-  mutate(animalID = str_c(animalID, sex, sep = "_")) %>%
-  select(-sex) %>%
   distinct() %>%
   relocate(species, twinID) %>%
-  arrange(species, as.numeric(twinID))
-count_typeI.II_markers
+  arrange(species, as.numeric(twinID)) %>%
+  merge(., twinChimerism_summary[, c("animalID", "mean_chimProp_c3")], by = "animalID", all.x = T) %>%
+  dplyr::rename("chimProp" = "mean_chimProp_c3") %>%
+  # add chimSums
+  merge(., chimSums[, c("twinID", "chimSum")], by = "twinID", all.x = T) %>%
+  # make new animalID (anonymous)
+  merge(., twinPairs_confirmed_l[, c("animalID", "twinID2")], by = "animalID", all.x = T) %>%
+  mutate(twinID2 = gsub("twin", "", twinID2)) %>%
+  mutate(temp = str_c(twinID, ".", twinID2, "_", sex),
+         animalID = temp) %>%
+  select(-sex, -twinID2, -temp) %>%
+  relocate(species, twinID, animalID)
+data_table3.5_marker.typeCounts
 
-table_count_typeI.II_markers <- count_typeI.II_markers %>%
+# gt table
+table3.5_marker.typeCounts <- data_table3.5_marker.typeCounts %>%
   mutate(species = case_when(
     species == "LWED" ~ "Saddleback tamarins",
     .default = "Emperor tamarins"
@@ -1699,7 +2080,9 @@ table_count_typeI.II_markers <- count_typeI.II_markers %>%
   mutate(twinID = ifelse(row_number() == 1, as.character(twinID), ""),
          .by = c(species, twinID)) %>% 
   mutate(species = ifelse(row_number() == 1, as.character(species), ""),
-         .by = species) %>% 
+         .by = species) %>%
+  #mutate(chimSum = ifelse(row_number() == 1, as.character(chimSum), ""),
+  #       .by = chimSum) %>%
   select(species, twinID, everything()) %>% 
   gt() %>%
   sub_missing(missing_text = '-') %>%
@@ -1709,14 +2092,28 @@ table_count_typeI.II_markers <- count_typeI.II_markers %>%
     species = md("**Species**"),
     twinID = md("**TwinID**"),
     animalID = md("**IndivID**"),
-    type1 = md("**Type I markers**"),
-    type2 = md("**Type II markers**"),
-    total = md("**Total markers**")
+    type1 = md("**Type-1 markers**"),
+    type2 = md("**Type-2 markers**"),
+    total = md("**Total markers**"),
+    chimProp = md("**Chimerism**"),
+    chimSum = md("**Sum twin chimerism**"),
   ) %>%
-  cols_align(., align = "center", columns = 2:6)
+  fmt_percent(
+    columns = c("chimProp", "chimSum"),
+    rows = everything(),
+    decimals = 2,
+    scale_values = T
+  ) %>%
+  cols_align(., align = "center", columns = 2:8) %>%
+  tab_footnote(
+    footnote = "Individual 27.2_F had no available blood sample for testing.",
+    locations = cells_body(columns = animalID, rows = 14)
+  ) %>%
+  opt_footnote_marks(marks= "standard")
+table3.5_marker.typeCounts
 
-table_count_typeI.II_markers %>%
-  gtsave("./DISSERTATION/ch3_chimerism/02_results/00_tablesFigures/table_count_typeI.II_markers.png", vwidth = 550)
+table3.5_marker.typeCounts %>%
+  gtsave("./DISSERTATION/ch3_chimerism/02_results/00_tablesFigures/table3.5_marker.typeCounts.png")
 ```
 
 ## Plots
@@ -1728,7 +2125,14 @@ library(ggpubr)
 twinID_levels <- unique(twinChimerism_allTwins_corrected$twinID)
 
 fig_nLoci.chimProp <- twinChimerism_allTwins_corrected %>%
-  group_by(twinID, animalID) %>%
+  mutate(species = case_match(
+    species,
+    "LWED" ~ "Saddlebacks",
+    "SIMP" ~ "Emperors"
+  ),
+  species = factor(species, levels = c("Saddlebacks", "Emperors"))
+  ) %>%
+  group_by(species, twinID, animalID) %>%
   mutate(twinID = factor(twinID, levels = twinID_levels)) %>%
   summarise(
     n_loci = n(),
@@ -1739,35 +2143,42 @@ fig_nLoci.chimProp <- twinChimerism_allTwins_corrected %>%
   geom_pointrange(aes(
     ymax = mean_chimProp + sd_chimProp,
     ymin = mean_chimProp - sd_chimProp
-  ),
-  position = position_jitter(width = 0.3),
-  size = 0.5) +
+    ),
+    #position = position_jitter(width = 0.3),
+    size = 1,
+    stroke = 1.5) +
   scale_shape_manual(values = c(1, 3, 5, 4, 0, 8, 2)) +
   scale_color_manual(values = my_colors) +
   scale_x_continuous(limits = c(0, 50)) +
   scale_y_continuous(limits = c(-10, 110), breaks = c(0, 25, 50, 75, 100)) +
-  theme_bw() +
+  theme_Publication_rv() +
   labs(x = "Number of informative markers",
        y = "Mean % chimerism",
        color = "TwinID",
-       shape = "TwinID")
+       shape = "TwinID") +
+  facet_grid(rows = vars(species)) +
+  theme(legend.position = "right")
 fig_nLoci.chimProp
 ```
 
-### genoSuccess vs. diff from 50% chimerism
+### genoSuccess vs. diff from popMean chimerism
 
 ```{r}
+# mean for both saddlebacks and emperor tamarins
+mean_chimProp_overall
+
 figData_genoPerformance.diff50p <- twinChimerism_allTwins_corrected %>%
-  group_by(twinID, animalID) %>%
+  group_by(species, twinID, animalID) %>%
+  mutate(twinID = factor(twinID, levels = twinID_levels)) %>%
   summarise(
     n_loci = n(),
     mean_chimProp_c3 = round(mean(chimProp_c3, na.rm = T), 2),
     sd_chimProp_c3 = round(sd(chimProp_c3), 2)
   ) %>%
   as.data.frame() %>%
-  mutate(diff = abs(0.5 - mean_chimProp_c3)) %>%
+  mutate(diff = abs(mean_chimProp_overall - mean_chimProp_c3)) %>%
   merge(., twinPairs_confirmed[, c("animalID_twin1", "animalID_twin2")], by.x = "animalID", by.y = "animalID_twin1", all.x = T) %>%
-  mutate(diff = abs(0.5 - mean_chimProp_c3)) %>%
+  mutate(diff = abs(mean_chimProp_overall - mean_chimProp_c3)) %>%
   merge(., twinPairs_confirmed[, c("animalID_twin1", "animalID_twin2")], by.x = "animalID", by.y = "animalID_twin2", all.x = T) %>%
   mutate(animalID_twin = coalesce(animalID_twin1, animalID_twin2),
          .keep = "unused") %>%
@@ -1782,10 +2193,41 @@ figData_genoPerformance.diff50p <- twinChimerism_allTwins_corrected %>%
     .default = genoSuccess.1
   ))
 
+# or... using actual geno counts
 figData_genoPerformance.diff50p %>%
-  ggplot(aes(x = gsCheck, y = diff, color = twinID)) +
-  geom_point(size = 3, stroke = 1.5)
+  mutate(minGenos = case_when(
+    totalGenos.1 > totalGenos.2 ~ totalGenos.2,
+    totalGenos.1 < totalGenos.2 ~ totalGenos.1,
+    .default = totalGenos.1
+  )) %>%
+  ggplot(aes(x = as.numeric(minGenos), y = diff, color = twinID, shape = twinID)) +
+  geom_point(size = 3, stroke = 1.5) +
+  scale_shape_manual(values = c(1, 3, 5, 4, 0, 8, 2)) +
+  scale_color_manual(values = my_colors) +
+  theme_Publication() +
+  theme(legend.position = "right") +
+  labs(x = "Number of loci genotyped",
+       y = "Difference from mean chimerism proportion",
+       color = "TwinID",
+       shape = "TwinID") +
+  scale_x_continuous(limits = c(0, 150), breaks = seq(0, 150, by = 25))
 
+
+
+
+# or again..
+figData_genoPerformance.diff50p %>%
+  select(twinID, mean_chimProp_c3, totalGenos.1, totalGenos.2) %>%
+  pivot_longer(-c(twinID, mean_chimProp_c3),
+               names_to = "whichTwin",
+               values_to = "totalGenos") %>%
+  ggplot(aes(x = totalGenos, y = mean_chimProp_c3, color = twinID)) +
+  geom_point()
+
+
+
+figData_genoPerformance.diff50p %>%
+  ggplot(aes(x = ))
 
 
   mutate(
@@ -1851,16 +2293,23 @@ figPlot_genoPerformance.diff50p
 Descriptive stats after ditching twin pairs w/poor genoSuccess:
 
 ```{r}
-temp <- figData_genoPerformance.diff50p %>%
-  filter(!gsCheck %in% c("gs<10%", "10<gs<20%"))
-
 twinChimerism_allTwins_corrected %>%
-  filter(twinID %in% temp$twinID) %>%
-  group_by(animalID) %>%
+  filter(!twinID %in% c(5, 22, 19)) %>%
+  group_by(species, animalID) %>%
   summarise(
-    n_loci = n(),
-    mean_chimProp_c3 = round(mean(chimProp_c3, na.rm = T), 2)
+    temp = mean(chimProp_c3)
   ) %>%
+  as.data.frame() %>%
+  group_by(species) %>%
+  summarise(
+    n_indiv = n(),
+    mean_chimProp_c3 = mean(temp, na.rm = T),
+    sd_chimProp_c3 = sd(temp),
+    min_chimProp_c3 = min(temp),
+    max_chimProp_c3 = max(temp)
+  )
+
+
   as.data.frame() %>%
   summarise(mean = mean(mean_chimProp_c3),
             sd = sd(mean_chimProp_c3))
@@ -2908,6 +3357,8 @@ max(gtscore.seq_simp_summary_final$mean_chimProp_gtscore)
 ```
 
 
+
+
 # SCRAPS
 
 ## Check ckmrSim r coefficients
@@ -3070,4 +3521,69 @@ twinPairs_blood_sampleList <- data.frame(
   sampleID_blood = c(twinPairs_run5$sampleID_blood_twin1, twinPairs_run5$sampleID_blood_twin2)
 ) %>%
   pull()
+```
+
+## 6.6 Trueness
+
+this stuff needs another look
+
+```{r}
+# avg HC est b/t type2.uc_vs_type1.c
+figData_mean.type2.uc_vs_mean.type1.c <- twinChimerism_allTwins_corrected %>%
+  mutate(
+    chimProp = case_when(
+      !chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp
+    ),
+    chimProp_c3 = case_when(
+      chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp_c3
+      )
+    ) %>%
+  group_by(animalID) %>%
+  summarise(
+    mean.type2.uc = mean(chimProp, na.rm = T),
+    mean.type1.c = mean(chimProp_c3, na.rm = T)
+  ) %>%
+  mutate(
+    diff = mean.type2.uc - mean.type1.c
+  )
+
+figData_mean.type2.uc_vs_mean.type1.c %>%
+  ggplot(aes(x = mean.type1.c, y = diff)) +
+  geom_point() +
+  ylim(-0.5, 0.5)
+
+# avg HC est b/t type2.c_vs_type1.c
+figData_mean.type2.c_vs_mean.type1.c <- twinChimerism_allTwins_corrected %>%
+  mutate(
+    chimProp = case_when(
+      !chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp
+    ),
+    chimProp_c3 = case_when(
+      chimType %in% c("type20", "type21") ~ NA,
+      .default = chimProp_c3
+      )
+    ) %>%
+  group_by(animalID) %>%
+  summarise(
+    mean.type2.c = mean(chimProp, na.rm = T),
+    mean.type1.c = mean(chimProp_c3, na.rm = T)
+  ) %>%
+  mutate(
+    diff = mean.type2.c - mean.type1.c
+  )
+
+figData_mean.type2.c_vs_mean.type1.c %>%
+  ggplot(aes(x = mean.type1.c, y = diff)) +
+  geom_point() +
+  ylim(-0.5, 0.5)
+
+
+twinChimerism_allTwins_corrected %>%
+  merge(., sampleRef[, c("animalID", "sex")], by = "animalID") %>%
+  distinct() %>%
+  group_by(sex) %>%
+  summarise(mean = mean(chimProp))
 ```
