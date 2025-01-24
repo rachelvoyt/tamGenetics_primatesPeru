@@ -1,4 +1,4 @@
-#/usr/bin/perl -w
+#!/home/rachelvoyt/perl5/perlbrew/perls/perl-5.38.0/bin/perl
 use Algorithm::Combinatorics qw(combinations);
 use strict;
 use Getopt::Long;
