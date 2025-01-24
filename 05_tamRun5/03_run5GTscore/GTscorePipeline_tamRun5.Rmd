@@ -12,11 +12,14 @@ knitr::opts_chunk$set(echo = TRUE)
 # 1 Packages
 
 ```{r load packages, include=FALSE}
-source("./GTscore_sourceScripts/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+source("./project_scripts/GTscore/GTscore_modified.R") # NOTE- added N=ATGC to script for later analyses (not included in original)
+source("./project_scripts/ravo_polygen.R") # my version of polygen script
+
 library(gsubfn)
 library(phylotools)
 library(TidyMultiqc)
 library(tidyverse)
+
 if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager", version = "3.16")
 BiocManager::install("Biostrings")
@@ -71,7 +74,7 @@ md_tamRun5_v5 <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv")
 
 For this run, we need to create the metadata files from scratch. We can use the extraction lists from the tamGenetics_ot2InputFiles.Rmd and merge it with the full extraction list to add metadata.
 
-##### Extractions included in run
+#### Extractions included in run
 
 ```{r}
 # all xtns
@@ -165,7 +168,7 @@ tamRun5_xtns_allSamples <- rbind(
   filter(!str_detect(xtnID, "Neg"))
 ```
 
-##### Add metadata
+#### Add metadata
 
 **NOTE** that sex for tamRun5.302 is missing in metadata; should be M -- adjust below:
 
@@ -230,6 +233,8 @@ write.csv(md_tamRun5, "./05_tamRun5/03_run5GTscore/tamRun5_metadata.csv", row.na
 
 ## 3.1 Download sequences from BaseSpace
 
+### tamRun5a
+
 To download all sample files, it's easiest to use the BaseSpace Command Line Interface (CLI).
 
 To install, follow the scripts provided here: <https://developer.basespace.illumina.com/docs/content/documentation/cli/cli-overview>
@@ -253,7 +258,7 @@ bs download project -i 384884910 -o /home/rachelvoyt/Documents/UT-Grad/Developme
 bs download project -i 374582211 -o /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/03_tamRun3/00_run3Seqs/unindexedReads --extension=fastq.gz
 ```
 
-## 3.2 Extract fast.gz files
+Then extract the files:
 
 ```{bash Extract sequencing results, eval = FALSE}
 # Navigate to the directory containing the .fastq.gz files from the sequencing run
@@ -267,24 +272,73 @@ find -empty -delete
 gunzip -r .
 ```
 
-## 3.3 Merge the two runs
+And adjust filenames:
 
-```{bash}
+```{r}
 # Trim filenames to make them more manageable
 for f in *R1_001.fastq; do g="${f%%_S*}_R1.fastq"; mv "${f}" "${g}"; done
 for f in *R2_001.fastq; do g="${f%%_S*}_R2.fastq"; mv "${f}" "${g}"; done
 
 # Edit first run filenames to be tamRun5a (repeat for runb if needed)
 rename 's/tamRun5/tamRun5a/' *.fastq
+```
+
+### tamRun5b
+
+For tamRun5b, I had access to the run data but not the fastq files, so I opted to download the run data and regenerate the fastq files by installing and using bcl2fastq following <https://support.parsebiosciences.com/hc/en-us/articles/360058912372-Generating-fastq-files-with-bcl2fastq>.
+
+First I acquired the run ID from the url -- 285748489, then created the fastq files:
+
+```{bash}
+# directory
+cd /home/rachelvoyt/Documents/UT-Grad/Development/repos/tamGenetics_primatesPeru/05_tamRun5/00_run5b_basespaceData
+
+# download run data
+bs run download --id 285748489 -o .
+
+# convert bcl to fastq files
+mkdir fastq_files
+bcl2fastq -i Data/Intensities/BaseCalls/ --output-dir fastq_files
+
+# got "Too many open files" error -- check limit; increase limit
+ulimit -n # 1024
+ulimit -n 4096
+
+# re-run - success!
+bcl2fastq -i Data/Intensities/BaseCalls/ --output-dir fastq_files
+
+# extract fastq.gz files
+gunzip -r .
+
+# trim filenames to make them more manageable
+cd fastq_files/tamGenetics/
+for f in *R1_001.fastq; do g="${f%%_S*}_R1.fastq"; mv "${f}" "${g}"; done
+for f in *R2_001.fastq; do g="${f%%_S*}_R2.fastq"; mv "${f}" "${g}"; done
+
+# edit run filenames to be tamRun5b
+rename 's/tamRun5/tamRun5b/' *.fastq
+
+# copy files to run5Seqs
+cd ./../../../
+cp ./00_run5b_basespaceData/fastq_files/tamGenetics/tamRun* 00_run5Seqs
+```
+
+## 3.3 Merge the two runs
+
+```{bash}
+cd 00_run5Seqs
+
+# adjust - to _ in tamRun5a filenames
+rename 's/tamRun5a-/tamRun5a_/' *.fastq
 
 # Create tamRun5ab merged fastq files
-for i in tamRun5a-*; do 
+for i in tamRun5a_*; do 
     f=${i##*tamRun5a}; 
     cat $i tamRun5b$f > tamRun5cat$f; 
 done
 
 # Check to see that total runs in tamRun5cat matches tamRun5a + tamRun5b
-for i in tamRun5a-*; do 
+for i in tamRun5a_*; do 
     f=${i##*tamRun5a}; 
     
     # Calculate the number of reads in the concatenated file
@@ -311,7 +365,7 @@ Note that we have interleaved files for tamRun3, tamRun3b, and the merged versio
 # Interleave reads 1 & 2 for each sample and place in a new folder
 cd ./../
 
-for i in ./00_run5Seqs/*_R1_001.fastq; do name=$(basename $i _R1_001.fastq); reformat.sh in=00_run5Seqs/${name}_R1_001.fastq in2=00_run5Seqs/${name}_R2_001.fastq out=02_run5Interleaved/${name}_interleaved.fastq; done
+for i in ./00_run5Seqs/*_R1.fastq; do name=$(basename $i _R1.fastq); reformat.sh in=00_run5Seqs/${name}_R1.fastq in2=00_run5Seqs/${name}_R2.fastq out=02_run5Interleaved/${name}.fastq; done
 ```
 
 # 4 Quality checks
@@ -525,9 +579,14 @@ Once the files are created, we can proceed with the first step in the GTscore pi
 
 ```{r count reads for amplicons, eval=FALSE}
 # all samples, all loci (includes negatives)
-system2("perl",
-        args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./primerProbeFile_panelv3_fullSet.txt --files ./05_tamRun5/03_run5GTscore/run5a_sampleFiles_fullSet.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5a_fullSet_")
+system2("/home/rachelvoyt/perl5/perlbrew/perls/perl-5.38.0/bin/perl",
+        args="./project_scripts/GTscore/AmpliconReadCounter_modified.pl -p ./project_data/primerProbeFile_panelv3_fullSet.txt --files ./05_tamRun5/03_run5GTscore/run5b_sampleFiles_fullSet.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5b_fullSet_")
 
+system2("/home/rachelvoyt/perl5/perlbrew/perls/perl-5.38.0/bin/perl",
+        args="./project_scripts/GTscore/AmpliconReadCounter_modified.pl -p ./project_data/primerProbeFile_panelv3_fullSet.txt --files ./05_tamRun5/03_run5GTscore/run5cat_sampleFiles_fullSet.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5cat_fullSet_")
+
+
+## skipped updating below
 # pos samples (no negs), dual loci
 system2("perl",
         args="./project_scripts/GTscore_AmpliconReadCounter_modified.pl -p ./project_data/primerProbeFile_panelv3_dual.txt --files ./05_tamRun5/03_run5GTscore/run5a_sampleFiles_pos.txt --inDir ./05_tamRun5/02_run5Interleaved/ --outDir ./05_tamRun5/03_run5GTscore/ --prefix run5a_posDual_")
@@ -558,6 +617,22 @@ The default names for these files are as follows, with LWED and SIMP appended to
 -   GTscore_locusSummary.txt - counts by locus of primer reads and primer probe reads
 
 # 6 Genotyping
+
+Using a 10x read depth cutoff for genotyping via my modified version of the gtscore script (located in ravo_polygen.R)
+
+```{r}
+#load locus table and allele reads file
+fullSet_singleSNP_locusTable <- read.delim("./05_tamRun5/03_run5GTscore/run5cat_fullSet_LocusTable_singleSNPs.txt", header = TRUE, stringsAsFactors = FALSE)
+
+fullSet_singleSNP_alleleReads <- read.delim("./05_tamRun5/03_run5GTscore/run5cat_fullSet_AlleleReads_singleSNPs.txt", header = TRUE, row.names = 1, stringsAsFactors = FALSE)
+
+#generate singleSNP genotypes using the polyGen algorithm, adjust "0" formatting
+fullSet_polyGenResults <- polyGen_rv(fullSet_singleSNP_locusTable, fullSet_singleSNP_alleleReads, depthCutoff = 10)
+
+# write results
+write.table(fullSet_polyGenResults, "./05_tamRun5/03_run5GTscore/run5cat_fullSet_polyGenResults_singleSNP_10x.txt", quote = FALSE, sep = "\t")
+```
+
 
 Genotyping by sequencing generally requires a minimum of 10x coverage to be considered reliable, though others implement even higher cutoffs (e.g., Bootsma et al. (2020), who also used the GTscore PolyGen script for genotyping, added a 30x cutoff). However, the GTscore genotyping script doesn't include this cutoff, and will provide genotypes with as little as one read per allele for heterozygous calls and 3 reads (vs. 0) for a homozygous call.
 
