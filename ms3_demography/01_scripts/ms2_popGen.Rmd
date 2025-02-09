@@ -1,0 +1,1015 @@
+---
+title: "ms2_popGen"
+author: "Rachel Voyt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1 Overview
+
+# 2 Packages
+
+```{r}
+library(adegenet)
+library(tidyverse)
+
+source("./project_scripts/ravo_ch2Scripts.R")
+source("./project_scripts/ravo_gtScripts.R")
+source("./project_scripts/GTscore/GTscore_modified.R")
+```
+
+# 3 Data
+
+## 3.1 metadata
+
+```{r}
+md <- read.csv("./metadataReconciliation/tamRun5_metadata_v5.csv") %>%
+  mutate(captureYear = str_sub(captureDate, 1, 4)) %>%
+  relocate(captureYear, .after = captureDate)
+
+md_hairOnly <- md %>%
+  filter(sampleType == "hair")
+
+sampleRef <- read.csv("./project_data/master_sampleInfo.csv")
+
+lociRef <- read.csv("./project_data/master_lociInfo.csv")
+```
+
+## capHist
+
+Filtered to 2009-2019 only
+
+```{r}
+capHist_2009to2019 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureHistories_byIndiv_2009to2023.csv", colClasses = "character") %>%
+  # filter to 2009-2019 only
+  mutate(ch = str_sub(ch, 1, 11)) %>%
+  filter(ch != "00000000000")
+```
+
+## genos
+
+```{r}
+genos <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T, na.strings = "0") %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  select(contains("tamRun5cat"))
+# ditch the "cat"
+names(genos) <- gsub("tamRun5cat", "tamRun5", names(genos))
+```
+
+## birth/death year
+
+I had here to recode animalID 90 as juv, but based on weights plus the fact that nipple measures suggest she'd be parous at 1 years old, I really doubt this is the case
+
+60 and 62 are NOT twins!! 
+- 60 birthEst = 2011-09-17
+- 62 birthEst = 2012-01-15
+
+```{r}
+birthData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/birthAssignments_capData_tamRun5_v3.csv") #%>%
+  # edit for animalID 90 ageClass recode to juvenile 
+#  mutate(
+#    age_capData = case_when(
+#      animalID == 90 ~ "juvenile",
+#      .default = age_capData
+#    ),
+#    birthYear_est = case_when(
+#      animalID == 90 ~ 2010,
+#      .default = birthYear_est
+#    )
+#  )
+
+birthAssignments <- birthData %>%
+  select(species, groupName, animalID, birthDate_est, birthYear_est) %>%
+  filter(!is.na(birthYear_est)) %>%
+  distinct() %>%
+  arrange(species, groupName, birthDate_est)
+
+deathData <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/deathAssignments_capData_tamRun5_v1.csv")
+
+deathAssignments <- deathData %>%
+  select(animalID, deathYear_est) %>%
+  na.omit() %>%
+  distinct() %>%
+  arrange(animalID) %>%
+  mutate(animalID = as.character(animalID))
+```
+
+## capData
+
+Capture data includes all records of individual captures from 2009-2019.
+
+Use the latest version of capData_byIndiv (from
+tamGenetics_paper3_dataOrganization), then 1) filter to first capture
+for each animalID 2) filter again to animalIDs in tamRun5
+
+**note** exclude those in capData w/"UNK" animalID; did a lot of digging
+in ch2_dataOrganization.Rmd and most likely these entries need to be
+ditched
+
+```{r}
+capData_2009to2023 <- read.csv("./DISSERTATION/ch2_demography/00_data/01_demoData_clean/captureData_byIndividual_v6.csv") %>%
+  # ditch UNK animalIDs
+  filter(animalID != "UNK") %>%
+  mutate(
+    captureYear = str_sub(captureDate, 1, 4),
+    captureYear = as.numeric(captureYear)
+  ) %>%
+  relocate(captureYear, .after = captureDate)
+  # adjust rowID 1 ageClass to "UNK" >> keep as adult for now
+  #mutate(
+  #  ageClass = case_when(
+  #    rowID == 1 ~ "UNK",
+  #    .default = ageClass
+  #  )
+  #)
+
+capData_2009to2019 <- capData_2009to2023 %>%
+  filter(rowID <= 613)
+```
+
+# 5 Filter genos
+
+Prior to using genotyping results in additional analyses, I'm using the
+following filters for quality control:
+
+1.  Species mismatches - remove any that conflict w/metadata
+2.  Sex mismatches - remove any where majority of sex loci conflict
+    w/metadata
+3.  Duplicates - for any duplicate pairs identified, remove the sample
+    with lower geno success
+4.  Separate genos by species & filter loci to retain only those for individual identification, then (following Arpin et al. 2024):
+    1.  Remove loci with \>50% missing data
+    2.  Remove samples with \>50% missing data
+    3.  Remove loci with minor allele freq \<0.03
+
+## 5.1 Species/sex checks
+
+### species checks
+
+4 species mismatches, though each was genotyped at only one locus - will
+probably get filtered out when ditching poorly performing loci/samples
+
+```{r}
+genos_forChecks <- genos %>%
+  # subset to hair samples
+  select(md[md$species %in% c("LWED", "SIMP") & md$sampleType == "hair", "sampleID"])
+
+speciesChecks <- assignSpecies(genos_forChecks, md, "sampleID")
+
+toRemove_speciesChecks <- speciesChecks %>%
+  filter(mdMatch == F) %>%
+  select(sampleID) %>%
+  pull()
+```
+
+### sex checks
+
+15 sex mismatches, though 12 of these are MIX. Vast majority clear up if
+go by the majority of calls -- not terribly worried about it though, bc
+when I tried before to first ditch poorly performing samples and then
+run assignSex, only got 3 mismatches and all were MIX (one 50/50, two
+with majority correct).
+
+--just checked the sampleSummary for the samples where mdMajMatch were
+either F or NA -- all of these had shit genoSuccess so they'll be
+ditched regardless
+
+```{r}
+# run sexChecks (can use same geno file as speciesChecks)
+sexChecks <- assignSex(genos_forChecks, md, "sampleID", exclude_nonTargetSp = "yes") %>%
+  filter(mdMatch == FALSE) %>%
+  mutate(
+    majSex = case_when(
+      propF > propM ~ "F",
+      propM > propF ~ "M",
+      .default = NA
+    ),
+    mdMajMatch = mdSex == majSex
+  ) %>%
+  relocate(c(majSex, mdMajMatch), .after = "mdSex")
+
+toRemove_sexChecks <- sexChecks %>%
+  filter(mdMajMatch == F | is.na(mdMajMatch)) %>%
+  select(sampleID) %>%
+  pull()
+```
+
+## 5.2 Dup checks
+
+Here I'm using my version of the GTscore "IDduplicateSamples" function;
+I modified it only slightly so that I could use a dataframe as input vs.
+the polygen output.
+
+Results show tamRun5.211/tamRun5.264 as the only likely duplicate pair -
+this is the set that I already caught in metadataReconciliation.Rmd for
+animalID 200
+
+**tamRun5.211 has the higher genotype success -- ditch tamRun5.264**
+
+```{r}
+run5_dupTest <- get_dupSamples(genos_forChecks)
+
+# view likely dups - only one pair (tamRun5.211/tamRun5.264)
+run5_likelyDups <- run5_dupTest %>%
+  filter(proportionCommon >= 0.5) %>%
+  filter(proportionMatch > 0.9)
+run5_likelyDups
+
+View(md %>% filter(sampleID %in% c(run5_likelyDups$Sample1, run5_likelyDups$Sample2)))
+
+# tamRun5.211 has the higher genotype success -- ditch tamRun5.264
+run5_sampleSum <- read.csv("./05_tamRun5/03_run5GTscore/summaryFiles/master_sampleSummary_10x.csv")
+
+run5_sampleSum %>% filter(Sample %in% c(run5_likelyDups$Sample1, run5_likelyDups$Sample2)) %>% select(Sample, GenotypeRate)
+
+toRemove_dupChecks <- "tamRun5.264"
+```
+
+## 5.3 Poor performance
+
+I found that some of the loci that were supposed to be sex-specific
+sometimes showed some variation in the other species -- as such, I'm
+opting to ignore the species designation for INDID SNPs and instead add
+a blanket filter to remove any loci whose minAF is less than 0.03
+(following Arpin et al. 2024, who used this cutoff)
+
+First though, apply filters based on species/sex checks, dupChecks, and
+genotype success--
+
+```{r}
+lwed_genos_temp <- genos %>%
+  # subset to hair + INDID only
+  select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  filter(!str_detect(rownames(.), "SEXID|SPECIESID")) %>%
+  t() %>%
+  as.data.frame() %>%
+  # 1. remove any species/sex mismatches
+  filter(!rownames(.) %in% toRemove_speciesChecks) %>%
+  filter(!rownames(.) %in% toRemove_sexChecks) %>%
+  # 2. remove any dups
+  filter(!rownames(.) %in% toRemove_dupChecks) %>%
+  # 3. remove SNPs with >50% missing data
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.5)) %>%
+  # 4. remove samples with >50% missing data
+  filter((rowSums(!is.na(.)) / ncol(.)) >= 0.5)
+
+simp_genos_temp <- genos %>%
+  # subset to hair + INDID only
+  select(md[md$species == "SIMP" & md$sampleType == "hair", "sampleID"]) %>%
+  filter(!str_detect(rownames(.), "SEXID|SPECIESID")) %>%
+  t() %>%
+  as.data.frame() %>%
+  # 1. remove any species/sex mismatches
+  filter(!rownames(.) %in% toRemove_speciesChecks) %>%
+  filter(!rownames(.) %in% toRemove_sexChecks) %>%
+  # 2. remove any dups
+  filter(!rownames(.) %in% toRemove_dupChecks) %>%
+  # 3. remove SNPs with >50% missing data
+  select(where(~sum(!is.na(.x))/length(.x) >= 0.5)) %>%
+  # 4. remove samples with >50% missing data
+  filter((rowSums(!is.na(.)) / ncol(.)) >= 0.5)
+```
+
+Then use these genos to check and filter based on minAF
+
+**LWED**
+
+```{r}
+locusTable <- read.table("./05_tamRun5/03_run5GTscore/fullSet_LocusTable_singleSNPs.txt", header = T) %>%
+  mutate(
+    Locus_ID = sub('[_][^_]+$', '', Locus_ID)
+  )
+
+lwed_locusTable <- locusTable %>%
+  filter(Locus_ID %in% colnames(lwed_genos_temp))
+
+lwed_readCounts_forFreqChecks <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt") %>%
+  select(contains("tamRun5cat")) %>%
+  `colnames<-`(sub('tamRun5cat', 'tamRun5', colnames(.))) %>%
+  select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(rownames(.) %in% colnames(lwed_genos_temp)) %>%
+  select(rownames(lwed_genos_temp))
+
+lwed_genos_forFreqChecks <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  select(contains("tamRun5cat")) %>%
+  `colnames<-`(sub('tamRun5cat', 'tamRun5', colnames(.))) %>%
+  select(md[md$species == "LWED" & md$sampleType == "hair", "sampleID"]) %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(rownames(.) %in% colnames(lwed_genos_temp)) %>%
+  select(rownames(lwed_genos_temp))
+
+lwed_alleleFreqs <- summarizeGTscore(lwed_readCounts_forFreqChecks, lwed_locusTable, lwed_genos_forFreqChecks)
+
+lwed_toRemove_afChecks <- lwed_alleleFreqs %>%
+  filter(minAF < 0.03) %>%
+  select(Locus_ID) %>%
+  pull()
+```
+
+**SIMP**
+
+```{r}
+simp_locusTable <- locusTable %>%
+  filter(Locus_ID %in% colnames(simp_genos_temp))
+
+simp_readCounts_forFreqChecks <- read.table("./05_tamRun5/03_run5GTscore/fullSet_AlleleReads_singleSNPs.txt") %>%
+  select(contains("tamRun5cat")) %>%
+  `colnames<-`(sub('tamRun5cat', 'tamRun5', colnames(.))) %>%
+  select(md[md$species == "SIMP" & md$sampleType == "hair", "sampleID"]) %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(rownames(.) %in% colnames(simp_genos_temp)) %>%
+  select(rownames(simp_genos_temp))
+
+simp_genos_forFreqChecks <- read.table("./05_tamRun5/03_run5GTscore/fullSet_polyGenResults_singleSNP_10x.txt", header = T) %>%
+  select(contains("tamRun5cat")) %>%
+  `colnames<-`(sub('tamRun5cat', 'tamRun5', colnames(.))) %>%
+  select(md[md$species == "SIMP" & md$sampleType == "hair", "sampleID"]) %>%
+  `rownames<-`(sub('[_][^_]+$', '', rownames(.))) %>%
+  filter(rownames(.) %in% colnames(simp_genos_temp)) %>%
+  select(rownames(simp_genos_temp))
+
+simp_alleleFreqs <- summarizeGTscore(simp_readCounts_forFreqChecks, simp_locusTable, simp_genos_forFreqChecks)
+
+simp_toRemove_afChecks <- simp_alleleFreqs %>%
+  filter(minAF < 0.03) %>%
+  select(Locus_ID) %>%
+  pull()
+```
+
+## 5.4 Final genos
+
+### genos
+
+```{r}
+lwed_genos <- lwed_genos_temp %>%
+  select(!all_of(lwed_toRemove_afChecks)) %>%
+  rownames_to_column("sampleID") %>%
+  mutate(pop = "LWED") %>%
+  merge(., md[, c("animalID", "sampleID", "sex", "captureYear")], by = "sampleID", all.x = T) %>%
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  relocate(sampleID, animalID, sex, birthYear_est, pop, captureYear)
+
+simp_genos <- simp_genos_temp %>%
+  select(!all_of(simp_toRemove_afChecks)) %>%
+  rownames_to_column("sampleID") %>%
+  mutate(pop = "SIMP") %>%
+  merge(., md[, c("animalID", "sampleID", "sex", "captureYear")], by = "sampleID", all.x = T) %>%
+  merge(., birthAssignments[, c("animalID", "birthYear_est")], by = "animalID", all.x = T) %>%
+  relocate(sampleID, animalID, sex, birthYear_est, pop, captureYear)
+```
+
+### genind
+
+```{r}
+lwed_genind <- adegenet::df2genind(X = lwed_genos[,c(7:79)],
+                                  sep = ",",
+                                  ind.names = lwed_genos$sampleID,
+                                  pop = lwed_genos$pop,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+lwed_genind@other$sex <- lwed_genos$sex
+lwed_genind@other$birthYear <- lwed_genos$birthYear_est
+lwed_genind@other$captureYear <- lwed_genos$captureYear
+
+simp_genind <- adegenet::df2genind(X = simp_genos[,c(7:73)],
+                                  sep = ",",
+                                  ind.names = simp_genos$sampleID,
+                                  pop = simp_genos$pop,
+                                  NA.char = "NA",
+                                  ploidy = 2,
+                                  type = "codom")
+simp_genind@other$sex <- simp_genos$sex
+simp_genind@other$birthYear <- simp_genos$birthYear_est
+simp_genind@other$captureYear <- simp_genos$captureYear
+```
+
+## 5.5 Quick overview of filtered geno data:
+
+Retained LWED data include...
+  - 72 indivs + 73 loci (vs 72/53 w/just run5a)
+  - avg 95% geno (vs. 94% w/just run5a)
+success among samples
+  - 44 non-juvs, 28 juvs
+
+Retained SIMP data include...
+  - 56 indivs + 67 loci (vs. 55/48 run5a)
+  - avg 94% geno (vs. 93%)
+success among samples - 28 non-juvs, 28 juvs
+
+```{r}
+# LWED
+lwed_genind
+mean(propTyped(lwed_genind, by = "ind")) # 0.9360587 > 0.9533866 (cat)
+median(propTyped(lwed_genind, by = "ind")) # 1
+
+sum(is.na(lwed_genos$birthYear_est)) # 43 > 44 non-juvs remaining
+sum(!is.na(lwed_genos$birthYear_est)) # 29 > 28 juvs remaining
+
+# SIMP
+simp_genind
+mean(propTyped(simp_genind, by = "ind")) # 0.932197 > 0.9389659
+median(propTyped(simp_genind, by = "ind")) # 1
+
+sum(is.na(simp_genos$birthYear_est)) # 27 > 28 non-juvs remaining
+sum(!is.na(simp_genos$birthYear_est)) # 28 > 28 juvs remaining
+```
+
+# 4 Relatedness
+
+Using package "related"
+
+```{r}
+library(related) # install from tar.gz
+```
+
+## Prep data
+
+To do so, first I need to create data subsets for each year of the study, saying who was in what group each year.
+
+**LWED**
+
+```{r}
+source("./project_scripts/ravo_ch2Scripts.R")
+# first find the indivs we need
+lwed_popData_perYear_allIndivs <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "LWED",
+  whichYears = 2009:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = F)
+
+# now get the geno data for each subset
+## format genos for related
+## get geno data for all indivs present in each year
+lwed_genos_forRelated <- get_genos_perYear(
+  genoData_df = lwed_genos,
+  genos_startCol = 7,
+  popData = lwed_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  outputFormat = "related")
+```
+
+**SIMP**
+
+```{r}
+# first find the indivs we need
+simp_popData_perYear_allIndivs <- get_popData_byYear(
+  capData = capData_2009to2019,
+  whichSpecies = "SIMP",
+  whichYears = 2011:2019,
+  whichAnimalIDs = "with_hairSamples",
+  md_genoData = md,
+  birthData = birthData[, c("animalID", "birthDate_est", "birthYear_est")],
+  adultsOnly = F)
+
+# now get the geno data for each subset
+## format genos for related
+## get geno data for all indivs present in each year
+simp_genos_forRelated <- get_genos_perYear(
+  genoData_df = simp_genos,
+  genos_startCol = 7,
+  popData = simp_popData_perYear_allIndivs,
+  sampleRef = sampleRef,
+  outputFormat = "related")
+```
+
+## Compare estimators
+
+Just lwed for now for speed. Comparing:
+
+Point estimators:
+  - quellergt: Queller & Goodnight (1989)
+  - wang: Wang (2002)
+
+Max-likelihood estimators:
+  - dyadml: dyadic likelihood estimator, Milligan (2003)
+  - trioml: triadic likelihood estimator, Wang (2007)
+  
+Side note - I just found that someone created an extended version of the compareestimators function to allow for all estimators to be compared instead of just point estimators. I'm not going to rerun, but putting this here for futuer: https://github.com/James-ODwyer/related_extended_function/blob/main/related_functions_over_100_loci.R 
+
+Winner = dyadml
+
+```{r}
+# set up inputs
+rel_input_lwed <- lwed_genos_forRelated$`2015`$genoData %>%
+  `names<-`(NULL) %>%
+  readgenotypedata(.)
+
+rel_simdata_lwed <- familysim(rel_input_lwed$freqs, 100)
+
+# run coancestry (use option 1 for now to skip CIs)
+#rel_output_lwed <- coancestry(rel_simdata_lwed,
+#                              dyadml = 1,
+#                              trioml = 1, 
+#                              quellergt = 1,
+#                              wang = 1)
+
+# export to save on memory
+saveRDS(rel_output_lwed, "./ms2_demography/02_results/estComps_output_lwed.rds")
+
+# quick-load coancestry output file
+rel_output_lwed <- readRDS("./ms2_demography/02_results/estComps_output_lwed.rds")
+
+# clean up rvals to include only the original 100 desired values for each relationship type
+simrel_lwed <- cleanuprvals(rel_output_lwed$relatedness, 100)
+
+# set up expected relatedness values for comparison (following order used in package tutorial)
+relvals <- c(
+  rep(0.5, 100),  # poval
+  rep(0.5, 100),  # fsval
+  rep(0.25, 100), # hsval
+  rep(0, 100)     # urval
+  )
+
+# this is what I used before, but doesn't match the order in the package tutorial; fixed it above
+#relvals <- c(rep(0, 100), # unrelated values
+#             rep(0.25, 100), # half-sibs
+#             rep(0.5, 100), # full-sibs
+#             rep(0.5, 100)) # parent-offspring
+
+# calculate Pearson's correlation coefficient for exp vs. obs values for each estimator (lwed 2015)
+quellergtcor_lwed <- cor.test(relvals, simrel_lwed$quellergt, method = "pearson") # 0.900416
+wangcor_lwed <- cor.test(relvals, simrel_lwed$wang, method = "pearson") # 0.899043
+dyadmlcor_lwed <- cor.test(relvals, simrel_lwed$dyadml, method = "pearson") # 0.9123804
+triomlcor_lwed <- cor.test(relvals, simrel_lwed$trioml, method = "pearson") # 0.9121987
+
+# dyadml = highest correlation coefficient (closely followed by trioml)
+data.frame(
+  estimator = c("QG", "Wang", "dyadml", "trioml"),
+  cor_lwed = c(quellergtcor_lwed$estimate,
+               wangcor_lwed$estimate,
+               dyadmlcor_lwed$estimate,
+               triomlcor_lwed$estimate)
+) %>%
+  arrange(desc(cor_lwed))
+```
+
+**Check other point estimators**
+
+I didn't originally include the other point estimators lynchli, lynchrd, and ritland in the run above; rather than re-running (since this takes HOURS when the ML estimators are included), I'm running another comparison below just with the point estimators.
+
+```{r}
+# compare all point estimators
+rel_output_lwed_ptOnly <- coancestry(rel_simdata_lwed,
+                                     lynchli = 1,
+                                     lynchrd = 1,
+                                     ritland = 1,
+                                     quellergt = 1,
+                                     wang = 1)
+
+# clean up rvals
+simrel_lwed_ptOnly <- cleanuprvals(rel_output_lwed_ptOnly$relatedness, 100)
+
+# compare correlation values
+lynchlicor_lwed_ptOnly <- cor.test(relvals,
+                                   simrel_lwed_ptOnly$lynchli,
+                                   method = "pearson")
+lynchrdcor_lwed_ptOnly <- cor.test(relvals,
+                                   simrel_lwed_ptOnly$lynchrd,
+                                   method = "pearson") # 0.8952412 
+ritlandcor_lwed_ptOnly <- cor.test(relvals,
+                                   simrel_lwed_ptOnly$ritland,
+                                   method = "pearson")
+quellergtcor_lwed_ptOnly <- cor.test(relvals,
+                                     simrel_lwed_ptOnly$quellergt,
+                                     method = "pearson")
+wangcor_lwed_ptOnly <- cor.test(relvals,
+                                simrel_lwed_ptOnly$wang,
+                                method = "pearson")
+
+# include both rounds of comparisons; dyadml still comes out on top
+data.frame(
+  estimator = c(
+    "qg1", "wang1", "dyadml", "trioml",
+    "qg2", "wang2", "lynchli", "lynchrd", "ritland"
+    ),
+  cor_lwed = c(
+    # first round of comparisons
+    quellergtcor_lwed$estimate,
+    wangcor_lwed$estimate,
+    dyadmlcor_lwed$estimate,
+    triomlcor_lwed$estimate,
+    # second round of comparisons
+    quellergtcor_lwed_ptOnly$estimate,
+    wangcor_lwed_ptOnly$estimate,
+    lynchlicor_lwed_ptOnly$estimate,
+    lynchrdcor_lwed_ptOnly$estimate,
+    ritlandcor_lwed_ptOnly$estimate
+    )
+) %>%
+  arrange(desc(cor_lwed))
+```
+
+**What if we account for inbreeding?**
+
+Estimators that can account for inbreeding include dyadml, trioml, lynchrd, and ritland. Test w/lynchrd and ritland only.
+
+```{r}
+rel_output_lwed_inbTest <- coancestry(rel_simdata_lwed,
+                                      allow.inbreeding = T,
+                                      lynchrd = 1,
+                                      ritland = 1)
+
+simrel_lwed_inbTest <- cleanuprvals(rel_output_lwed_inbTest$relatedness, 100)
+
+# values are no different than when allow.inbreeding = F
+cor.test(relvals,
+         simrel_lwed_inbTest$lynchrd,
+         method = "pearson") # 0.8952412 
+cor.test(relvals,
+         simrel_lwed_inbTest$ritland,
+         method = "pearson") # 0.8640683
+```
+
+**Plots**
+
+dyadml also shows best differentiation b/t relationship types in density plots
+
+```{r}
+# long-format data
+simrel_lwed_l <- simrel_lwed %>%
+  select(-c(pair.no, ind1.id, ind2.id, lynchli, lynchrd)) %>%
+  pivot_longer(-group,
+               names_to = "Estimator",
+               values_to = "Relatedness_Value") %>%
+  mutate(
+    Estimator = case_match(
+      Estimator,
+      "trioml" ~ "tri",
+      "wang" ~ "w",
+      "ritland" ~ "rit",
+      "quellergt" ~ "qg",
+      "dyadml" ~ "di"
+      ),
+    group = case_match(
+      group,
+      "POPO" ~ "Parent-offspring",
+      "SBSB" ~ "Full-sibs",
+      "HSHS" ~ "Half-sibs",
+      "URUR" ~ "Unrelated"
+      )
+    ) %>%
+  dplyr::rename("relationship" = "group")
+
+# boxplots
+ggplot(simrel_lwed_l, aes(x = Estimator, y = Relatedness_Value), ylim = c(-0.5, 1)) +
+  geom_boxplot() +
+  facet_wrap(~relationship)
+
+# density plot
+simrel_lwed_l %>%
+  ggplot(aes(x = Relatedness_Value,
+             group = relationship,
+             fill = relationship)) +
+  geom_density(adjust = 1.5, alpha = 0.4) +
+  facet_wrap(~Estimator)
+```
+
+## Get relatedness estimates
+
+### Define function
+
+Function does the following:
+  - separately for each year, uses the dyadml estimator to estimate 1) relatedness coefficient, 2) delta7, 3) delta8, 4) inbreeding coefficient, & 5) corresponding CIs
+  - outputs list of two dataframes containing results for all years, including one for relatedness metrics and the other for inbreeding metrics
+  
+**NOTE:** According to the package documentation & tutorial, setting allow.inbreeding = TRUE should result in relatedness estimates with inbreeding taken into account. Doing so results in an inbreeding dataframe that only contains LH (Li & Horvitz (1953) method, as modified by Ritland (1996)) and LR (Lynch & Ritland (1999)) estimates, which are apparently calculated automatically regardless of how allow.inbreeding is set. However, if we're using dyadml with inbreeding, we should be getting a column with "L2" values - but we don't get that unless allow.inbreeding = FALSE. This suggests that to actually incorporate inbreeding, allow.inbreeding needs to be set to FALSE instead of TRUE. Further support is suggested by runtime differences; the runtime is slower when allow.inbreeding = FALSE, which is what we'd expect if inbreeding is being incorporated into the calculations.
+
+Note also that when allow.inbreeding = FALSE, the column order in inbreeding dataframe appears to be mixed up between L3 (for trioml), LH, and LR. Values for the L2 column, however, only appear when running dyadml, so I'm making the tentative assumption that the L2 values are indeed what they're supposed to be (i.e., inbreeding estimates calculated via dyadml) - and with that, I'm also assuming that the dyadml relatedness values with allow.inbreeding = FALSE are the ones that take inbreeding into account.
+
+More info on GitHub issues (with no apparent resolution): (https://github.com/timothyfrasier/related/issues/2)
+
+```{r}
+get_multi.relData <- function(genoList,
+                              dyadml = 2,
+                              error.rates = 0.01,
+                              ci95.num.bootstrap = 100,
+                              allow.inbreeding = F
+                              ) {
+  
+  # initialize dataframes for relatedness data & inbreeding data
+  # initialize list to store rel & inb dfs
+  relData_df <- data.frame()
+  inbData_df <- data.frame()
+  results_list <- list()
+  
+  # Get relData for each year & store in list
+  for (year in names(genoList)) {
+    
+    # extract genoData for that year
+    genoData_year <- genoList[[as.character(year)]]$genoData %>%
+      select(where(~!all(is.na(.x))))
+    
+    # format genos for related
+    rel_input_year <- genoData_year %>%
+      `names<-`(NULL) %>%
+      readgenotypedata(.)
+    
+    # run coancestry for that year
+    ## use alleleFreqs based only on indivs in dataset
+    rel_output_year <- coancestry(
+      genotype.data = rel_input_year$gdata,
+      dyadml = dyadml,
+      error.rates = error.rates,
+      ci95.num.bootstrap = ci95.num.bootstrap,
+      allow.inbreeding = allow.inbreeding
+    )
+    
+    # create relData_df for that year
+    relData_df_year <- list(
+      rel_output_year$relatedness,
+      rel_output_year$relatedness.ci95,
+      rel_output_year$delta7,
+      rel_output_year$delta7.ci95,
+      rel_output_year$delta8,
+      rel_output_year$delta8.ci95
+      ) %>%
+      reduce(left_join, by = c("pair.no", "ind1.id", "ind2.id", "group")) %>%
+      select(c("pair.no", "ind1.id", "ind2.id", "group"), contains("dyadml")) %>%
+      set_names("pair.no", "ind1.id", "ind2.id", "group", "rval", "rval_ci.low", "rval_ci.high", "delta7", "delta7_ci.low", "delta7_ci.high", "delta8", "delta8_ci.low", "delta8_ci.high") %>%
+      mutate(year = as.character(year)) %>%
+      relocate(year)
+    
+    # create inbData_df for that year
+    inbData_df_year <- cbind(rel_output_year$inbreeding,
+                             rel_output_year$inbreeding.ci95[, 8:9]) %>%
+      select(ind.id, contains("L2")) %>%
+      mutate(year = as.character(year)) %>%
+      relocate(year)
+    
+    # append year dfs to master dfs
+    relData_df <- rbind(relData_df, relData_df_year)
+    inbData_df <- rbind(inbData_df, inbData_df_year)
+  }
+  
+  return(list(relData = relData_df, inbData = inbData_df))
+  
+}
+```
+
+### Run function
+
+```{r}
+lwed_relData_byYear <- get_multi.relData(
+  lwed_genos_forRelated,
+  dyadml = 2,
+  error.rates = 0.01,
+  ci95.num.bootstrap = 1000,
+  allow.inbreeding = F
+  )
+
+simp_relData_byYear <- get_multi.relData(
+  simp_genos_forRelated,
+  dyadml = 2,
+  error.rates = 0.01,
+  ci95.num.bootstrap = 1000,
+  allow.inbreeding = F
+  )
+```
+
+### Results
+
+```{r}
+lwed_relData <- lwed_relData_byYear$relData
+lwed_inbData <- lwed_relData_byYear$inbData
+
+simp_relData <- simp_relData_byYear$relData
+simp_inbData <- simp_relData_byYear$inbData
+```
+
+### For Alex
+
+```{r}
+# Export relData & inbData files
+write.csv(lwed_relData, "./ms2_demography/02_results/lwed_relData.csv", row.names = F)
+write.csv(lwed_inbData, "./ms2_demography/02_results/lwed_inbData.csv", row.names = F)
+write.csv(simp_relData, "./ms2_demography/02_results/simp_relData.csv", row.names = F)
+write.csv(simp_inbData, "./ms2_demography/02_results/simp_inbData.csv", row.names = F)
+
+# Also include metadata for included indivs
+md_forAlex <- rbind(lwed_inbData, simp_inbData) %>%
+  select(ind.id) %>%
+  mutate(animalID = str_sub(ind.id, 4, -1)) %>%
+  merge(., md_hairOnly, by = "animalID") %>%
+  select(animalID, species, sex) %>%
+  distinct() %>%
+  arrange(species, as.numeric(animalID))
+
+grpKey_forAlex <- md_hairOnly %>%
+  select(species, group) %>%
+  mutate(group2 = str_sub(group, 1, 2)) %>%
+  distinct() %>%
+  arrange(species, group)
+
+write.csv(md_forAlex, "./ms2_demography/02_results/md_forAlex.csv", row.names = F)
+write.csv(grpKey_forAlex, "./ms2_demography/02_results/grpKey_forAlex.csv", row.names = F)
+
+# and geno files
+write.csv(genos, "./ms2_demography/02_results/fullset_genos_unfiltered.csv", row.names = F)
+write.csv(lwed_genos, "./ms2_demography/02_results/lwed_genos.csv", row.names = F)
+write.csv(simp_genos, "./ms2_demography/02_results/simp_genos.csv", row.names = F)
+```
+
+# SCRAPS
+
+thought about maybe using the entire dataset for alleleFreqs, but doing so needs more finagling for it to work -- maybe try *not* removing loci when col is all NA if using full dataset for freqs?
+
+```{r}
+get_multi.relData <- function(genoList,
+                              genos_forFreqs = NULL,
+                              dyadml = 2,
+                              error.rates = 0.01,
+                              ci95.num.bootstrap = 100,
+                              allow.inbreeding = c(T, F)
+                              ) {
+  
+  # Initialize list to store relatedness output for each year
+  relData_list <- list()
+  
+  # Get relData for each year & store in list
+  for (year in names(genoList)) {
+    
+    # extract genoData for that year
+    genoData_year <- genoList[[as.character(year)]]$genoData %>%
+      select(where(~!all(is.na(.x))))
+    
+    # format genos for related
+    rel_input_year <- genoData_year %>%
+      `names<-`(NULL) %>%
+      readgenotypedata(.)
+    
+    # run coancestry for that year
+    if (is.null(genos_forFreqs)) {
+      rel_output_year <- coancestry(
+        genotype.data = rel_input_year$gdata,
+        dyadml = dyadml,
+        error.rates = error.rates,
+        ci95.num.bootstrap = ci95.num.bootstrap,
+        allow.inbreeding = allow.inbreeding
+      )
+    } else if (!is.null(genos_forFreqs)) {
+      
+      # subset loci to those used in year
+      genos_forFreqs_subset <- genos_forFreqs %>%
+        select(names(genoData_year))
+        
+      rel_forFreqs <- genos_forFreqs_subset %>%
+        `names<-`(NULL) %>%
+        readgenotypedata(.)
+      
+      freqs <- rel_forFreqs$freqs
+      
+      # then use as input for coancestry
+      rel_output_year <- coancestry(
+        genotype.data = rel_input_year$gdata,
+        dyadml = dyadml,
+        allele.freqs = freqs,
+        error.rates = error.rates,
+        ci95.num.bootstrap = ci95.num.bootstrap,
+        allow.inbreeding = allow.inbreeding
+      )
+    }
+    
+    # add results for each year to list w/year as name
+    relData_list[[as.character(year)]] <- rel_output_year
+    
+  }
+  
+  return(relData_list)
+  
+}
+```
+
+TROUBLESHOOTING
+
+```{r}
+lwed_genos_forFreqs_temp1 <- lwed_genos %>%
+  mutate(animalID = str_c(str_sub(pop, 1, 2), animalID, sep = "_")) %>%
+  select(-pop) %>%
+  select(c(animalID, contains(c("INDID", "SPECIES", "SEX", "LWED", "SIMP"))))
+lwed_genos_forFreqs_temp2 <- lwed_genos_forFreqs_temp1 %>%
+  select(-sex) %>%
+  column_to_rownames("animalID")
+lwed_genos_forFreqs <- names(lwed_genos_forFreqs_temp2) %>%
+  map_dfc(~ lwed_genos_forFreqs_temp2 %>%
+            select(all_of(.x)) %>%
+            separate(.x,
+                     into = paste0(.x, c("a", "b")),
+                     sep = ",")
+  ) %>%
+  mutate_all(~ str_replace(., "A", "4")) %>%
+  mutate_all(~ str_replace(., "T", "7")) %>%
+  mutate_all( ~ str_replace(., "C", "3")) %>%
+  mutate_all(~ str_replace(., "G", "6")) %>%
+  rownames_to_column("animalID") %>%
+  merge(., lwed_genos_forFreqs_temp1[, c("animalID", "sex")], by = "animalID") %>%
+  relocate(sex, .after = animalID) %>%
+  select(-sex)
+
+
+
+
+genoData_year <- lwed_genos_forRelated$`2009`$genoData %>%
+  select(where(~!all(is.na(.x))))
+rel_input_year <- genoData_year %>%
+      `names<-`(NULL) %>%
+      readgenotypedata(.)
+genos_forFreqs <- lwed_genos_forFreqs
+
+genos_forFreqs_subset <- genos_forFreqs %>%
+        select(names(genoData_year))
+rel_forFreqs <- genos_forFreqs_subset %>%
+        `names<-`(NULL) %>%
+        readgenotypedata(.)
+freqs <- rel_forFreqs$freqs
+
+
+missing_loci <- setdiff(names(genoData_year), names(genos_forFreqs_subset))
+print(missing_loci)
+
+# Get all alleles from the genotype data
+geno_alleles <- unique(unlist(rel_input_year$gdata))
+
+# Get all alleles from freqs
+freq_alleles <- unique(unlist(lapply(freqs, rownames)))
+
+# Identify missing alleles
+missing_alleles <- setdiff(geno_alleles, freq_alleles)
+
+print(missing_alleles)
+
+
+
+
+get_multi.relData <- function(genoList,
+                              genos_forFreqs = NULL,
+                              dyadml = 2,
+                              error.rates = 0.01,
+                              ci95.num.bootstrap = 100,
+                              allow.inbreeding = c(T, F)
+                              ) {
+  
+  # Initialize list to store relatedness output for each year
+  relData_list <- list()
+  
+  # Get relData for each year & store in list
+  for (year in names(genoList)) {
+    
+    # extract genoData for that year
+    genoData_year <- genoList[[as.character(year)]]$genoData %>%
+      select(where(~!all(is.na(.x))))
+    
+    # format genos for related
+    rel_input_year <- genoData_year %>%
+      `names<-`(NULL) %>%
+      readgenotypedata(.)
+    
+    # run coancestry for that year
+    if (is.null(genos_forFreqs)) {
+      rel_output_year <- coancestry(
+        genotype.data = rel_input_year$gdata,
+        dyadml = dyadml,
+        error.rates = error.rates,
+        ci95.num.bootstrap = ci95.num.bootstrap,
+        allow.inbreeding = allow.inbreeding
+      )
+    } else if (!is.null(genos_forFreqs)) {
+      
+      # subset loci to those used in year
+      genos_forFreqs_subset <- genos_forFreqs %>%
+        select(names(genoData_year))
+        
+      rel_forFreqs <- genos_forFreqs_subset %>%
+        `names<-`(NULL) %>%
+        readgenotypedata(.)
+      
+      freqs <- rel_forFreqs$freqs
+      
+      # then use as input for coancestry
+      rel_output_year <- coancestry(
+        genotype.data = rel_input_year$gdata,
+        dyadml = dyadml,
+        allele.freqs = freqs,
+        error.rates = error.rates,
+        ci95.num.bootstrap = ci95.num.bootstrap,
+        allow.inbreeding = allow.inbreeding
+      )
+    }
+    
+    # add results for each year to list w/year as name
+    relData_list[[as.character(year)]] <- rel_output_year
+    
+  }
+  
+  return(relData_list)
+  
+}
+```
